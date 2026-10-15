@@ -4,7 +4,7 @@
     {
       "name": "usage-detail",
       "source": "./usage-detail",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "description": "ZCode 本地用量明细：逐条请求分页浏览、来源/项目/模型区分、5 小时窗口燃烧率、热力图、洞察、models.dev 官方价成本估算、本地常驻面板与导出（只读）。",
       "displayName": "Usage Detail",
       "displayName_i18n": {
