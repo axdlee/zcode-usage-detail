@@ -104,11 +104,15 @@ cmd_dashboard() {
 #usage-dashboard .ud-tag{font-size:11px;color:var(--muted-foreground);background:var(--muted);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle;}
 #usage-dashboard .ud-stack{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--muted);margin:8px 0 4px;}
 #usage-dashboard .ud-stack span{height:100%;}
-#usage-dashboard .ud-insights{display:flex;flex-wrap:wrap;padding:4px 0;}
-#usage-dashboard .ud-ins{padding:2px 18px 2px 0;margin:2px 18px 2px 0;border-right:1px solid var(--border);}
-#usage-dashboard .ud-ins:last-child{border-right:none;margin-right:0;}
-#usage-dashboard .ud-ins-v{font-size:14px;font-weight:500;}
-#usage-dashboard .ud-ins-l{font-size:11px;color:var(--muted-foreground);}
+/* 内容卡片：accent 左色条 + 淡色底 + 值/标签字号层级（color-mix 不支持时回退纯卡片底） */
+#usage-dashboard .ud-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:9px;margin-top:6px;}
+#usage-dashboard .ud-card{--ac:var(--muted-foreground);position:relative;padding:10px 12px 9px 16px;border-radius:10px;border:1px solid var(--border);background:var(--card);background:color-mix(in srgb,var(--ac) 7%,var(--card));overflow:hidden;}
+#usage-dashboard .ud-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ac);opacity:.9;}
+#usage-dashboard .ud-card-v{font-size:17px;font-weight:600;line-height:1.3;font-variant-numeric:tabular-nums;word-break:break-word;}
+#usage-dashboard .ud-card-s{font-size:11.5px;color:var(--muted-foreground);margin-top:1px;}
+#usage-dashboard .ud-card-l{font-size:11px;color:var(--muted-foreground);margin-top:3px;letter-spacing:.02em;}
+#usage-dashboard .viz-stat{--ac:var(--blue);position:relative;overflow:hidden;background:var(--card);background:color-mix(in srgb,var(--ac) 6%,var(--card));}
+#usage-dashboard .viz-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ac);opacity:.9;}
 #usage-dashboard .ud-pager{display:flex;align-items:center;gap:10px;margin-top:10px;}
 #usage-dashboard .ud-pager .btn{margin-top:0;}
 #usage-dashboard .ud-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0;}
@@ -149,24 +153,24 @@ cmd_dashboard() {
 #usage-dashboard #ud-errors table{min-width:760px;}
 #usage-dashboard .ud-turn{display:flex;align-items:baseline;gap:8px;padding:7px 12px;margin:0 0 10px;border-radius:10px;background:var(--muted);font-size:12.5px;line-height:1.6;}
 #usage-dashboard .ud-turn[hidden]{display:none;}
-#usage-dashboard .ud-turn-t{color:var(--muted-foreground);white-space:nowrap;font-size:11px;}
+#usage-dashboard .ud-turn-t{color:var(--muted-foreground);white-space:nowrap;font-size:11px;margin-left:auto;padding-left:12px;}
 </style>
 UD_HEAD
       if [[ "$cmd" == dashboard-this ]]; then
         cat "$SCRIPT_DIR/../assets/session-dashboard.html"
       else
         cat <<'UD_ALL_HEAD'
-<div id="ud-turn" hidden></div>
+<div id="ud-turn" class="ud-turn" hidden></div>
 <div class="viz-controls" role="group" aria-label="用量筛选">
   <label class="form-label text-small text-muted" for="ud-f-pv">来源</label>
   <select class="form-select" id="ud-f-pv"></select>
   <label class="form-label text-small text-muted" for="ud-f-model">模型</label>
   <select class="form-select" id="ud-f-model"></select>
   <div class="viz-row" role="group" aria-label="时间范围" id="ud-f-range">
-    <button type="button" class="ud-toggle" data-r="today" aria-pressed="false">今天</button>
+    <button type="button" class="ud-toggle" data-r="today" aria-pressed="true">今天</button>
     <button type="button" class="ud-toggle" data-r="7" aria-pressed="false">近 7 天</button>
     <button type="button" class="ud-toggle" data-r="30" aria-pressed="false">近 30 天</button>
-    <button type="button" class="ud-toggle" data-r="all" aria-pressed="true">全部</button>
+    <button type="button" class="ud-toggle" data-r="all" aria-pressed="false">全部</button>
   </div>
   <span id="ud-sess-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除会话筛选"></span>
   <span id="ud-day-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除日期筛选"></span>
@@ -195,13 +199,13 @@ UD_HEAD
 </div>
 <div id="ud-overview" role="tabpanel" aria-labelledby="ud-tab-overview">
   <div class="viz-grid">
-    <div class="card viz-stat"><div class="text-muted text-small">请求次数</div><div class="viz-stat-value tabular-nums" id="ud-k1">–</div><div class="text-small text-muted" id="ud-k1c"></div></div>
-    <div class="card viz-stat"><div class="text-muted text-small">输入 token</div><div class="viz-stat-value tabular-nums" id="ud-k2">–</div><div class="text-small text-muted" id="ud-k2c"></div></div>
-    <div class="card viz-stat"><div class="text-muted text-small">生成 token</div><div class="viz-stat-value tabular-nums" id="ud-k3">–</div><div class="text-small text-muted" id="ud-k3c"></div></div>
-    <div class="card viz-stat"><div class="text-muted text-small">活跃会话</div><div class="viz-stat-value tabular-nums" id="ud-k4">–</div><div class="text-small text-muted" id="ud-k4c"></div></div>
+    <div class="card viz-stat" style="--ac:var(--blue)"><div class="text-muted text-small">请求次数</div><div class="viz-stat-value tabular-nums" id="ud-k1">–</div><div class="text-small text-muted" id="ud-k1c"></div></div>
+    <div class="card viz-stat" style="--ac:#8b5cf6"><div class="text-muted text-small">输入 token</div><div class="viz-stat-value tabular-nums" id="ud-k2">–</div><div class="text-small text-muted" id="ud-k2c"></div></div>
+    <div class="card viz-stat" style="--ac:var(--green)"><div class="text-muted text-small">生成 token</div><div class="viz-stat-value tabular-nums" id="ud-k3">–</div><div class="text-small text-muted" id="ud-k3c"></div></div>
+    <div class="card viz-stat" style="--ac:var(--yellow)"><div class="text-muted text-small">活跃会话</div><div class="viz-stat-value tabular-nums" id="ud-k4">–</div><div class="text-small text-muted" id="ud-k4c"></div></div>
   </div>
-  <div class="ud-insights text-small" id="ud-insights" aria-live="polite"></div>
-  <div class="ud-insights text-small" id="ud-health"></div>
+  <div class="ud-sec"><div class="ud-kv-l">用量洞察</div><div class="ud-card-grid" id="ud-insights" aria-live="polite"></div></div>
+  <div class="ud-sec"><div class="ud-kv-l">性能体检</div><div class="ud-card-grid" id="ud-health"></div></div>
   <div id="ud-quota-card" hidden></div>
   <div class="ud-grid3">
     <div>
@@ -378,7 +382,24 @@ function __usageBoot(D) {
     .sort(function (a, b) { return b.t - a.t; });
   var pvOrder = pvTot.map(function (x) { return x.i; });
   function pvColor(p) { var k = pvOrder.indexOf(p); return 'var(--viz-series-' + ((k % 6) + 1) + ')'; }
-  function pvLabel(p) { return esc(String(PV[p] || '?').replace(/^account:/, '')); }
+  // 官方套餐 provider id → 官方中文名（GLM Coding Plan 档位命名见 bigmodel.cn/glm-coding）；未知 id 与自定义来源保留原名
+  var PV_CN = {
+    'bigmodel-individual-coding-plan': 'GLM Coding Plan 个人版',
+    'bigmodel-coding-plan': 'GLM Coding Plan',
+    'bigmodel-lite-coding-plan': 'GLM Coding Plan Lite',
+    'bigmodel-pro-coding-plan': 'GLM Coding Plan Pro',
+    'bigmodel-max-coding-plan': 'GLM Coding Plan Max',
+    'bigmodel-start-plan': 'GLM Coding Plan 入门版',
+    'zai-start-plan': 'GLM Coding Plan 入门版'
+  };
+  function pvLabel(p) {
+    var raw = String(PV[p] || '?');
+    if (/^account:/.test(raw)) {
+      var id = raw.replace(/^account:/, '');
+      return esc(PV_CN[id] || id);
+    }
+    return esc(raw);
+  }
   function pvTag(p) { return /^account:/.test(String(PV[p] || '')) ? '官方账号' : '自定义接入'; }
 
   function priceOf(mi) {
@@ -418,7 +439,7 @@ function __usageBoot(D) {
   (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [] }; });
   (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
-  var st = { p: -1, m: -1, s: -1, rng: 'all', day: null, hidePv: {} };
+  var st = { p: -1, m: -1, s: -1, rng: 'today', day: null, hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
   var heatMode = 'day', heatLastW = -1, sessExp = -1, detExp = -1;
@@ -521,34 +542,40 @@ function __usageBoot(D) {
     rows.forEach(function (r) { var k = dayKey(r[1]); perDay[k] = (perDay[k] || 0) + N(r[4]) + N(r[5]); });
     for (var k in perDay) { if (perDay[k] > peakV) { peakV = perDay[k]; peak = k; } }
     var hit = a.inn ? Math.round(a.ca / a.inn * 100) : 0;
-    var items = [
-      ['活跃天数', days.length + ' 天'],
-      ['连续活跃', '当前 ' + cur + ' 天 · 最长 ' + longest + ' 天'],
-      ['峰值日', peak ? peak.slice(5) + '（' + fmt(peakV) + ' token）' : '–'],
-      ['缓存命中率', hit + '%'],
-      ['缓存量（读+写）', fmt(a.ca + a.ccw) + ' token'],
-      ['任务完成', D.todos && D.todos[1] > 0 ? N(D.todos[0]) + '/' + D.todos[1] + '（' + Math.round(N(D.todos[0]) / D.todos[1] * 100) + '%）' : '–'],
-      ['重试 / 取消', D.stability ? fmtI(D.stability[0]) + ' / ' + fmtI(D.stability[1]) : '–'],
-      ['平均耗时', a.req ? (a.dur / a.req / 1000).toFixed(1) + ' s' : '–'],
-      ['主会话 / 子代理', fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub)]
-    ];
+    // 内容卡片：accent 按信息类型固定（蓝=活跃/耗时，绿=缓存/任务，黄=重试，红=浪费，紫=峰值/拆分，橙=成本，灰=体量）
+    var C = { blue: 'var(--blue)', green: 'var(--green)', yellow: 'var(--yellow)', red: 'var(--red)', purple: '#8b5cf6', gold: 'var(--viz-series-2,var(--yellow))', gray: 'var(--muted-foreground)' };
+    function card(v, l, ac, s) {
+      return '<div class="ud-card" style="--ac:' + (C[ac] || C.gray) + '"><div class="ud-card-v tabular-nums">' + v + '</div>' +
+        (s ? '<div class="ud-card-s">' + s + '</div>' : '') + '<div class="ud-card-l">' + l + '</div></div>';
+    }
+    var out = '';
+    out += card(days.length + ' 天', '活跃天数', 'blue');
+    out += card(cur + ' 天', '连续活跃', 'blue', '最长 ' + longest + ' 天');
+    out += card(peak ? peak.slice(5) : '–', '峰值日', 'purple', peak ? fmt(peakV) + ' token' : '');
+    out += card(hit + '%', '缓存命中率', 'green', '缓存读 ' + fmt(a.ca) + ' token');
+    out += card(fmt(a.ca + a.ccw), '缓存量（读+写）', 'green');
+    out += card(D.todos && D.todos[1] > 0 ? N(D.todos[0]) + '/' + D.todos[1] : '–', '任务完成', 'green',
+      D.todos && D.todos[1] > 0 ? Math.round(N(D.todos[0]) / D.todos[1] * 100) + '% 完成' : '');
+    out += card(D.stability ? fmtI(D.stability[0]) + ' / ' + fmtI(D.stability[1]) : '–', '重试 / 取消', 'yellow');
+    out += card(a.req ? (a.dur / a.req / 1000).toFixed(1) + ' s' : '–', '平均耗时', 'blue');
+    out += card(fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub), '主会话 / 子代理', 'purple', fmtI(a.req - a.sub) + ' 主 · ' + fmtI(a.sub) + ' 子代理');
     if (D.hours) {
       var pk = -1, pv2 = -1;
       for (var hh = 0; hh < 24; hh++) { var kk2 = (hh < 10 ? '0' : '') + hh; var c2 = N(D.hours[kk2]); if (c2 > pv2) { pv2 = c2; pk = hh; } }
-      if (pk >= 0) items.push(['峰值时段', pk + ' 点（' + fmtI(pv2) + ' 次请求）']);
+      if (pk >= 0) out += card(pk + ' 点', '峰值时段', 'blue', fmtI(pv2) + ' 次请求');
     }
-    if (D.disk && D.disk.logs) items.push(['数据体量', '日志 ' + fmtMB(D.disk.logs) + ' · 导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db)]);
+    if (D.disk && D.disk.logs) out += card(fmtMB(D.disk.logs), '数据体量', 'gray', '导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db));
     var totalCost = 0, anyCost = false, unpricedTok = 0;
     rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } else unpricedTok += N(r[4]) + N(r[5]); });
     if (anyCost) {
       var aTok = a.inn + a.out;
-      items.push(['折算成本（API 牌价）', fmtCost(totalCost) + (unpricedTok > 0 && aTok ? ' · 未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : '')]);
+      out += card(fmtCost(totalCost), '折算成本（API 牌价）', 'gold', unpricedTok > 0 && aTok ? '未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : '');
     }
     // 浪费取证：失败/取消请求白耗的 token（本地口径，CLI 详单见 usage.sh waste）
     (function () {
       var wReq = 0, wTok = 0;
       rows.forEach(function (r) { if (r[8] === 1 || r[8] === 2) { wReq++; wTok += N(r[4]) + N(r[5]); } });
-      if (wReq > 0) items.push(['浪费取证', fmtI(wReq) + ' 次失败/取消 · 白耗 ' + fmt(wTok) + ' token']);
+      if (wReq > 0) out += card(fmt(wTok) + ' token', '浪费取证', 'red', fmtI(wReq) + ' 次失败/取消');
     })();
     // 本地预算：日 / 30 天折算金额进度（价格/预算对话框里设置）
     if (st.budget && (N(st.budget.daily) > 0 || N(st.budget.monthly) > 0)) {
@@ -558,19 +585,16 @@ function __usageBoot(D) {
       var dayCost = 0, mCost = 0;
       rows.forEach(function (r) { var c = rowCost(r); if (c == null) return; if (r[1] >= dayStart) dayCost += c; if (r[1] >= mStart) mCost += c; });
       var bd = N(st.budget.daily), bm = N(st.budget.monthly);
-      if (bd > 0) {
-        var pd = Math.min(100, Math.round(dayCost / bd * 100));
-        items.push({ l: '今日折算 / 日预算', html: '<div class="ud-ins-v tabular-nums">' + fmtCost(dayCost) + ' / ' + fmtCost(bd) + '（' + pd + '%）</div><div class="ud-budget-bar' + (pd >= 100 ? ' ud-over' : '') + '"><i style="width:' + pd + '%"></i></div>' });
+      function budgetCard(v, tot, pd, l) {
+        return '<div class="ud-card" style="--ac:' + C.gold + '"><div class="ud-card-v tabular-nums">' + v +
+          ' <span class="ud-card-s">/ ' + fmtCost(tot) + '</span></div>' +
+          '<div class="ud-budget-bar' + (pd >= 100 ? ' ud-over' : '') + '"><i style="width:' + pd + '%"></i></div>' +
+          '<div class="ud-card-l">' + l + '</div></div>';
       }
-      if (bm > 0) {
-        var pm2 = Math.min(100, Math.round(mCost / bm * 100));
-        items.push({ l: '本月折算 / 月预算', html: '<div class="ud-ins-v tabular-nums">' + fmtCost(mCost) + ' / ' + fmtCost(bm) + '（' + pm2 + '%）</div><div class="ud-budget-bar' + (pm2 >= 100 ? ' ud-over' : '') + '"><i style="width:' + pm2 + '%"></i></div>' });
-      }
+      if (bd > 0) out += budgetCard(fmtCost(dayCost), bd, Math.min(100, Math.round(dayCost / bd * 100)), '今日折算 / 日预算');
+      if (bm > 0) out += budgetCard(fmtCost(mCost), bm, Math.min(100, Math.round(mCost / bm * 100)), '本月折算 / 月预算');
     }
-    $('ud-insights').innerHTML = items.map(function (it) {
-      if (it && it.html) return '<span class="ud-ins"><div>' + it.html + '</div><div class="ud-ins-l">' + it.l + '</div></span>';
-      return '<span class="ud-ins"><div class="ud-ins-v tabular-nums">' + it[1] + '</div><div class="ud-ins-l">' + it[0] + '</div></span>';
-    }).join('');
+    $('ud-insights').innerHTML = out;
   }
 
   // 健康度卡片：性能与稳定性体检（全部本地聚合）
@@ -578,24 +602,27 @@ function __usageBoot(D) {
     var host = $('ud-health');
     if (!host) return;
     var a = agg(rows);
-    var items = [];
+    var CB = { blue: 'var(--blue)', green: 'var(--green)', yellow: 'var(--yellow)', red: 'var(--red)', purple: '#8b5cf6', gray: 'var(--muted-foreground)' };
+    function hcard(v, l, ac, s) {
+      return '<div class="ud-card" style="--ac:' + (CB[ac] || CB.gray) + '"><div class="ud-card-v tabular-nums">' + v + '</div>' +
+        (s ? '<div class="ud-card-s">' + s + '</div>' : '') + '<div class="ud-card-l">' + l + '</div></div>';
+    }
+    var out = '';
     var ttft = 0, tn = 0, genTok = 0, genMs = 0;
     rows.forEach(function (r) { var t = N(r[11]); if (t > 0) { ttft += t; tn++; } var d = N(r[7]) - t; if (d > 0) { genMs += d; genTok += N(r[5]); } });
-    if (tn) items.push(['平均首字', (ttft / tn / 1000).toFixed(2) + ' s']);
-    if (genMs > 0) items.push(['生成速率', fmtI(Math.round(genTok / (genMs / 1000))) + ' tok/s']);
+    if (tn) out += hcard((ttft / tn / 1000).toFixed(2) + ' s', '平均首字', 'yellow', '到首个 token 的延迟');
+    if (genMs > 0) out += hcard(fmtI(Math.round(genTok / (genMs / 1000))) + ' tok/s', '生成速率', 'blue');
     if (D.stability && a) {
       var errPct = a.req ? Math.round(D.stability[2] / a.req * 1000) / 10 : 0;
-      items.push(['错误率', errPct + '%']);
+      out += hcard(errPct + '%', '错误率', 'red', '失败请求 / 全部请求');
     }
     var peakCtx = 0;
     (D.compactions || []).forEach(function (c) { if (N(c[2]) > peakCtx) peakCtx = N(c[2]); });
-    if (peakCtx > 0) items.push(['峰值上下文', fmt(peakCtx) + ' token']);
+    if (peakCtx > 0) out += hcard(fmt(peakCtx), '峰值上下文', 'purple', '压缩前最高 token');
     var toolMs = 0, toolC = 0;
     (D.sessionTools || []).forEach(function (t) { toolC += N(t[2]); toolMs += N(t[3]); });
-    if (toolC) items.push(['工具调用', fmtI(toolC) + ' 次 · ' + (toolMs / 1000).toFixed(0) + ' s']);
-    host.innerHTML = items.map(function (it) {
-      return '<span class="ud-ins"><div class="ud-ins-v tabular-nums">' + it[1] + '</div><div class="ud-ins-l">' + it[0] + '</div></span>';
-    }).join('');
+    if (toolC) out += hcard(fmtI(toolC) + ' 次', '工具调用', 'gray', '累计 ' + (toolMs / 1000).toFixed(0) + ' s');
+    host.innerHTML = out;
   }
 
   function renderProviders(rows) {
