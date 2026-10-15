@@ -1,10 +1,16 @@
 #!/usr/bin/env node
-// 查询 GLM Coding Plan 官方配额：/api/monitor/usage/quota/limit
-// 凭据解析顺序：ANTHROPIC_AUTH_TOKEN 环境变量 → ZCode 本地 provider_config.json 中的套餐 API Key（只发往官方域名）
+// 查询套餐配额。数据源链：
+//   1. 客户端日志尾随（零密钥，quota-log.mjs）——zcode-plan 套餐桶 + MCP 额度
+//   2. /api/monitor/usage/quota/limit（需要凭据：ANTHROPIC_AUTH_TOKEN → provider_config API Key → 令牌文件 → OAuth）
+// 两级都无数据时输出降级提示（面板渲染为操作指引）。
 import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readQuotaFromLog } from './quota-log.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveEndpoint() {
   if (process.env.ANTHROPIC_AUTH_TOKEN && process.env.ANTHROPIC_BASE_URL) {
@@ -48,8 +54,22 @@ function resolveEndpoint() {
 }
 
 const ep = resolveEndpoint();
+// 数据源 1：客户端日志（零密钥）。有桶直接输出；日期非今天标 stale。
+const fromLog = readQuotaFromLog();
+if (fromLog.ok && fromLog.buckets.length) {
+  console.log(JSON.stringify({
+    ok: true,
+    source: 'client-log',
+    stale: !!fromLog.stale,
+    logDate: fromLog.logDate,
+    limits: fromLog.buckets.map(function (b) {
+      return { type: b.name, percentage: b.percent, resetTime: b.resetAt ? new Date(b.resetAt).toLocaleString() : null, remaining: b.remaining, limit: b.limit };
+    })
+  }));
+  process.exit(0);
+}
 if (!ep) {
-  console.error(JSON.stringify({ error: '未找到套餐凭据（ANTHROPIC_AUTH_TOKEN/ANTHROPIC_BASE_URL 或 ZCode provider_config 中的编码套餐 API Key）' }));
+  console.error(JSON.stringify({ error: '暂无可用配额数据：客户端日志中尚无额度观测（客户端刷新套餐余额后写入），也未找到 API 凭据。可在 ~/.zcode/usage-quota-token.json 写入 {"token":"你的KEY","base":"https://open.bigmodel.cn"} 启用监控接口。' }));
   process.exit(2);
 }
 const base = ep.base.replace(/\/+$/, '');

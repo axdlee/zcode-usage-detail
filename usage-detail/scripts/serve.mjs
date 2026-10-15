@@ -7,6 +7,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 const port = Number(process.argv[2]) || 7741;
 const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
@@ -19,8 +20,18 @@ if (!fs.existsSync(DB)) {
   process.exit(1);
 }
 
+// node:sqlite 只读连接（Node ≥22.5）：常驻进程内直接查询，省去每次 spawn sqlite3 CLI 的进程开销
+let db;
+try {
+  db = new DatabaseSync(DB, { readOnly: true });
+} catch (e) {
+  console.error('node:sqlite 打开数据库失败（需要 Node ≥ 22.5）：' + e.message);
+  process.exit(1);
+}
 function q(sql) {
-  return execFileSync('sqlite3', ['-readonly', DB, sql], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const row = db.prepare(sql).get();
+  if (!row) return '';
+  return String(row[Object.keys(row)[0]]);
 }
 
 function pricePath() {
@@ -30,11 +41,11 @@ function pricePath() {
   return fs.existsSync(d) ? d : null;
 }
 
-const META_SQL = (pf, limit, disk) => `
+const META_SQL = (pfText, limit, disk) => `
   WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
        M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
        S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM model_usage)),
-       PJ AS (SELECT ${pf ? `CAST(readfile('${pf}') AS text)` : 'NULL'} AS pj),
+       PJ AS (SELECT ${pfText != null ? `CAST('${pfText.replace(/'/g, "''")}' AS text)` : 'NULL'} AS pj),
        R AS (SELECT * FROM model_usage ORDER BY started_at DESC LIMIT ${limit})
   SELECT json_object(
     'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
@@ -44,7 +55,7 @@ const META_SQL = (pf, limit, disk) => `
     'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
     'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM model_usage),
     'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM model_usage GROUP BY hr)),
-    'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre)),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+    'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
     'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'prices',(SELECT CASE
@@ -74,7 +85,10 @@ const META_SQL = (pf, limit, disk) => `
 
 function dataJSON(limit) {
   limit = Math.max(1, Math.min(20000, Number(limit) || 3000));
-  return q(META_SQL(pricePath(), limit, diskJSON()));
+  // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
+  const pp = pricePath();
+  const pfText = pp ? fs.readFileSync(pp, 'utf8') : null;
+  return q(META_SQL(pfText, limit, diskJSON()));
 }
 
 function liveJSON() {

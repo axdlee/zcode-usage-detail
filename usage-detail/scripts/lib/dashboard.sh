@@ -58,7 +58,7 @@ cmd_dashboard() {
         'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
         'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM U),
         'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM U GROUP BY hr)),
-        'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre)),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+        'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
         'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
         'prices',(SELECT CASE
@@ -266,6 +266,15 @@ function __usageBoot(D) {
   var STAT = ['完成', '失败', '已取消', '进行中'];
   var SCOLOR = ['var(--green)', 'var(--red)', 'var(--yellow)', 'var(--blue)'];
   var QT = ['主会话', '子代理', '系统'];
+  // tok/s：生成 = 输出+思考；生成耗时 ≈ 总耗时 - 首字（首字缺失按总耗时近似）
+  function tpsOf(r) {
+    var gen = Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11])));
+    return Math.round(N(r[5]) / gen * 1000);
+  }
+  function tpsHtml(t) {
+    var c = t >= 320 ? 'var(--viz-series-5)' : t >= 240 ? 'var(--red)' : t >= 160 ? 'var(--yellow)' : t >= 80 ? 'var(--green)' : 'var(--viz-series-1)';
+    return '<span class="tabular-nums" style="color:' + c + '">' + fmtI(t) + '</span>';
+  }
   function stHtml(s) { return '<span style="white-space:nowrap"><span style="color:' + SCOLOR[s] + '">●</span> ' + STAT[s] + '</span>'; }
 
   // 供应商：官方账号(account:*) / 自定义接入，按总 token 降序分配固定系列色
@@ -310,7 +319,7 @@ function __usageBoot(D) {
   var maxTs = 0;
   R.forEach(function (r) { if (r[1] > maxTs) maxTs = r[1]; });
   var cmpMap = {}, toolsMap = {};
-  (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2] }; });
+  (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [] }; });
   (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
   var st = { p: -1, m: -1, rng: 'all', hidePv: {} };
@@ -622,10 +631,15 @@ function __usageBoot(D) {
       var recent = complete.slice(-3);
       var avg = recent.length ? recent.reduce(function (a, b) { return a + b.inn + b.out; }, 0) / recent.length : 0;
       var projected = rate * 5;
+      var avgReq = recent.length ? Math.round(recent.reduce(function (a, b) { return a + b.req; }, 0) / recent.length) : 0;
+      var remainReq = avgReq > 0 ? Math.max(0, avgReq - active.req) : -1;
       var cmp = '';
       if (avg > 0) {
         var diff = Math.round((projected - avg) / avg * 100);
         cmp = '<div class="text-small text-muted" style="margin-top:6px">近 ' + recent.length + ' 个完整窗口均值 ' + fmt(avg) + ' token · 按当前速率本窗口预计 ' + fmt(projected) + ' token（' + (diff >= 0 ? '高于' : '低于') + '均值 ' + Math.abs(diff) + '%）</div>';
+      }
+      if (remainReq >= 0) {
+        cmp += '<div class="text-small text-muted" style="margin-top:4px">按近 ' + recent.length + ' 个完整窗口平均请求数（' + fmtI(avgReq) + ' 次），本窗口预计还可发起约 <b class="tabular-nums">' + fmtI(remainReq) + '</b> 次请求</div>';
       }
       var resetClock = fullTs(active.start + 18e6).slice(11, 16);
       $('ud-block-now').innerHTML =
@@ -658,6 +672,21 @@ function __usageBoot(D) {
       .map(function (t) { return '<span class="text-small text-muted">' + esc(String(t[0]).replace(/^mcp__/, '')) + ' ×' + fmtI(t[1]) + '</span>'; }).join(' · ');
     var cm = cmpMap[o.g];
     var cmpHtml = cm ? '压缩 ' + cm.cnt + ' 次 · 压缩前水位最高 ' + fmt(cm.pre) + ' token' : '无压缩记录';
+    // 事件时间线：压缩事件（META 带时间）+ 模型切换（相邻请求模型变化推导），按时间归并
+    var events = [];
+    (cm ? cm.ts : []).forEach(function (t) { events.push({ t: t, label: '上下文压缩' }); });
+    var prevM = -1;
+    rs.forEach(function (r) {
+      if (prevM !== -1 && r[2] !== prevM) {
+        var d = new Date(r[1]);
+        events.push({ t: pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()), label: '切换模型 → ' + (MD[r[2]] || '?') });
+      }
+      prevM = r[2];
+    });
+    events.sort(function (a, b) { return a.t < b.t ? -1 : a.t > b.t ? 1 : 0; });
+    var tl8 = events.length
+      ? '<div class="ud-sec"><div class="ud-kv-l">事件时间线</div>' + events.slice(-12).map(function (e) { return '<div class="text-small text-muted">' + esc(e.t) + ' · ' + esc(e.label) + '</div>'; }).join('') + (events.length > 12 ? '<div class="text-small text-muted">… 共 ' + events.length + ' 个事件</div>' : '') + '</div>'
+      : '';
     var W = 600, H = 90, maxIn = 1;
     rs.forEach(function (r) { if (N(r[4]) > maxIn) maxIn = N(r[4]); });
     var pts = rs.map(function (r, i) {
@@ -671,12 +700,18 @@ function __usageBoot(D) {
       kv('项目目录', dir) +
       kv('起止', fullTs(rs.length ? rs[0][1] : 0) + ' ~ ' + fullTs(o.last)) +
       kv('请求 / 缓存率', fmtI(o.req) + ' 次 · ' + o.rate + '%') +
+      (function () {
+        var gen = 0, ms = 0;
+        rs.forEach(function (r) { gen += N(r[5]); ms += Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11]))); });
+        return ms > 0 ? kv('平均输出速率', tpsHtml(Math.round(gen / ms * 1000)) + ' tok/s（加权）') : '';
+      })() +
       kv('上下文压缩', cmpHtml) +
       (costOn && o.hasCost ? kv('估算成本', fmtCost(o.cost)) : '') +
       '</div>' +
       '<div class="ud-sec"><div class="ud-kv-l">模型占比（按 token）</div>' + mix + '</div>' +
       '<div class="ud-sec"><div class="ud-kv-l">来源</div>' + pvm + '</div>' +
       (tl ? '<div class="ud-sec"><div class="ud-kv-l">使用工具 Top 6</div>' + tl + '</div>' : '') +
+      tl8 +
       '<div class="ud-sec"><div class="ud-kv-l">上下文水位（按请求输入 token 近似，峰值 ' + fmt(maxIn) + '）</div>' + curve + '</div>';
   }
   function renderSessions(rows) {
@@ -727,6 +762,7 @@ function __usageBoot(D) {
     return '<div class="ud-kv">' +
       kv('Token 构成', '输入 ' + fmtI(r[4]) + '（缓存读 ' + fmtI(r[6]) + ' · 缓存写 ' + fmtI(r[10]) + '）+ 生成 ' + fmtI(r[5]) + ' = 合计 ' + fmtI(N(r[4]) + N(r[5]))) +
       kv('时序', '总耗时 ' + fmtI(r[7]) + ' ms · 首字 ' + (r[11] == null ? '–' : fmtI(r[11]) + ' ms（' + ttftpct + '）')) +
+      kv('输出速率', tpsHtml(tpsOf(r)) + ' tok/s（生成 ' + fmtI(r[5]) + ' tok / 生成耗时 ' + fmtI(Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11])))) + ' ms）') +
       kv('模型 / 来源 / 类型', esc(MD[r[2]]) + ' · ' + pvLabel(r[3]) + ' · ' + QT[r[9]]) +
       kv('会话', TL[r[0]] ? esc(TL[r[0]]) : '–') +
       (costOn ? kv('估算成本', c == null ? '–' : fmtCost(c)) : '') +
@@ -757,7 +793,8 @@ function __usageBoot(D) {
       10: function (r) { return N(r[10]); },
       11: function (r) { return N(r[11]); },
       12: function (r) { return N(r[4]) + N(r[5]); },
-      13: function (r) { return rowCost(r) || 0; }
+      13: function (r) { return rowCost(r) || 0; },
+      14: function (r) { return tpsOf(r); }
     };
     var list = rows.filter(function (r) { return detailStat === -2 ? (r[8] === 1 || r[8] === 2) : (detailStat < 0 || r[8] === detailStat); })
       .sort(function (a, b) { return (ACC[sortD.k](a) - ACC[sortD.k](b)) * sortD.d; });
@@ -765,6 +802,7 @@ function __usageBoot(D) {
       { h: '时间', k: 0 }, { h: '会话', k: null }, { h: '模型', k: null }, { h: '来源', k: null }, { h: '类型', k: null },
       { h: '输入', k: 4, end: 1 }, { h: '缓存读', k: 6, end: 1 }, { h: '缓存写', k: 10, end: 1 },
       { h: '生成', k: 5, end: 1 }, { h: '合计', k: 12, end: 1 }, { h: '耗时 ms', k: 7, end: 1 }, { h: '首字 ms', k: 11, end: 1 },
+      { h: 'tok/s', k: 14, end: 1 },
       { h: '状态', k: null },
       costOn ? { h: '成本', k: 13, end: 1 } : null
     ].filter(Boolean);
@@ -791,6 +829,7 @@ function __usageBoot(D) {
           '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
           '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
           '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
+          '<td class="text-end">' + tpsHtml(tpsOf(r)) + '</td>' +
           '<td>' + stHtml(r[8]) + '</td></tr>';
       });
     } else {
@@ -805,6 +844,7 @@ function __usageBoot(D) {
           '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
           '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
           '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
+          '<td class="text-end">' + tpsHtml(tpsOf(r)) + '</td>' +
           '<td>' + stHtml(r[8]) + '</td>' +
           (costOn ? '<td class="text-end tabular-nums">' + (rowCost(r) == null ? '–' : fmtCost(rowCost(r))) + '</td>' : '') +
           '</tr>';
@@ -1030,12 +1070,16 @@ function __usageBoot(D) {
       return;
     }
     var names = { TOKENS_LIMIT: '5 小时池已用', TIME_LIMIT: 'MCP（月）已用', WEEKLY_LIMIT: '周配额已用', TOKENS_WEEKLY_LIMIT: '周配额已用' };
+    var srcTag = j.source === 'client-log' ? ' · 客户端日志' + (j.stale ? '（' + (j.logDate || '') + ' 观测）' : '') : '';
     el.innerHTML = j.limits.map(function (l) {
       var pct = Math.round(N(l.percentage));
       var name = names[l.type] || l.type;
+      var remain = l.remaining != null && l.limit ? '<span class="text-small text-muted">余 ' + fmtI(l.remaining) + ' / ' + fmtI(l.limit) + ' · </span>' : '';
       var reset = l.resetTime ? '<span class="text-small text-muted">' + esc(String(l.resetTime)) + ' 重置</span>' : '';
-      return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="text-small text-muted">' + esc(name) + '</span>' + reset + '</div><div class="viz-stat-value tabular-nums">' + pct + '%</div><div class="progress" style="margin-top:6px"><div class="progress-bar" style="width:' + pct + '%"></div></div></div>';
-    }).join('');
+      var warn = pct >= 80 ? '<span class="ud-tag" style="color:var(--red)">即将用尽</span>' : pct >= 60 ? '<span class="ud-tag" style="color:var(--yellow)">用量偏高</span>' : '';
+      var barColor = pct >= 80 ? 'var(--red)' : pct >= 60 ? 'var(--yellow)' : 'var(--viz-series-1)';
+      return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="text-small text-muted">' + esc(name) + warn + '</span>' + remain + reset + '</div><div class="viz-stat-value tabular-nums">' + pct + '%</div><div class="progress" style="margin-top:6px"><div class="progress-bar" style="width:' + Math.min(100, pct) + '%;background:' + barColor + '"></div></div></div>';
+    }).join('') + (srcTag ? '<div class="text-small text-muted" style="grid-column:1/-1;margin-top:2px">数据来源：' + srcTag + '</div>' : '');
   }
   window.__usageRenderQuota = renderQuota;
 

@@ -1,0 +1,187 @@
+<!doctype html>
+<!-- ZCode 用量明细 · 会话侧栏面板。零依赖：经宿主注入的 window.zcode 兼容层取数，明暗主题自适应 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>用量面板</title>
+<style>
+:root{
+  --background:#ffffff; --foreground:#1a1a1a; --card:#ffffff;
+  --muted:#f2f2f3; --muted-foreground:#6b6b70; --border:#e4e4e7;
+  --green:#15803d; --red:#dc2626; --yellow:#b45309; --series:#4066f0;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --background:#1b1b1f; --foreground:#e9e9ec; --card:#232328;
+    --muted:#2c2c31; --muted-foreground:#9c9ca6; --border:#3a3a41;
+    --green:#3fbf7f; --red:#f47166; --yellow:#d9a514; --series:#6c8cff;
+  }
+}
+:root[data-theme="dark"]{--background:#1b1b1f;--foreground:#e9e9ec;--card:#232328;--muted:#2c2c31;--muted-foreground:#9c9ca6;--border:#3a3a41;--green:#3fbf7f;--red:#f47166;--yellow:#d9a514;--series:#6c8cff}
+:root[data-theme="light"]{--background:#ffffff;--foreground:#1a1a1a;--card:#ffffff;--muted:#f2f2f3;--muted-foreground:#6b6b70;--border:#e4e4e7;--green:#15803d;--red:#dc2626;--yellow:#b45309;--series:#4066f0}
+*{box-sizing:border-box}
+body{margin:0;padding:12px 12px 20px;background:var(--background);color:var(--foreground);font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif}
+.card{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:0 0 8px;background:var(--card)}
+.hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.hd b{font-size:13px}
+.hd .act{font-size:12px;color:var(--muted-foreground);cursor:pointer;border:0;background:none;padding:2px 6px;border-radius:6px}
+.hd .act:hover{background:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:11px;color:var(--muted-foreground)}
+.row{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px}
+.row .nm{flex:0 0 38%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted-foreground)}
+.row .bar{flex:1;height:5px;border-radius:3px;background:var(--muted);overflow:hidden}
+.row .bar i{display:block;height:100%;background:var(--series);border-radius:3px}
+.row .n{flex:0 0 auto;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}
+.qbucket{margin:6px 0}
+.qbucket .t{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+.qbucket .t .pct{font-variant-numeric:tabular-nums;font-weight:600}
+.qbucket .bar{height:5px;border-radius:3px;background:var(--muted);overflow:hidden}
+.qbucket .bar i{display:block;height:100%;border-radius:3px}
+.warn-ok{background:var(--green)} .warn-warn{background:var(--yellow)} .warn-hot{background:var(--red)}
+.mini{font-size:11px;color:var(--muted-foreground)}
+.sess{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px dashed var(--border)}
+.sess:last-child{border-bottom:0}
+.sess .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess .n{font-variant-numeric:tabular-nums;color:var(--muted-foreground)}
+#ud-state{font-size:12px;color:var(--muted-foreground);padding:20px 0;text-align:center}
+.badge{display:inline-block;font-size:10px;border:1px solid var(--border);border-radius:4px;padding:0 4px;margin-left:6px;color:var(--muted-foreground)}
+</style>
+</head>
+<body>
+<div id="ud-state">正在读取本地用量…</div>
+<div id="ud-root" hidden>
+  <div class="card kpi">
+    <div class="hd"><b>用量总览</b><button class="act" id="ud-refresh" type="button">刷新</button></div>
+    <div class="grid">
+      <div class="kpi"><div class="v" id="ud-req">–</div><div class="l" id="ud-req-l">请求（已加载）</div></div>
+      <div class="kpi"><div class="v" id="ud-tok">–</div><div class="l">输入 token（含缓存读）</div></div>
+      <div class="kpi"><div class="v" id="ud-out">–</div><div class="l">生成 token（输出+思考）</div></div>
+      <div class="kpi"><div class="v" id="ud-cr">–</div><div class="l">缓存命中率</div></div>
+    </div>
+    <div class="mini" id="ud-meta" style="margin-top:8px"></div>
+  </div>
+  <div class="card" id="ud-quota-card" hidden>
+    <div class="hd"><b>套餐配额</b><span class="mini" id="ud-quota-src"></span></div>
+    <div id="ud-quota"></div>
+  </div>
+  <div class="card">
+    <div class="hd"><b>当前 5 小时窗口</b><span class="mini" id="ud-win-eta"></span></div>
+    <div class="grid">
+      <div class="kpi"><div class="v" id="ud-win-req">–</div><div class="l">请求数</div></div>
+      <div class="kpi"><div class="v" id="ud-win-tok">–</div><div class="l">token</div></div>
+    </div>
+    <div class="mini" id="ud-win-est" style="margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <div class="hd"><b>来源构成</b><span class="mini">按 token</span></div>
+    <div id="ud-pv"></div>
+  </div>
+  <div class="card">
+    <div class="hd"><b>模型分布</b><span class="mini">按 token</span></div>
+    <div id="ud-md"></div>
+  </div>
+  <div class="card">
+    <div class="hd"><b>最近活跃会话</b><span class="mini">Top 5</span></div>
+    <div id="ud-sess"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var zc = window.zcode;
+  var fmtI = function (n) { return Number(n || 0).toLocaleString('en-US'); };
+  var fmtC = function (n) {
+    n = Number(n || 0);
+    if (n >= 1e8) return (n / 1e8).toFixed(2) + ' 亿';
+    if (n >= 1e4) return (n / 1e4).toFixed(1) + ' 万';
+    return fmtI(n);
+  };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  function applyTheme() {
+    var t = (zc && zc.hostContext && zc.hostContext.theme) || null;
+    if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+  }
+
+  function bars(el, items) {
+    if (!items || !items.length) { el.innerHTML = '<div class="mini">暂无数据</div>'; return; }
+    el.innerHTML = items.map(function (it) {
+      return '<div class="row"><span class="nm" title="' + esc(it.name) + '">' + esc(it.name) + '</span>' +
+        '<span class="bar"><i style="width:' + Math.max(2, it.pct) + '%"></i></span>' +
+        '<span class="n">' + it.pct + '%</span></div>';
+    }).join('');
+  }
+
+  function warnClass(pct) { return pct >= 80 ? 'warn-hot' : (pct >= 60 ? 'warn-warn' : 'warn-ok'); }
+
+  function render(d) {
+    document.getElementById('ud-state').hidden = true;
+    document.getElementById('ud-root').hidden = false;
+    var k = d.kpi || {};
+    document.getElementById('ud-req').textContent = fmtI(k.requests);
+    document.getElementById('ud-req-l').textContent = '请求（已加载 ' + fmtI(k.covered) + ' / ' + fmtI(k.total) + '）';
+    document.getElementById('ud-tok').textContent = fmtC(k.inTokens);
+    document.getElementById('ud-out').textContent = fmtC(k.outTokens);
+    document.getElementById('ud-cr').textContent = k.cacheRate == null ? '–' : k.cacheRate + '%';
+    document.getElementById('ud-meta').textContent = '快照 ' + (k.gen || '') + ' · 今日 ' + fmtI(k.todayRequests) + ' 次';
+    // 配额（含预警：≥60% 黄 / ≥80% 红）
+    var qc = document.getElementById('ud-quota-card');
+    if (d.quota && d.quota.buckets && d.quota.buckets.length) {
+      qc.hidden = false;
+      document.getElementById('ud-quota-src').textContent = '客户端日志' + (d.quota.stale ? '（' + d.quota.logDate + ' 观测）' : '');
+      document.getElementById('ud-quota').innerHTML = d.quota.buckets.map(function (b) {
+        var reset = b.resetAt ? '<span class="mini">' + esc(new Date(b.resetAt).toLocaleString()) + ' 重置</span>' : '';
+        var remain = b.remaining != null ? ' · 余 ' + fmtI(b.remaining) : '';
+        var warn = b.percent >= 60 ? ' <span class="badge" style="color:var(--' + (b.percent >= 80 ? 'red' : 'yellow') + ');border-color:var(--' + (b.percent >= 80 ? 'red' : 'yellow') + ')">' + (b.percent >= 80 ? '即将用尽' : '用量偏高') + '</span>' : '';
+        return '<div class="qbucket"><div class="t"><span>' + esc(b.name) + warn + reset + '</span><span class="pct">' + b.percent + '%</span></div>' +
+          '<div class="bar"><i class="' + warnClass(b.percent) + '" style="width:' + Math.min(100, b.percent) + '%"></i></div>' +
+          '<div class="mini">已用 ' + fmtI(b.used) + ' / ' + fmtI(b.limit) + remain + '</div></div>';
+      }).join('');
+    } else { qc.hidden = true; }
+    // 5h 窗口 + 剩余请求估算（⑤）：按近 3 窗口均值推算
+    var w = d.window || {};
+    document.getElementById('ud-win-req').textContent = fmtI(w.req);
+    document.getElementById('ud-win-tok').textContent = fmtC(w.tok);
+    if (w.start) {
+      var el = Date.now() - w.start;
+      var left = Math.max(0, 5 * 3600 * 1000 - el);
+      document.getElementById('ud-win-eta').textContent = '已进行 ' + (el / 3600000).toFixed(1) + ' h · 剩余 ' + (left / 3600000).toFixed(1) + ' h';
+    } else { document.getElementById('ud-win-eta').textContent = '暂无进行中的窗口'; }
+    var est = d.windowEstimate;
+    document.getElementById('ud-win-est').textContent = est && est.avgReq
+      ? '按近 ' + est.basedOn + ' 个完整窗口均值（' + fmtI(est.avgReq) + ' 次），本窗口预计还可发起约 ' + fmtI(est.remainingReq) + ' 次请求'
+      : '';
+    bars(document.getElementById('ud-pv'), d.providers);
+    bars(document.getElementById('ud-md'), d.models);
+    var se = document.getElementById('ud-sess');
+    if (!d.topSessions || !d.topSessions.length) { se.innerHTML = '<div class="mini">暂无数据</div>'; }
+    else se.innerHTML = d.topSessions.map(function (s) {
+      return '<div class="sess"><span class="t" title="' + esc(s.title) + '">' + esc(s.title) + '</span><span class="n">' + fmtC(s.tokens) + '</span></div>';
+    }).join('');
+  }
+
+  function load() {
+    if (!zc || !zc.callTool) {
+      document.getElementById('ud-state').textContent = '面板需要在 ZCode Desktop 会话内打开（未检测到 window.zcode 桥）';
+      return;
+    }
+    Promise.resolve(zc.callTool('usage_summary', {})).then(function (res) {
+      var sc = res && (res.structuredContent || (res.result && res.result.structuredContent));
+      if (!sc) throw new Error('空响应');
+      render(sc);
+    }).catch(function (e) {
+      document.getElementById('ud-state').textContent = '读取失败：' + (e && e.message || e);
+    });
+  }
+  document.getElementById('ud-refresh').addEventListener('click', load);
+  if (zc && zc.subscribe) { try { zc.subscribe(function () { applyTheme(); }); } catch (e) {} }
+  applyTheme();
+  function boot() { applyTheme(); load(); }
+  if (zc && zc.ready) { Promise.resolve(zc.ready()).then(boot).catch(boot); } else { boot(); }
+  setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

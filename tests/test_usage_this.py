@@ -44,7 +44,8 @@ class UsageThisTest(unittest.TestCase):
                 position INTEGER, time_created INTEGER, time_updated INTEGER
             );
             CREATE TABLE part (
-                id TEXT PRIMARY KEY, session_id TEXT, data TEXT
+                id TEXT PRIMARY KEY, session_id TEXT, data TEXT,
+                time_created INTEGER, time_updated INTEGER
             );
         """)
         self.add_session("old", "另一会话", "/other")
@@ -64,7 +65,7 @@ class UsageThisTest(unittest.TestCase):
             ("current", "任务一", "completed", "medium", 1, 1000, 1000),
             ("current", "任务二", "pending", "medium", 2, 1000, 1000),
         ])
-        self.conn.execute("INSERT INTO part VALUES ('p1', 'current', '{\"type\":\"compaction\",\"preCompactTokenCount\":90000}')")
+        self.conn.execute("INSERT INTO part VALUES ('p1', 'current', '{\"type\":\"compaction\",\"preCompactTokenCount\":90000}', 2500, 2500)")
         self.conn.commit()
 
     def add_session(self, sid, title, directory):

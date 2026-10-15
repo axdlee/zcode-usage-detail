@@ -13,6 +13,7 @@ source "$SCRIPT_DIR/lib/session.sh"
 source "$SCRIPT_DIR/lib/cmd-query.sh"
 source "$SCRIPT_DIR/lib/cmd-cost.sh"
 source "$SCRIPT_DIR/lib/cmd-monitor.sh"
+source "$SCRIPT_DIR/lib/cmd-doctor.sh"
 source "$SCRIPT_DIR/lib/cmd-this.sh"
 source "$SCRIPT_DIR/lib/dashboard.sh"
 
@@ -43,6 +44,7 @@ case "$cmd" in
   dashboard|dashboard-this) cmd_dashboard "$@" ;;
   quota) cmd_quota "$@" ;;
   serve) cmd_serve "$@" ;;
+  doctor) cmd_doctor "$@" ;;
   help|*)
     cat <<'EOF'
 用法：usage.sh [子命令] [参数]
