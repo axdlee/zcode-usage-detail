@@ -1,6 +1,6 @@
 {
   "name": "usage-detail",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "ZCode 本地用量明细：会话侧栏面板、逐条请求钻取、tok/s 速率、来源/项目/模型区分、5 小时窗口燃烧率与剩余请求估算、零密钥配额条（客户端日志）、分时计价、热力图与图表悬停明细、缓存率全链路、models.dev 官方价成本估算、本地常驻面板与导出（只读）。",
   "author": {
     "name": "yeelight"
@@ -25,7 +25,9 @@
     "panel": {
       "type": "stdio",
       "command": "node",
-      "args": ["${ZCODE_PLUGIN_ROOT}/scripts/mcp/panel-server.mjs"],
+      "args": [
+        "${ZCODE_PLUGIN_ROOT}/scripts/mcp/panel-server.mjs"
+      ],
       "env": {
         "ZCODE_USAGE_DB": "${user_config.dbPath}",
         "ZCODE_USAGE_LIMIT": "${user_config.panelLimit}"
@@ -36,12 +38,16 @@
     "surfaces": [
       {
         "id": "usage",
-        "title": { "zh-CN": "用量", "en-US": "Usage" },
+        "title": {
+          "zh-CN": "用量",
+          "en-US": "Usage"
+        },
         "icon": "chart-column",
         "server": "panel",
         "resourceUri": "ui://usage-detail/panel.html",
         "availability": "session"
       }
     ]
-  }
+  },
+  "hooks": "./hooks"
 }

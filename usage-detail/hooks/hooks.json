@@ -1,0 +1,18 @@
+{
+  "description": "usage-detail: 每轮回复末尾附一行本问速率/用量/缓存率统计（模型按注入指令在收尾前自测）",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/prompt-submit.mjs"],
+            "timeoutMs": 5000,
+            "statusMessage": "usage-detail: 准备本轮用量统计…"
+          }
+        ]
+      }
+    ]
+  }
+}

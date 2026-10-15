@@ -15,7 +15,9 @@ const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/
 const USER_PRICE = process.env.ZCODE_USAGE_PRICES || path.join(os.homedir(), '.zcode/usage-prices.json');
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const PANEL_HTML = path.join(HERE, '..', 'ui', 'panel.html');
-const DEFAULT_LIMIT = Math.max(1, Math.min(20000, Number(process.env.ZCODE_USAGE_LIMIT) || 3000));
+const DEFAULT_LIMIT = process.env.ZCODE_USAGE_LIMIT && Number(process.env.ZCODE_USAGE_LIMIT)
+  ? Math.max(1, Math.min(20000, Number(process.env.ZCODE_USAGE_LIMIT)))
+  : -1; // 默认全部
 
 let db = null;
 function openDb() {
@@ -84,7 +86,9 @@ function metaSQL(limit, disk) {
 
 let metaCache = { at: 0, v: null };
 function dataJSON(limit) {
-  limit = Math.max(1, Math.min(20000, Number(limit) || DEFAULT_LIMIT));
+  // -1 = 全部（LIMIT -1），0/空 = 默认，其余钳到 1-20000
+  if (limit == null || Number(limit) === 0) limit = DEFAULT_LIMIT;
+  else if (Number(limit) > 0) limit = Math.max(1, Math.min(20000, Number(limit)));
   if (metaCache.v && metaCache.v.limit === limit && Date.now() - metaCache.at < 15000) return metaCache.v.data;
   const disk = { logs: duMB(path.join(os.homedir(), '.zcode/v2/logs')), rollout: duMB(path.join(os.homedir(), '.zcode/cli/rollout')), artifacts: duMB(path.join(os.homedir(), '.zcode/cli/artifacts')), db: duMB(DB) };
   const data = JSON.parse(q1(metaSQL(limit, disk)));
@@ -122,6 +126,20 @@ function buildSummary() {
   }
   const pct = (m) => Object.keys(m).map((k) => ({ name: k, tokens: m[k], pct: Math.round(m[k] / (inn + out) * 1000) / 10 }))
     .sort((a, b) => b.tokens - a.tokens);
+  // 近 14 天每日 token（供面板 sparkline）
+  const dayMap = {};
+  for (const r of R) {
+    const d = new Date(r[1]);
+    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    dayMap[key] = (dayMap[key] || 0) + r[4] + r[5];
+  }
+  const daily = Object.keys(dayMap).sort().slice(-14).map((k) => ({ day: k.slice(5), tokens: dayMap[k] }));
+  const hourMap = D.hours || {};
+  const hours = Object.keys(hourMap).map((h) => ({ h: Number(h), req: hourMap[h] })).sort((a, b) => a.h - b.h);
+  const failures = (D.stability || [0, 0, 0])[2] || 0;
+  const tools = (D.tools || []).slice(0, 5).map((t) => ({ name: String(t[0]).replace(/^mcp__/, ''), req: t[1] }));
+  const states = { completed: 0, error: 0, cancelled: 0 };
+  for (const r of R) { if (r[8] === 0) states.completed++; else if (r[8] === 1) states.error++; else if (r[8] === 2) states.cancelled++; }
   const topSess = Object.values(sessAgg).sort((a, b) => b.tot - a.tot).slice(0, 5);
   const quota = readQuotaFromLog();
   // 当前 5h 窗口（与 usage.sh blocks 口径一致：R 按时间降序，从最新往旧，相邻间隔 ≥5h 即断窗）
@@ -158,6 +176,9 @@ function buildSummary() {
     topSessions: topSess.map((s) => ({ title: s.title.slice(0, 40), req: s.req, tokens: s.tot, last: s.last })),
     window: win,
     windowEstimate,
+    daily, hours, tools, failures, states,
+    disk: D.disk || {},
+    serveUrl: 'http://127.0.0.1:7741',
     quota: quota.ok ? { buckets: quota.buckets, stale: quota.stale, logDate: quota.logDate } : null,
   };
 }
@@ -196,6 +217,11 @@ const TOOLS = [
     _meta: { ui: { resourceUri: 'ui://usage-detail/panel.html', surface: 'usage', visibility: ['model', 'app'] } },
   },
   {
+    name: 'open_full_panel',
+    description: '打开本地常驻完整面板（http://127.0.0.1:7741）。若服务未运行会自动以只读方式启动（仅监听本机）。返回 { url }。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'usage_detail',
     description: 'ZCode 本地请求明细分页（每行：时间/模型/来源/输入/生成/缓存读/缓存写/耗时ms/首字ms/状态/会话）。status: 0 完成 1 失败 2 取消 3 进行中，缺省全部。',
     inputSchema: {
@@ -210,6 +236,26 @@ const TOOLS = [
   },
 ];
 
+import http2 from 'node:http';
+import { spawn } from 'node:child_process';
+function serveRunning() {
+  return new Promise((resolve) => {
+    const req = http2.get('http://127.0.0.1:7741/api/live', { timeout: 1200 }, (res) => { res.resume(); resolve(res.statusCode === 200); });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+async function ensureServe() {
+  if (await serveRunning()) return { url: 'http://127.0.0.1:7741', started: false };
+  const child = spawn('node', [path.join(HERE, '..', 'serve.mjs'), '7741'], { detached: true, stdio: 'ignore' });
+  child.unref();
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 400));
+    if (await serveRunning()) return { url: 'http://127.0.0.1:7741', started: true };
+  }
+  return { url: 'http://127.0.0.1:7741', started: false, error: '启动超时，可手动运行 usage.sh serve' };
+}
+
 function handleToolCall(name, args) {
   if (name === 'usage_summary') {
     return { structuredContent: buildSummary(), content: [{ type: 'text', text: '用量摘要已生成' }] };
@@ -217,6 +263,9 @@ function handleToolCall(name, args) {
   if (name === 'usage_detail') {
     const out = buildDetail(args);
     return { structuredContent: out, content: [{ type: 'text', text: (out.rows || []).length + ' 条明细' }] };
+  }
+  if (name === 'open_full_panel') {
+    return ensureServe().then((r) => ({ structuredContent: r, content: [{ type: 'text', text: r.url + (r.started ? '（已启动）' : '（已在运行）') }] }));
   }
   return { isError: true, content: [{ type: 'text', text: '未知工具：' + name }] };
 }
