@@ -1,0 +1,19 @@
+{
+  "name": "zcode-usage-detail",
+  "plugins": [
+    {
+      "name": "usage-detail",
+      "source": "./usage-detail",
+      "version": "0.3.0",
+      "description": "查询 ZCode 本地用量明细：逐条请求记录、来源（官方套餐/自定义接入）与模型区分、多维筛选和交互式仪表盘（只读本地 SQLite）。",
+      "displayName": "Usage Detail",
+      "displayName_i18n": {
+        "zh-CN": "用量明细"
+      },
+      "description_i18n": {
+        "zh-CN": "查询 ZCode 本地每次模型请求的用量明细：来源区分、多维筛选与交互式仪表盘"
+      },
+      "category": "developer-tools"
+    }
+  ]
+}
