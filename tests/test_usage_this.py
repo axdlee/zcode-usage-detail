@@ -154,8 +154,15 @@ class UsageThisTest(unittest.TestCase):
             self.add_usage("bulk-%04d" % n, "old", 10000 + n)
         data, _ = self.dashboard("--session", "current")
         self.assertEqual((data["total"], data["covered"]), (4, 4))
+        # 默认 -1 = 全部历史（0.10.3 起）
         data, _ = self.dashboard("--session", "old")
-        self.assertEqual((data["total"], data["covered"]), (3011, 3000))
+        self.assertEqual((data["total"], data["covered"]), (3011, 3011))
+        # 显式限制仍然生效（环境变量 / ZCODE_USAGE_LIMIT）
+        out = self.root / "limited-this.html"
+        self.run_script("dashboard-this", str(out), "--session", "old", ZCODE_USAGE_LIMIT="300")
+        html = out.read_text()
+        data = json.loads(re.search(r"const DATA =\n(.*?)\n;", html, re.S)[1])
+        self.assertEqual((data["total"], data["covered"]), (3011, 300))
         self.assertTrue(all(data["models"][row[2]] == "Model-A" for row in data["rows"]))
 
     def test_upstream_dashboard_limit_is_preserved(self):

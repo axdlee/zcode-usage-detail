@@ -9,7 +9,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { readQuotaFromLog } from '../quota-log.mjs';
 
 const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
 const USER_PRICE = process.env.ZCODE_USAGE_PRICES || path.join(os.homedir(), '.zcode/usage-prices.json');
@@ -256,7 +255,6 @@ function buildSummary() {
   const states = { completed: 0, error: 0, cancelled: 0 };
   for (const r of R) { if (r[8] === 0) states.completed++; else if (r[8] === 1) states.error++; else if (r[8] === 2) states.cancelled++; }
   const topSess = Object.values(sessAgg).sort((a, b) => b.tot - a.tot).slice(0, 5);
-  const quota = readQuotaFromLog();
   // 当前 5h 窗口（与 usage.sh blocks 口径一致：R 按时间降序，从最新往旧，相邻间隔 ≥5h 即断窗）
   let win = { req: 0, tok: 0, start: 0 };
   for (let i = 0; i < R.length; i++) {
@@ -292,11 +290,8 @@ function buildSummary() {
     window: win,
     windowEstimate,
     daily, hours, tools, failures, states,
-    // 5h/周池真实余量需要 API Key（客户端凭据为加密托管，日志不含该观测）；MCP 额度为零密钥真实数据
-    quotaHint: quota.ok ? null : 'MCP 额度暂无观测；如需 5 小时池/周配额余量，可在 ~/.zcode/usage-quota-token.json 写入 {"token":"你的GLM API KEY","base":"https://open.bigmodel.cn"}（客户端登录态为加密托管，第三方不可读，故此处无法零密钥获取）。',
     disk: D.disk || {},
     serveUrl: 'http://127.0.0.1:7741',
-    quota: quota.ok ? { buckets: quota.buckets, stale: quota.stale, logDate: quota.logDate } : null,
   };
 }
 
@@ -320,10 +315,27 @@ function buildDetail(args) {
 
 // ---------- 最小 MCP stdio 协议 ----------
 const SERVER_INFO = { name: 'usage-detail-panel', version: '0.10.0' };
-let panelHtml = null;
+// 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
+// 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
+import { execFile } from 'node:child_process';
+const { SHELL_CSS, TAB_JS } = await import('../shell.mjs');
+const USAGE_SH = path.join(HERE, '..', 'usage.sh');
+let dashCache = { at: 0, html: null };
 function getPanelHtml() {
-  if (panelHtml == null) panelHtml = fs.readFileSync(PANEL_HTML, 'utf8');
-  return panelHtml;
+  return new Promise((resolve, reject) => {
+    if (dashCache.html && Date.now() - dashCache.at < 60000) return resolve(dashCache.html);
+    const tmp = path.join(os.tmpdir(), 'usage-detail-panel-' + process.pid + '.html');
+    execFile('bash', [USAGE_SH, 'dashboard', tmp], { timeout: 120000, env: { ...process.env, ZCODE_USAGE_LIMIT: process.env.ZCODE_USAGE_LIMIT || '-1' } }, (err) => {
+      if (err) return reject(new Error('生成仪表盘失败：' + (err.message || err)));
+      try {
+        const frag = fs.readFileSync(tmp, 'utf8');
+        fs.unlinkSync(tmp);
+        const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZCode 用量面板</title><style>' + SHELL_CSS + '</style></head><body style="padding:10px 12px 40px;max-width:none">' + frag + '<script>' + TAB_JS + '</scr' + 'ipt></body></html>';
+        dashCache = { at: Date.now(), html };
+        resolve(html);
+      } catch (e) { reject(e); }
+    });
+  });
 }
 
 const TOOLS = [
@@ -458,13 +470,9 @@ function dispatch(msg) {
       case 'resources/read': {
         const uri = params && params.uri;
         if (uri !== 'ui://usage-detail/panel.html') { replyErr(-32602, '未知资源：' + uri); return; }
-        reply({
-          contents: [{
-            uri,
-            mimeType: 'text/html;profile=mcp-app',
-            text: getPanelHtml(),
-          }],
-        });
+        getPanelHtml().then((html) => {
+          reply({ contents: [{ uri, mimeType: 'text/html;profile=mcp-app', text: html }] });
+        }).catch((e) => replyErr(-32603, (e && e.message) || String(e)));
         return;
       }
       default:

@@ -2,7 +2,7 @@
 
 cmd_dashboard() {
     # 生成交互式用量界面（HTML 片段），输出路径必须由调用方指定。
-    # 默认最近 3000 条；全量 dashboard 可用第三参数调整，会话版用 ZCODE_USAGE_LIMIT 调整。
+    # 默认内嵌全部历史（-1）；可用第三参数或 ZCODE_USAGE_LIMIT 限制条数。
     out="${2:-}"
     [[ -n "$out" ]] || { echo "用法：usage.sh $cmd <输出.html> [条数]" >&2; exit 1; }
     scope=''
@@ -19,8 +19,9 @@ cmd_dashboard() {
         'selection',$(sql_quote "$SESSION_MODE"))
         FROM (SELECT 1) LEFT JOIN session s ON s.id=$SESSION_SQL)"
     fi
-    limit=$(num_arg "${ZCODE_USAGE_LIMIT:-3000}" "$limit_arg")
-    [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间：${limit}（过大可能超出会话内嵌渲染的体积限制，更多历史请用 export json）" >&2; exit 1; }
+    limit=$(num_arg "${ZCODE_USAGE_LIMIT:--1}" "$limit_arg")
+    # 默认 -1 = 全部历史；显式给定条数时校验范围
+    [[ "$limit" == "-1" ]] || { is_num "$limit" && [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间或 -1（全部）：${limit}" >&2; exit 1; }; }
     # 价格表每日自动同步一次（需要 node + curl；ZCODE_USAGE_NO_AUTOSYNC=1 关闭）
     if [[ -z "${ZCODE_USAGE_NO_AUTOSYNC:-}" ]] && command -v node >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
       upf="${ZCODE_USAGE_PRICES:-$HOME/.zcode/usage-prices.json}"
@@ -89,7 +90,6 @@ cmd_dashboard() {
     {
       cat <<'UD_HEAD'
 <div id="usage-dashboard">
-<div id="ud-quota" class="viz-grid" hidden style="margin-bottom:8px"></div>
 <style>
 #usage-dashboard .ud-toggle{background:none;border:none;color:var(--muted-foreground);font-size:12px;padding:2px 6px;}
 #usage-dashboard .ud-toggle[aria-pressed="true"]{color:var(--foreground);font-weight:500;}
@@ -164,7 +164,11 @@ UD_HEAD
   <div id="ud-top-sessions"></div>
   <div style="display:flex;justify-content:space-between;align-items:center">
     <h3 style="margin-bottom:0">时段分布</h3>
-    <span class="text-small text-muted" id="ud-hours-note"></span>
+    <span class="viz-row" id="ud-hours-toggle" role="group" aria-label="时段分布指标">
+      <button type="button" class="ud-toggle" data-m="req" aria-pressed="true">请求</button>
+      <button type="button" class="ud-toggle" data-m="tok" aria-pressed="false">token</button>
+      <span class="text-small text-muted" id="ud-hours-note"></span>
+    </span>
   </div>
   <div id="ud-hours"></div>
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -502,14 +506,23 @@ function __usageBoot(D) {
       }).join('') + '</tbody></table>' : '<p class="text-muted">当前筛选下暂无数据</p>';
   }
 
+  var hourMetric = 'req';
   function renderHours(rows) {
     var host = $('ud-hours');
     if (!host) return;
     var w = host.clientWidth;
     if (!w) return;
+    // 逐小时聚合：请求数 / token（输入+生成）/ 缓存率（与热力图同口径，随全局筛选）
     var H = D.hours || {};
-    var arr = [];
-    for (var i = 0; i < 24; i++) { var kk = (i < 10 ? '0' : '') + i; arr.push(N(H[kk])); }
+    var reqArr = [], tokArr = [], caArr = [], innArr = [];
+    for (var i = 0; i < 24; i++) { var kk = (i < 10 ? '0' : '') + i; reqArr.push(N(H[kk])); tokArr.push(0); caArr.push(0); innArr.push(0); }
+    rows.forEach(function (r) {
+      var hr = new Date(r[1]).getHours();
+      tokArr[hr] += N(r[4]) + N(r[5]);
+      caArr[hr] += N(r[6]);
+      innArr[hr] += N(r[4]);
+    });
+    var arr = hourMetric === 'tok' ? tokArr : reqArr;
     var peak = 0;
     for (var i2 = 1; i2 < 24; i2++) if (arr[i2] > arr[peak]) peak = i2;
     var max = Math.max.apply(null, arr) || 1;
@@ -520,12 +533,24 @@ function __usageBoot(D) {
     for (var i3 = 0; i3 < 24; i3++) {
       var bh = Math.round((Hh - 20) * arr[i3] / max);
       var x = 2 + i3 * cw;
-      out += '<rect x="' + x + '" y="' + (Hh - 18 - bh) + '" width="' + bw + '" height="' + bh + '" rx="2" fill="var(--viz-series-1)"' + (i3 === peak ? '' : ' fill-opacity="0.45"') + '><title>' + i3 + ':00–' + i3 + ':59 · ' + fmtI(arr[i3]) + ' 次请求</title></rect>';
+      var cr = innArr[i3] ? Math.round(caArr[i3] / innArr[i3] * 100) + '%' : '–';
+      out += '<rect x="' + x + '" y="' + (Hh - 18 - bh) + '" width="' + bw + '" height="' + bh + '" rx="2" fill="var(--viz-series-1)"' + (i3 === peak ? '' : ' fill-opacity="0.45"') + '><title>' + i3 + ':00–' + i3 + ':59 · ' + fmtI(reqArr[i3]) + ' 次请求 · ' + fmt(tokArr[i3]) + ' tok · 缓存 ' + cr + '</title></rect>';
       if (i3 % 3 === 0) out += '<text x="' + (x + bw / 2) + '" y="' + (Hh - 4) + '" text-anchor="middle" font-size="10" fill="var(--muted-foreground)">' + i3 + '</text>';
     }
-    host.innerHTML = '<svg width="' + (cw * 24) + '" height="' + Hh + '" role="img" aria-label="24 小时请求分布"><desc>峰值 ' + peak + ' 点</desc>' + out + '</svg>';
+    host.innerHTML = '<svg width="' + (cw * 24) + '" height="' + Hh + '" role="img" aria-label="24 小时用量分布"><desc>峰值 ' + peak + ' 点</desc>' + out + '</svg>';
     var note = $('ud-hours-note');
-    if (note) note.textContent = '峰值 ' + peak + ' 点 · ' + fmtI(arr[peak]) + ' 次请求';
+    if (note) note.textContent = hourMetric === 'tok' ? '峰值 ' + peak + ' 点 · ' + fmt(arr[peak]) + ' tok' : '峰值 ' + peak + ' 点 · ' + fmtI(arr[peak]) + ' 次请求';
+  }
+  function wireHoursToggle() {
+    var wrap = $('ud-hours-toggle');
+    if (!wrap) return;
+    Array.prototype.forEach.call(wrap.querySelectorAll('.ud-toggle'), function (b) {
+      b.addEventListener('click', function () {
+        hourMetric = b.dataset.m;
+        Array.prototype.forEach.call(wrap.querySelectorAll('.ud-toggle'), function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+        renderHours(frows(false));
+      });
+    });
   }
   function renderHeatmap(rows) {
     var host = $('ud-heatmap');
@@ -859,12 +884,21 @@ function __usageBoot(D) {
         else { more.hidden = false; more.textContent = '加载更多（已显示 ' + sessShown + ' / ' + list.length + '）'; }
       }
     } else {
+      var pageSel = '';
+      if (totalPages > 1) {
+        pageSel = '<select class="form-select" id="ud-page-sel" aria-label="跳转到页" style="max-width:110px">';
+        for (var pi = 1; pi <= totalPages; pi++) pageSel += '<option value="' + pi + '"' + (pi === page ? ' selected' : '') + '>' + pi + ' / ' + totalPages + '</option>';
+        pageSel += '</select>';
+      }
       $('ud-pager').innerHTML = '<button type="button" class="btn" id="ud-prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
-        '<span class="text-small text-muted tabular-nums">第 ' + page + ' / ' + totalPages + ' 页 · 共 ' + fmtI(list.length) + ' 条</span>' +
+        pageSel +
+        '<span class="text-small text-muted tabular-nums">共 ' + fmtI(list.length) + ' 条</span>' +
         '<button type="button" class="btn" id="ud-next"' + (page >= totalPages ? ' disabled' : '') + '>下一页</button>';
       var prevBtn = $('ud-prev'), nextBtn = $('ud-next');
       if (prevBtn) prevBtn.addEventListener('click', function () { page--; detExp = -1; renderDetail(frows(false)); });
       if (nextBtn) nextBtn.addEventListener('click', function () { page++; detExp = -1; renderDetail(frows(false)); });
+      var pageSelEl = $('ud-page-sel');
+      if (pageSelEl) pageSelEl.addEventListener('change', function () { page = +this.value; detExp = -1; renderDetail(frows(false)); });
       Array.prototype.forEach.call($('ud-detail-body').querySelectorAll('tr.ud-click'), function (tr) {
         tr.addEventListener('click', function () {
           var i = +tr.getAttribute('data-di');
@@ -976,6 +1010,7 @@ function __usageBoot(D) {
     renderModels(rows);
     renderTopSessions(rows);
     renderHours(rows);
+    if (!wireHoursToggle.done) { wireHoursToggle.done = true; wireHoursToggle(); }
     renderHeatmap(rows);
     renderBlocks(rows);
     renderSessions(rows);
@@ -1061,29 +1096,29 @@ function __usageBoot(D) {
     }).observe($('ud-heatmap'));
   }
 
-  function renderQuota(j) {
-    var el = $('ud-quota');
-    if (!el) return;
-    el.hidden = false;
-    if (!j || !j.ok || !j.limits || !j.limits.length) {
-      el.innerHTML = '<div class="card" style="grid-column:1/-1"><span class="text-small text-muted">实时配额条不可用：' + esc((j && j.error) || '监控接口未返回配额') + '。桌面 OAuth 登录态不适用于该接口；如用 API Key 接入，可在 ~/.zcode/usage-quota-token.json 写入 {"token":"你的KEY","base":"https://open.bigmodel.cn"}。</span></div>';
-      return;
-    }
-    var names = { TOKENS_LIMIT: '5 小时池已用', TIME_LIMIT: 'MCP（月）已用', WEEKLY_LIMIT: '周配额已用', TOKENS_WEEKLY_LIMIT: '周配额已用' };
-    var srcTag = j.source === 'client-log' ? ' · 客户端日志' + (j.stale ? '（' + (j.logDate || '') + ' 观测）' : '') : '';
-    el.innerHTML = j.limits.map(function (l) {
-      var pct = Math.round(N(l.percentage));
-      var name = names[l.type] || l.type;
-      var remain = l.remaining != null && l.limit ? '<span class="text-small text-muted">余 ' + fmtI(l.remaining) + ' / ' + fmtI(l.limit) + ' · </span>' : '';
-      var reset = l.resetTime ? '<span class="text-small text-muted">' + esc(String(l.resetTime)) + ' 重置</span>' : '';
-      var warn = pct >= 80 ? '<span class="ud-tag" style="color:var(--red)">即将用尽</span>' : pct >= 60 ? '<span class="ud-tag" style="color:var(--yellow)">用量偏高</span>' : '';
-      var barColor = pct >= 80 ? 'var(--red)' : pct >= 60 ? 'var(--yellow)' : 'var(--viz-series-1)';
-      return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="text-small text-muted">' + esc(name) + warn + '</span>' + remain + reset + '</div><div class="viz-stat-value tabular-nums">' + pct + '%</div><div class="progress" style="margin-top:6px"><div class="progress-bar" style="width:' + Math.min(100, pct) + '%;background:' + barColor + '"></div></div></div>';
-    }).join('') + (srcTag ? '<div class="text-small text-muted" style="grid-column:1/-1;margin-top:2px">数据来源：' + srcTag + '</div>' : '');
-  }
-  window.__usageRenderQuota = renderQuota;
 
   apply();
+  // 图表悬停提示：SVG rect 的 title 即入即显（原生 title 有 1~2s 延迟；全环境通用）
+  var tip = document.createElement('div');
+  tip.id = 'ud-tip';
+  tip.setAttribute('role', 'tooltip');
+  tip.style.cssText = 'position:fixed;display:none;z-index:999;pointer-events:none;background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.22);white-space:pre;max-width:360px;';
+  document.body.appendChild(tip);
+  document.addEventListener('mousemove', function (e) {
+    var t = e.target;
+    var rect = t && t.closest ? t.closest('svg rect') : null;
+    var title = rect && rect.querySelector('title');
+    if (title && title.textContent) {
+      tip.textContent = title.textContent;
+      tip.style.display = 'block';
+      var x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 10);
+      var y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 10);
+      tip.style.left = Math.max(6, x) + 'px';
+      tip.style.top = Math.max(6, y) + 'px';
+    } else {
+      tip.style.display = 'none';
+    }
+  });
   // 支持 #tab hash 定位（本地面板跳转：#trend/#blocks/#sessions/#detail/#errors）
   var h = (location.hash || '').replace('#', '');
   if (h) {
