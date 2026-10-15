@@ -6,6 +6,18 @@ set -euo pipefail
 DB="${ZCODE_USAGE_DB:-$HOME/.zcode/cli/db/db.sqlite}"
 PRICE_FILE="${ZCODE_USAGE_PRICES:-$HOME/.zcode/usage-prices.json}"
 
+# 价格表解析顺序：ZCODE_USAGE_PRICES → 用户文件 ~/.zcode/usage-prices.json → 插件内置官方价（models.dev）
+price_file() {
+  if [[ -n "${ZCODE_USAGE_PRICES:-}" && -f "$ZCODE_USAGE_PRICES" ]]; then
+    echo "$ZCODE_USAGE_PRICES"; return
+  fi
+  if [[ -f "$HOME/.zcode/usage-prices.json" ]]; then
+    echo "$HOME/.zcode/usage-prices.json"; return
+  fi
+  local d; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/default-prices.json"
+  if [[ -f "$d" ]]; then echo "$d"; fi
+}
+
 if [[ ! -f "$DB" ]]; then
   echo "未找到 ZCode 本地数据库：$DB" >&2
   exit 1
@@ -103,18 +115,20 @@ case "$cmd" in
        FROM tool_usage GROUP BY tool_name ORDER BY 调用 DESC LIMIT $n;"
     ;;
   cost)
-    # 成本估算：价格表 JSON，键为模型名（不区分大小写），单位为 元/百万token
-    if [[ ! -f "$PRICE_FILE" ]]; then
-      echo "未找到价格表：$PRICE_FILE"
-      echo "格式示例（元/百万 token，可只写常用模型）："
-      echo '  { "GLM-5.3": {"in": 8, "out": 32, "cache": 2}, "GLM-5.3-Flash": {"in": 0.5, "out": 2, "cache": 0.1} }'
+    # 成本估算：默认用插件内置官方价（models.dev），用户文件 ~/.zcode/usage-prices.json 可覆盖/扩展
+    pf=$(price_file)
+    if [[ -z "$pf" ]]; then
+      echo "未找到价格表（应随插件内置 scripts/default-prices.json）" >&2
       exit 1
     fi
-    q "WITH p AS (SELECT key AS model,
-                         CAST(json_extract(value,'\$.in') AS real) AS pin,
-                         CAST(json_extract(value,'\$.out') AS real) AS pout,
-                         CAST(json_extract(value,'\$.cache') AS real) AS pcache
-                  FROM json_each(CAST(readfile('$PRICE_FILE') AS text)))
+    q "WITH src AS (SELECT CAST(readfile('$pf') AS text) AS j),
+            n AS (SELECT CASE WHEN json_type(j,'\$.models')='object' THEN j ELSE json_object('models',json(j)) END AS j2,
+                         COALESCE(json_extract(j,'\$.currency'),'USD') AS cur FROM src),
+            p AS (SELECT je.key AS model,
+                         CAST(json_extract(je.value,'\$.in') AS real) AS pin,
+                         CAST(json_extract(je.value,'\$.out') AS real) AS pout,
+                         CAST(json_extract(je.value,'\$.cache') AS real) AS pcache
+                  FROM n, json_each(n.j2,'\$.models') je)
        SELECT m.model_id AS 模型,
               count(*) AS 请求数,
               round(sum(m.input_tokens)/1000000.0*p.pin, 2) AS 输入成本,
@@ -122,11 +136,108 @@ case "$cmd" in
               round(sum(m.cache_read_input_tokens)/1000000.0*p.pcache, 2) AS 缓存读成本,
               round(sum(m.input_tokens)/1000000.0*p.pin
                   + sum(m.output_tokens+m.reasoning_tokens)/1000000.0*p.pout
-                  + sum(m.cache_read_input_tokens)/1000000.0*p.pcache, 2) AS 合计
+                  + sum(m.cache_read_input_tokens)/1000000.0*p.pcache, 2) AS 合计,
+              (SELECT cur FROM n) AS 币种
        FROM model_usage m JOIN p ON lower(p.model) = lower(m.model_id)
        GROUP BY m.model_id ORDER BY 合计 DESC;"
     echo
     echo "（估算口径：官方牌价 × 本地记录 token；订阅套餐内请求实际不按 token 计费）"
+    ;;
+  prices)
+    # 官方价格表：show 查看 / sync 从 models.dev 同步（保留自定义条目）
+    sub="${2:-show}"
+    case "$sub" in
+      show)
+        pf=$(price_file)
+        [[ -n "$pf" ]] || { echo "未找到价格表" >&2; exit 1; }
+        echo "生效价格表：$pf"
+        echo
+        q "WITH src AS (SELECT CAST(readfile('$pf') AS text) AS j),
+                n AS (SELECT CASE WHEN json_type(j,'\$.models')='object' THEN j ELSE json_object('models',json(j)) END AS j2 FROM src)
+           SELECT je.key AS 模型,
+                  json_extract(je.value,'\$.in') AS 输入,
+                  json_extract(je.value,'\$.out') AS 生成,
+                  json_extract(je.value,'\$.cache') AS 缓存读,
+                  COALESCE(json_extract(j2.j2,'\$.currency'),'USD') AS 币种
+           FROM n j2, json_each(j2.j2,'\$.models') je
+           ORDER BY 模型;"
+        echo
+        echo "（单位：每百万 token）自定义请编辑 ~/.zcode/usage-prices.json；同步官方价：usage.sh prices sync"
+        ;;
+      sync)
+        command -v node >/dev/null 2>&1 || { echo "prices sync 需要 node（同步仅是可选操作，内置价格表已可用）" >&2; exit 1; }
+        tmp=$(mktemp)
+        curl -fsSL --max-time 30 https://models.dev/api.json -o "$tmp" || { echo "下载 models.dev 失败" >&2; rm -f "$tmp"; exit 1; }
+        node - "$tmp" "${ZCODE_USAGE_PRICES:-$HOME/.zcode/usage-prices.json}" <<'NODE'
+const fs = require('fs');
+const md = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const user = process.argv[3];
+let out = { currency: 'USD', models: {} };
+try {
+  const old = JSON.parse(fs.readFileSync(user, 'utf8'));
+  if (old && typeof old.models === 'object') out = old;
+  else if (old && typeof old === 'object') out.models = old;
+} catch (e) {}
+out.currency = out.currency || 'USD';
+let n = 0;
+for (const prov of ['zai', 'zhipuai']) {
+  for (const [m, v] of Object.entries((md[prov] || {}).models || {})) {
+    if (!/glm/i.test(m)) continue;
+    const p = v.price || v.cost;
+    if (!p) continue;
+    out.models[m] = { in: p.input || 0, out: p.output || 0, cache: p.cache_read || 0 };
+    n++;
+  }
+}
+out.source = 'models.dev';
+out.updated = new Date().toISOString().slice(0, 10);
+fs.mkdirSync(require('path').dirname(user), { recursive: true });
+fs.writeFileSync(user, JSON.stringify(out, null, 2) + '\n');
+console.log('已同步 ' + n + ' 个官方模型价到 ' + user + '（自定义条目保留，官方价以 models.dev 为准）');
+NODE
+        rm -f "$tmp"
+        ;;
+      *)
+        echo "用法：usage.sh prices [show|sync]" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  live)
+    # 实时燃烧率监控（终端）：每 N 秒刷新（默认 3），Ctrl-C 退出。
+    # 只查询最近 5h 与近 48h 数据，走 started_at 索引，开销极低。
+    interval=$(num_arg 3 "${2:-}")
+    while true; do
+      printf '\033[H\033[2J'
+      echo "── ZCode 用量实时监控 · 每 ${interval}s 刷新 · Ctrl-C 退出 · $(date '+%H:%M:%S') ──"
+      echo
+      q "WITH cur AS (SELECT count(*) AS req,
+                            COALESCE(sum(input_tokens),0) AS inn,
+                            COALESCE(sum(output_tokens+reasoning_tokens),0) AS gen,
+                            min(started_at) AS st
+                     FROM model_usage WHERE started_at > (unixepoch()*1000 - 18000000)),
+            s AS (SELECT started_at, input_tokens, output_tokens+reasoning_tokens AS gen,
+                         LAG(started_at) OVER (ORDER BY started_at) AS prev
+                  FROM model_usage WHERE started_at > (unixepoch()*1000 - 172800000)),
+            b AS (SELECT started_at, input_tokens, gen,
+                         SUM(CASE WHEN prev IS NULL OR started_at-prev>=18000000 THEN 1 ELSE 0 END) OVER (ORDER BY started_at) AS blk
+                  FROM s),
+            hist AS (SELECT blk, sum(input_tokens)+sum(gen) AS tok
+                     FROM b GROUP BY blk
+                     HAVING min(started_at) <= (unixepoch()*1000 - 18000000)
+                     ORDER BY min(started_at) DESC LIMIT 3)
+       SELECT c.req AS 本窗请求,
+              c.inn+c.gen AS 本窗token,
+              CAST(round((c.inn+c.gen) / max(0.1,(unixepoch()*1000 - COALESCE(c.st, unixepoch()*1000))/3600000.0)) AS int) AS 燃烧率token每小时,
+              (SELECT CAST(round(avg(tok)) AS int) FROM hist) AS 近3窗口均值token,
+              (SELECT count(*) FROM hist) AS 均值样本数
+       FROM cur c;"
+      echo
+      q "SELECT $PV_LABEL AS 来源, count(*) AS 近24h请求, sum(input_tokens+output_tokens+reasoning_tokens) AS token
+         FROM model_usage WHERE started_at > (unixepoch()*1000 - 86400000)
+         GROUP BY provider_id ORDER BY 近24h请求 DESC;"
+      sleep "$interval"
+    done
     ;;
   export)
     kind="${2:-csv}"
@@ -260,11 +371,17 @@ case "$cmd" in
     [[ -n "$out" ]] || { echo "用法：usage.sh dashboard <输出.html> [条数]" >&2; exit 1; }
     limit=$(num_arg "${ZCODE_USAGE_LIMIT:-3000}" "${3:-}")
     [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间：$limit（过大可能超出会话内嵌渲染的体积限制，更多历史请用 export json）" >&2; exit 1; }
+    pf=$(price_file)
+    if [[ -n "$pf" ]]; then
+      PJ_SQL="(SELECT CAST(readfile('$pf') AS text) AS pj)"
+    else
+      PJ_SQL="(SELECT NULL AS pj)"
+    fi
     META=$(qr "
       WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
            M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
            S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM model_usage)),
-           PJ AS (SELECT CAST(readfile('$PRICE_FILE') AS text) AS pj),
+           PJ AS $PJ_SQL,
            R AS (SELECT * FROM model_usage ORDER BY started_at DESC LIMIT $limit)
       SELECT json_object(
         'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
@@ -400,7 +517,13 @@ UD_HEAD
 (function () {
   var D = DATA || {};
   var PV = D.providers || [], MD = D.models || [], TL = D.sessions || [], R = D.rows || [];
-  var TOOLS = D.tools || [], PRICE = (D.prices && typeof D.prices === 'object') ? D.prices : null;
+  var TOOLS = D.tools || [];
+  var PRICE = (D.prices && typeof D.prices === 'object') ? D.prices : null;
+  var PMODELS = PRICE && PRICE.models && typeof PRICE.models === 'object' ? PRICE.models : PRICE;
+  var CURSYM = (function () {
+    var c = PRICE && PRICE.currency;
+    return { USD: '$', CNY: '¥', EUR: '€', GBP: '£', JPY: '¥' }[c] || (c ? c + ' ' : '$');
+  })();
   var $ = function (id) { return document.getElementById(id); };
   var N = function (v) { return v == null ? 0 : v; };
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
@@ -424,10 +547,10 @@ UD_HEAD
   function pvTag(p) { return /^account:/.test(String(PV[p] || '')) ? '官方账号' : '自定义接入'; }
 
   function priceOf(mi) {
-    if (!PRICE) return null;
+    if (!PMODELS) return null;
     var name = String(MD[mi] || '');
-    var p = PRICE[name] || PRICE[name.toLowerCase()];
-    if (!p) { for (var k in PRICE) { if (k.toLowerCase() === name.toLowerCase()) { p = PRICE[k]; break; } } }
+    var p = PMODELS[name] || PMODELS[name.toLowerCase()];
+    if (!p) { for (var k in PMODELS) { if (k.toLowerCase() === name.toLowerCase()) { p = PMODELS[k]; break; } } }
     return p || null;
   }
   function rowCost(r) {
@@ -435,7 +558,7 @@ UD_HEAD
     if (!p) return null;
     return N(r[4]) / 1e6 * N(p.in) + N(r[5]) / 1e6 * N(p.out) + N(r[6]) / 1e6 * N(p.cache);
   }
-  function fmtCost(c) { return c == null ? '–' : '¥' + (c >= 100 ? Math.round(c) : c.toFixed(2)); }
+  function fmtCost(c) { return c == null ? '–' : CURSYM + (c >= 100 ? Math.round(c).toLocaleString('zh-CN') : c.toFixed(2)); }
 
   var maxTs = 0;
   R.forEach(function (r) { if (r[1] > maxTs) maxTs = r[1]; });
@@ -588,34 +711,52 @@ UD_HEAD
       var k = dayKey(d.getTime());
       cells.push({ k: k, v: per[k] ? per[k].tok : 0, req: per[k] ? per[k].req : 0 });
     }
-    var lead = (start.getDay() + 6) % 7;
+    // 最多展示最近 26 周，避免超宽
+    if (cells.length > 182) {
+      cells = cells.slice(-182);
+      start = new Date(cells[0].k + 'T00:00:00');
+    }
+    var lead = (start.getDay() + 6) % 7; // 周一为第一行
     var nz = cells.map(function (c) { return c.v; }).filter(function (v) { return v > 0; }).sort(function (a, b) { return a - b; });
     function q(p) { return nz.length ? nz[Math.min(nz.length - 1, Math.floor(nz.length * p))] : 1; }
     var q1 = q(0.25), q2 = q(0.5), q3 = q(0.75);
-    var CS = 12, GAP = 3, RW = 7;
+    var CS = 13, GAP = 3, RW = 7, L = 24, T = 16;
     var cols = Math.ceil((lead + cells.length) / RW);
-    var W = 26 + cols * (CS + GAP), H = 16 + RW * (CS + GAP);
+    var W = L + cols * (CS + GAP) + 4, H = T + RW * (CS + GAP) + 20;
     var out = '';
-    var monthMark = -1;
+    ['一', '三', '五'].forEach(function (w, i) {
+      out += '<text x="' + (L - 6) + '" y="' + (T + (i * 2 + 1) * (CS + GAP) - 2) + '" text-anchor="end" font-size="10" fill="var(--muted-foreground)">' + w + '</text>';
+    });
+    var lastMonth = '';
     cells.forEach(function (c, i) {
       var pos = lead + i;
       var col = Math.floor(pos / RW), row = pos % RW;
-      var x = 26 + col * (CS + GAP), y = 16 + row * (CS + GAP);
+      if (row === 0) {
+        var mk = c.k.slice(0, 7);
+        if (mk !== lastMonth) {
+          lastMonth = mk;
+          out += '<text x="' + (L + col * (CS + GAP)) + '" y="10" font-size="10" fill="var(--muted-foreground)">' + Number(c.k.slice(5, 7)) + '月</text>';
+        }
+      }
+      var x = L + col * (CS + GAP), y = T + row * (CS + GAP);
       var fill = 'var(--muted)', op = '';
       if (c.v > 0) {
         fill = 'var(--viz-series-1)';
-        op = c.v <= q1 ? ' fill-opacity="0.3"' : c.v <= q2 ? ' fill-opacity="0.55"' : c.v <= q3 ? ' fill-opacity="0.78"' : '';
+        op = c.v <= q1 ? ' fill-opacity="0.35"' : c.v <= q2 ? ' fill-opacity="0.6"' : c.v <= q3 ? ' fill-opacity="0.85"' : '';
       }
-      if (row === 0 && col > monthMark) {
-        var mk = c.k.slice(0, 7);
-        if (mk !== (cells[i - 1] ? cells[i - 1].k.slice(0, 7) : '')) {
-          monthMark = col;
-          out += '<text x="' + x + '" y="10" font-size="10" fill="var(--muted-foreground)">' + c.k.slice(0, 7) + '</text>';
-        }
-      }
-      out += '<rect x="' + x + '" y="' + y + '" width="' + CS + '" height="' + CS + '" rx="2" fill="' + fill + '"' + op + '><title>' + c.k + ' · ' + fmtI(c.req) + ' 次 · ' + fmt(c.v) + ' token</title></rect>';
+      out += '<rect x="' + x + '" y="' + y + '" width="' + CS + '" height="' + CS + '" rx="3" fill="' + fill + '"' + op + '><title>' + c.k + ' · ' + fmtI(c.req) + ' 次请求 · ' + fmt(c.v) + ' token</title></rect>';
     });
-    host.innerHTML = '<svg width="' + W + '" height="' + H + '" role="img" aria-label="活跃热力图（按天 token）"><desc>共 ' + cells.length + ' 天，' + nz.length + ' 天有用量</desc>' + out + '</svg>';
+    var lg = ['少'];
+    var lv = [0, q1, q2, q3, Infinity];
+    for (var li = 0; li < 5; li++) {
+      var lx = W - 118 + li * (CS + GAP);
+      var lfill = li === 0 ? 'var(--muted)' : 'var(--viz-series-1)';
+      var lop = li === 0 || li === 4 ? '' : ' fill-opacity="' + [0, 0.35, 0.6, 0.85][li] + '"';
+      lg.push('<rect x="' + lx + '" y="' + (H - 14) + '" width="' + CS + '" height="' + CS + '" rx="3" fill="' + lfill + '"' + lop + '></rect>');
+    }
+    lg.push('<text x="' + (W - 128) + '" y="' + (H - 4) + '" text-anchor="end" font-size="10" fill="var(--muted-foreground)">少</text>');
+    lg.push('<text x="' + (W - 4) + '" y="' + (H - 4) + '" text-anchor="end" font-size="10" fill="var(--muted-foreground)">多</text>');
+    host.innerHTML = '<svg width="' + W + '" height="' + H + '" role="img" aria-label="活跃热力图（按天 token）"><desc>共 ' + cells.length + ' 天，' + nz.length + ' 天有用量' + (per[days[days.length - 1]] && cells.length >= 182 ? '，展示最近 26 周' : '') + '</desc>' + out + lg.join('') + '</svg>';
   }
 
   function renderBlocks(rows) {
@@ -630,13 +771,25 @@ UD_HEAD
     var last = blocks[blocks.length - 1];
     var active = last && (now - last.start) < 18e6 ? last : null;
     if (active) {
-      var elPct = Math.min(100, Math.round((now - active.start) / 18e6 * 100));
+      var elapsedMs = now - active.start;
+      var elPct = Math.min(100, Math.round(elapsedMs / 18e6 * 100));
       var minsLeft = Math.max(0, Math.round((active.start + 18e6 - now) / 60000));
-      $('ud-block-now').innerHTML = '<div class="text-small text-muted">最近窗口（进行中）· 开始 ' + fullTs(active.start) + '</div>' +
-        '<div class="text-small" style="margin:4px 0">' + fmtI(active.req) + ' 次请求 · ' + fmt(active.inn + active.out) + ' token · 约 ' + minsLeft + ' 分钟后满 5 小时</div>' +
-        '<div class="progress" role="progressbar" aria-label="窗口时间进度" aria-valuenow="' + elPct + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:' + elPct + '%"></div></div>';
+      var tok = active.inn + active.out;
+      var rate = tok / Math.max(0.05, elapsedMs / 36e5);
+      var complete = blocks.filter(function (b) { return b !== active; });
+      var recent = complete.slice(-3);
+      var avg = recent.length ? recent.reduce(function (a, b) { return a + b.inn + b.out; }, 0) / recent.length : 0;
+      var projected = rate * 5;
+      var cmp = '';
+      if (avg > 0) {
+        var diff = Math.round((projected - avg) / avg * 100);
+        cmp = '<div class="text-small text-muted" style="margin-top:4px">近 ' + recent.length + ' 个完整窗口均值 ' + fmt(avg) + ' token · 按当前速率本窗口预计 ' + fmt(projected) + ' token（' + (diff >= 0 ? '高于' : '低于') + '均值 ' + Math.abs(diff) + '%）</div>';
+      }
+      $('ud-block-now').innerHTML = '<div class="text-small text-muted">最近窗口（进行中）· 开始 ' + fullTs(active.start) + ' · 已进行 ' + (elapsedMs / 36e5).toFixed(1) + ' / 5 小时</div>' +
+        '<div class="text-small" style="margin:4px 0">' + fmtI(active.req) + ' 次请求 · ' + fmt(tok) + ' token · 燃烧率 ' + fmt(rate) + ' token/小时 · 约 ' + minsLeft + ' 分钟后满 5 小时</div>' +
+        '<div class="progress" role="progressbar" aria-label="窗口时间进度" aria-valuenow="' + elPct + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:' + elPct + '%"></div></div>' + cmp;
     } else {
-      $('ud-block-now').innerHTML = '<div class="text-small text-muted">当前没有进行中的 5 小时窗口（最近一次活动 ' + (last ? fullTs(last.end) : '–') + '）</div>';
+      $('ud-block-now').innerHTML = '<div class="text-small text-muted">当前没有进行中的 5 小时窗口（最近一次活动 ' + (last ? fullTs(last.end) : '–') + '）。需要盯着燃烧率时，可在终端运行 <code>usage.sh live</code> 实时监控。</div>';
     }
     $('ud-blocks-body').innerHTML = blocks.slice(-12).reverse().map(function (b) {
       var hrs = ((b.end - b.start) / 36e5).toFixed(1);
@@ -825,7 +978,9 @@ UD_TAIL
   months                   按月汇总
   projects [N]             按项目目录汇总 Top N（默认 15）
   tools [N]                工具调用统计 Top N（默认 15）
-  cost                     成本估算（需价格表 ~/.zcode/usage-prices.json，格式见 README）
+  cost                     成本估算（默认用内置官方价，~/.zcode/usage-prices.json 可覆盖）
+  prices [show|sync]       查看价格表 / 从 models.dev 同步官方价（保留自定义条目）
+  live [秒]                终端实时燃烧率监控（默认 3s 刷新，Ctrl-C 退出；供用户在终端运行）
   export csv|json [路径]   导出全部记录（默认当前目录）
   recent [N]               最近 N 条逐条请求明细（默认 20）
   day [YYYY-MM-DD]         某天逐条明细（缺省今天）

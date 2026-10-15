@@ -8,6 +8,14 @@
 
 ![仪表盘总览](screenshots/dashboard-overview-dark.png)
 
+每日趋势按来源堆叠，官方套餐与 BYOK 一目了然：
+
+![每日趋势](screenshots/dashboard-trend-light.png)
+
+5 小时窗口实时燃烧率（当前速率 vs 近期窗口均值）：
+
+![5小时窗口](screenshots/dashboard-blocks-dark.png)
+
 ## 功能
 
 - **逐条明细**：每次模型请求一行——时间、会话、模型、来源、主会话/子代理、输入/生成/缓存读 token、耗时、状态
@@ -63,6 +71,7 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 | 输入 | 效果 |
 |---|---|
 | `/usage-ui` | 生成交互式仪表盘，内嵌渲染在会话中 |
+| `/usage-ui 8000` | 同上，内嵌最近 8000 条 |
 | `/usage` | 文本总览（累计 + 今日） |
 | `/usage blocks` | 5 小时窗口用量（含进行中的窗口） |
 | `/usage recent 50` | 最近 50 条逐条明细 |
@@ -70,22 +79,34 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 | `/usage months` | 按月汇总 |
 | `/usage projects 10` | 按项目目录汇总 Top 10 |
 | `/usage tools` | 工具调用统计 |
-| `/usage cost` | 成本估算（需先配置价格表，见下） |
+| `/usage cost` | 成本估算（内置官方价，可自定义价格表） |
+| `/usage prices sync` | 从 models.dev 同步最新官方价 |
 | `/usage export csv` | 导出全部记录为 CSV |
 | `/usage day 2026-10-14` | 某天的逐条明细 |
 | `/usage sessions 10` | 会话用量排行 Top 10 |
 | `/usage errors` | 最近的失败/取消请求 |
 | “看看我哪个会话最烧 token” | 自然语言同样可以，会自动路由到对应查询 |
 
-### 成本估算（可选）
+### 成本估算（默认官方价，可自定义）
 
-创建 `~/.zcode/usage-prices.json`（单位：元/百万 token，键为模型名，大小写不敏感，可只写常用模型）：
+价格表解析顺序：`ZCODE_USAGE_PRICES` 环境变量 → `~/.zcode/usage-prices.json`（你的自定义文件）→ 插件内置官方价（自动打包自 [models.dev](https://models.dev) 的 zai/zhipuai 官方牌价，美元/百万 token）。所以开箱即有官方价，无需任何配置。
 
-```json
-{ "GLM-5.3": {"in": 8, "out": 32, "cache": 2}, "GLM-5.3-Flash": {"in": 0.5, "out": 2, "cache": 0.1} }
-```
+- `usage.sh prices show` 查看当前生效的价格表
+- `usage.sh prices sync` 从 models.dev 同步最新官方价（保留你的自定义条目；需要 node + curl）
+- 自定义：编辑 `~/.zcode/usage-prices.json`，可加任意模型、改币种：
 
-配置后 `/usage cost` 给出按模型拆分的估算；仪表盘顶部出现"成本估算"开关，打开后会话排行与来源构成会追加成本列。注意：订阅套餐（如 GLM Coding Plan）内的请求实际不按 token 计费，估算仅供 BYOK 按量计费或心理参考。
+  ```json
+  { "currency": "USD",
+    "models": { "glm-5.3": {"in": 1.4, "out": 4.4, "cache": 0.26},
+                 "my-private-model": {"in": 1, "out": 3, "cache": 0.1} } }
+  ```
+
+配置后 `/usage cost` 按模型拆分估算；仪表盘顶部出现"成本估算"开关，打开后会话排行与来源构成追加成本列。注意：订阅套餐（如 GLM Coding Plan）内的请求实际不按 token 计费，估算仅供 BYOK 按量计费或心理参考。
+
+### 实时燃烧率监控
+
+- 仪表盘"5 小时窗口"页：当前窗口的燃烧率（token/小时）、时间进度条、与近 3 个完整窗口均值的对比和满窗预测
+- 终端实时监控（claude-monitor 风格）：`usage.sh live [秒]`，默认 3s 刷新、Ctrl-C 退出；只查最近 5h/48h 数据并走索引，开销极低，适合挂在一个终端角落
 
 ### 仪表盘预览
 
