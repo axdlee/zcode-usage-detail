@@ -30,7 +30,7 @@ function pricePath() {
   return fs.existsSync(d) ? d : null;
 }
 
-const META_SQL = (pf, limit) => `
+const META_SQL = (pf, limit, disk) => `
   WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
        M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
        S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM model_usage)),
@@ -41,6 +41,12 @@ const META_SQL = (pf, limit) => `
     'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
     'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
     'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
+    'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
+    'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM model_usage),
+    'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM model_usage GROUP BY hr)),
+    'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre)),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+    'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
+    'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
@@ -60,7 +66,7 @@ const META_SQL = (pf, limit) => `
               R.duration_ms,
               CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
               CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-              R.cache_creation_input_tokens, R.time_to_first_token_ms))
+              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id))
             FROM R
             LEFT JOIN S SI ON SI.v = R.session_id
             LEFT JOIN M MI ON MI.v = R.model_id
@@ -68,7 +74,7 @@ const META_SQL = (pf, limit) => `
 
 function dataJSON(limit) {
   limit = Math.max(1, Math.min(20000, Number(limit) || 3000));
-  return q(META_SQL(pricePath(), limit));
+  return q(META_SQL(pricePath(), limit, diskJSON()));
 }
 
 function liveJSON() {
@@ -89,6 +95,52 @@ function liveJSON() {
     today: { req: today[0] || 0, tok: today[1] || 0, fail: today[2] || 0 },
     gen: Date.now()
   };
+}
+
+let diskCache = { at: 0, v: {} };
+function diskJSON() {
+  if (Date.now() - diskCache.at < 600000) return diskCache.v;
+  const dirs = {
+    logs: path.join(os.homedir(), '.zcode/v2/logs'),
+    rollout: path.join(os.homedir(), '.zcode/cli/rollout'),
+    artifacts: path.join(os.homedir(), '.zcode/cli/artifacts'),
+    db: DB
+  };
+  const out = {};
+  for (const [k, dir] of Object.entries(dirs)) {
+    try { out[k] = parseInt(execFileSync('du', ['-sm', dir], { encoding: 'utf8' }).split('\t')[0], 10) || 0; }
+    catch (e) { out[k] = 0; }
+  }
+  diskCache = { at: Date.now(), v: out };
+  return out;
+}
+
+let quotaCache = { at: 0, v: null };
+function quotaJSON() {
+  if (quotaCache.v && Date.now() - quotaCache.at < 60000) return quotaCache.v;
+  try {
+    const out = execFileSync(process.execPath, [path.join(HERE, 'quota.mjs')], { encoding: 'utf8', timeout: 25000 });
+    quotaCache = { at: Date.now(), v: JSON.parse(out) };
+  } catch (e) {
+    let msg = e.message;
+    try { msg = JSON.parse(e.stdout || '{}').error || msg; } catch (e2) {}
+    quotaCache = { at: Date.now(), v: { ok: false, error: String(msg).slice(0, 160) } };
+  }
+  return quotaCache.v;
+}
+
+function requestJSON(id) {
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return { error: '非法 id' };
+  const row = q(`SELECT json_object(
+    'raw_usage_json', raw_usage_json,
+    'provider_metadata_json', provider_metadata_json,
+    'finish_reason', finish_reason,
+    'error_code', error_code,
+    'error_message', error_message,
+    'agent', agent,
+    'variant', variant)
+  FROM model_usage WHERE id = '${id}';`).trim();
+  return row ? JSON.parse(row) : { error: '未找到该请求' };
 }
 
 function renderFragment(limit) {
@@ -121,8 +173,15 @@ function renderFragment(limit) {
     }
     tick();
     setInterval(tick, 5000);
+    if (window.__usageRenderQuota) {
+      fetch('/api/quota').then(function (r) { return r.json(); }).then(function (j) {
+        if (window.__usageRenderQuota) window.__usageRenderQuota(j);
+      }).catch(function () {});
+    }
     // 图表悬停提示：热力图/趋势图等 SVG 图形，鼠标即入即显完整明细（原生 title 有 1~2s 延迟）
     var tip = document.createElement('div');
+    tip.id = 'ud-tip';
+    tip.setAttribute('role', 'tooltip');
     tip.style.cssText = 'position:fixed;display:none;z-index:999;pointer-events:none;background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.22);white-space:pre;max-width:360px;';
     document.body.appendChild(tip);
     document.addEventListener('mousemove', function (e) {
@@ -247,12 +306,18 @@ const server = http.createServer(function (req, res) {
   try {
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
       const limit = u.searchParams.get('limit') || 3000;
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       const fragHtml = getFragment(limit);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZCode 用量面板</title><style>' + SHELL_CSS + '</style></head><body>' + fragHtml + '<script>' + TAB_JS + '</scr' + 'ipt></body></html>');
     } else if (req.method === 'GET' && u.pathname === '/api/data') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(dataJSON(u.searchParams.get('limit') || 3000));
+    } else if (req.method === 'GET' && u.pathname === '/api/quota') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(quotaJSON()));
+    } else if (req.method === 'GET' && u.pathname === '/api/request') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(requestJSON(u.searchParams.get('id') || '')));
     } else if (req.method === 'GET' && u.pathname === '/api/live') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(liveJSON()));
@@ -266,7 +331,7 @@ const server = http.createServer(function (req, res) {
       res.end('Not Found');
     }
   } catch (e) {
-    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('错误：' + (e.message || e));
   }
 });

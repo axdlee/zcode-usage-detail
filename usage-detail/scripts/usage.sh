@@ -142,7 +142,7 @@ case "$cmd" in
        FROM model_usage m JOIN p ON lower(p.model) = lower(m.model_id)
        GROUP BY m.model_id ORDER BY 合计 DESC;"
     echo
-    echo "（估算口径：官方牌价 × 本地记录 token；订阅套餐内请求实际不按 token 计费）"
+    echo "（估算口径：官方牌价 × 本地记录 token；含分时费率的模型按标准价估算，精确分时请在面板查看；订阅套餐内请求实际不按 token 计费）"
     ;;
   prices)
     # 官方价格表：show 查看 / sync 从 models.dev 同步（保留自定义条目）
@@ -271,6 +271,7 @@ NODE
             'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
             'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
             'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
+        'sessionDirs',(SELECT json_group_array(COALESCE(se.directory,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
             'total',(SELECT count(*) FROM model_usage),
             'covered',(SELECT count(*) FROM R),
             'gen',(SELECT datetime('now','localtime')),
@@ -280,7 +281,7 @@ NODE
                       R.duration_ms,
                       CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
                       CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-                  R.cache_creation_input_tokens, R.time_to_first_token_ms))
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id))
                     FROM R
                     LEFT JOIN S SI ON SI.v = R.session_id
                     LEFT JOIN M MI ON MI.v = R.model_id
@@ -395,6 +396,10 @@ NODE
     else
       PJ_SQL="(SELECT NULL AS pj)"
     fi
+    logs_mb=$(du -sm "$HOME/.zcode/v2/logs" 2>/dev/null | cut -f1); logs_mb=${logs_mb:-0}
+    rollout_mb=$(du -sm "$HOME/.zcode/cli/rollout" 2>/dev/null | cut -f1); rollout_mb=${rollout_mb:-0}
+    artifacts_mb=$(du -sm "$HOME/.zcode/cli/artifacts" 2>/dev/null | cut -f1); artifacts_mb=${artifacts_mb:-0}
+    db_mb=$(du -m "$DB" 2>/dev/null | cut -f1); db_mb=${db_mb:-0}
     META=$(qr "
       WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
            M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
@@ -406,6 +411,12 @@ NODE
         'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
         'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
         'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
+        'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
+        'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM model_usage),
+        'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM model_usage GROUP BY hr)),
+        'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre)),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+        'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
+        'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
         'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
@@ -434,6 +445,7 @@ NODE
     {
       cat <<'UD_HEAD'
 <div id="usage-dashboard">
+<div id="ud-quota" class="viz-grid" hidden style="margin-bottom:8px"></div>
 <style>
 #usage-dashboard .ud-toggle{background:none;border:none;color:var(--muted-foreground);font-size:12px;padding:2px 6px;}
 #usage-dashboard .ud-toggle[aria-pressed="true"]{color:var(--foreground);font-weight:500;}
@@ -455,6 +467,14 @@ NODE
 #usage-dashboard .ud-pager .btn{margin-top:0;}
 #usage-dashboard .ud-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0;}
 #usage-dashboard .ud-legend .form-check{display:inline-flex;align-items:center;gap:4px;margin:0;}
+#usage-dashboard .ud-click{cursor:pointer;}
+#usage-dashboard .ud-click:hover td{background:var(--muted);}
+#usage-dashboard .ud-exp td{background:var(--muted);padding:12px 14px;}
+#usage-dashboard .ud-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:4px 0;}
+#usage-dashboard .ud-kv-l{font-size:11px;color:var(--muted-foreground);}
+#usage-dashboard .ud-kv-v{font-size:13px;font-weight:500;}
+#usage-dashboard .ud-sec{margin-top:12px;}
+#usage-dashboard pre.ud-raw{font-size:11px;background:var(--muted);border-radius:8px;padding:8px 10px;overflow-x:auto;white-space:pre;}
 </style>
 <div class="viz-controls" role="group" aria-label="用量筛选">
   <label class="form-label text-small text-muted" for="ud-f-pv">来源</label>
@@ -494,6 +514,11 @@ NODE
   <h3>最活跃会话（Top 5）</h3>
   <div id="ud-top-sessions"></div>
   <div style="display:flex;justify-content:space-between;align-items:center">
+    <h3 style="margin-bottom:0">时段分布</h3>
+    <span class="text-small text-muted" id="ud-hours-note"></span>
+  </div>
+  <div id="ud-hours"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center">
     <h3 style="margin-bottom:0">活跃热力图</h3>
     <div class="viz-row" role="group" aria-label="热力图粒度" id="ud-heat-toggle">
       <button type="button" class="ud-toggle" data-hm="day" aria-pressed="true">每日</button>
@@ -522,13 +547,14 @@ NODE
   </table></div>
 </div>
 <div id="ud-sessions" role="tabpanel" aria-labelledby="ud-tab-sessions" hidden>
-  <p class="text-small text-muted">点击表头排序，筛选条件在上方全局生效。</p>
+  <p class="text-small text-muted">点击表头排序，筛选条件在上方全局生效；点击行可展开会话详情。</p>
   <div class="table-responsive"><table class="table table-sm">
     <thead id="ud-sessions-head"></thead>
     <tbody id="ud-sessions-body"></tbody>
   </table></div>
 </div>
 <div id="ud-detail" role="tabpanel" aria-labelledby="ud-tab-detail" hidden>
+  <p class="text-small text-muted">点击表头排序；点击任意请求行可展开该请求的完整信息。</p>
   <div class="viz-row">
     <label class="form-label text-small text-muted" for="ud-f-stat">状态</label>
     <select class="form-select" id="ud-f-stat">
@@ -559,7 +585,7 @@ UD_HEAD
 ;
 function __usageBoot(D) {
   var PV = D.providers || [], MD = D.models || [], TL = D.sessions || [], R = D.rows || [];
-  var TOOLS = D.tools || [];
+  var TOOLS = D.tools || [], SD = D.sessionDirs || [];
   var PRICE = (D.prices && typeof D.prices === 'object') ? D.prices : null;
   var PMODELS = PRICE && PRICE.models && typeof PRICE.models === 'object' ? PRICE.models : PRICE;
   var CURSYM = (function () {
@@ -595,20 +621,40 @@ function __usageBoot(D) {
     if (!p) { for (var k in PMODELS) { if (k.toLowerCase() === name.toLowerCase()) { p = PMODELS[k]; break; } } }
     return p || null;
   }
+  function tierMult(ts, t) {
+    if (!t || !t.tiers) return 1;
+    var d = new Date(ts);
+    var h = d.getHours();
+    if (typeof t.tz === 'number') h = ((d.getUTCHours() + t.tz) % 24 + 24) % 24;
+    for (var i = 0; i < t.tiers.length; i++) {
+      var tier = t.tiers[i] || {};
+      var ws = tier.hours || [];
+      for (var j = 0; j < ws.length; j++) {
+        var b = ws[j][0], e = ws[j][1];
+        if (b <= e ? (h >= b && h < e) : (h >= b || h < e)) return tier.mult == null ? 1 : tier.mult;
+      }
+    }
+    return 1;
+  }
   function rowCost(r) {
     var p = priceOf(r[2]);
     if (!p) return null;
-    return N(r[4]) / 1e6 * N(p.in) + N(r[5]) / 1e6 * N(p.out) + N(r[6]) / 1e6 * N(p.cache);
+    var base = N(r[4]) / 1e6 * N(p.in) + N(r[5]) / 1e6 * N(p.out) + N(r[6]) / 1e6 * N(p.cache);
+    return base * tierMult(r[1], p.tariff);
   }
+  function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : N(mb) + ' MB'; }
   function fmtCost(c) { return c == null ? '–' : CURSYM + (c >= 100 ? Math.round(c).toLocaleString('zh-CN') : c.toFixed(2)); }
 
   var maxTs = 0;
   R.forEach(function (r) { if (r[1] > maxTs) maxTs = r[1]; });
+  var cmpMap = {}, toolsMap = {};
+  (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2] }; });
+  (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
   var st = { p: -1, m: -1, rng: 'all', hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, detailStat = -1, curMetric = 'req', costOn = false;
-  var heatMode = 'day', heatLastW = -1;
+  var heatMode = 'day', heatLastW = -1, sessExp = -1, detExp = -1;
 
   function cutOf() { if (st.rng === 'all') return 0; return maxTs - (st.rng === '7' ? 7 : 30) * 864e5; }
   function frows(ignorePv) {
@@ -675,12 +721,20 @@ function __usageBoot(D) {
       ['峰值日', peak ? peak.slice(5) + '（' + fmt(peakV) + ' token）' : '–'],
       ['缓存命中率', hit + '%'],
       ['缓存量（读+写）', fmt(a.ca + a.ccw) + ' token'],
+      ['任务完成', D.todos && D.todos[1] > 0 ? N(D.todos[0]) + '/' + D.todos[1] + '（' + Math.round(N(D.todos[0]) / D.todos[1] * 100) + '%）' : '–'],
+      ['重试 / 取消', D.stability ? fmtI(D.stability[0]) + ' / ' + fmtI(D.stability[1]) : '–'],
       ['平均耗时', a.req ? (a.dur / a.req / 1000).toFixed(1) + ' s' : '–'],
       ['主会话 / 子代理', fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub)]
     ];
     if (TOOLS.length) {
       items.push(['最常用工具', esc(String(TOOLS[0][0])).replace(/^mcp__/, '') + ' ×' + fmtI(TOOLS[0][1])]);
     }
+    if (D.hours) {
+      var pk = -1, pv2 = -1;
+      for (var hh = 0; hh < 24; hh++) { var kk2 = (hh < 10 ? '0' : '') + hh; var c2 = N(D.hours[kk2]); if (c2 > pv2) { pv2 = c2; pk = hh; } }
+      if (pk >= 0) items.push(['峰值时段', pk + ' 点（' + fmtI(pv2) + ' 次请求）']);
+    }
+    if (D.disk && D.disk.logs) items.push(['数据体量', '日志 ' + fmtMB(D.disk.logs) + ' · 导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db)]);
     var totalCost = 0, anyCost = false;
     rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } });
     if (anyCost) items.push(['估算成本', fmtCost(totalCost)]);
@@ -729,7 +783,7 @@ function __usageBoot(D) {
       var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; }
     });
     return Object.keys(per).map(function (g) {
-      var o = per[g]; o.g = g; o.tot = o.inn + o.out;
+      var o = per[g]; o.g = +g; o.tot = o.inn + o.out;
       o.rate = o.inn ? Math.round(o.ca / o.inn * 100) : 0;
       return o;
     });
@@ -744,6 +798,31 @@ function __usageBoot(D) {
       }).join('') + '</tbody></table>' : '<p class="text-muted">当前筛选下暂无数据</p>';
   }
 
+  function renderHours(rows) {
+    var host = $('ud-hours');
+    if (!host) return;
+    var w = host.clientWidth;
+    if (!w) return;
+    var H = D.hours || {};
+    var arr = [];
+    for (var i = 0; i < 24; i++) { var kk = (i < 10 ? '0' : '') + i; arr.push(N(H[kk])); }
+    var peak = 0;
+    for (var i2 = 1; i2 < 24; i2++) if (arr[i2] > arr[peak]) peak = i2;
+    var max = Math.max.apply(null, arr) || 1;
+    var cw = Math.floor((w - 4) / 24);
+    var bw = Math.max(3, cw - 3);
+    var Hh = 92;
+    var out = '';
+    for (var i3 = 0; i3 < 24; i3++) {
+      var bh = Math.round((Hh - 20) * arr[i3] / max);
+      var x = 2 + i3 * cw;
+      out += '<rect x="' + x + '" y="' + (Hh - 18 - bh) + '" width="' + bw + '" height="' + bh + '" rx="2" fill="var(--viz-series-1)"' + (i3 === peak ? '' : ' fill-opacity="0.45"') + '><title>' + i3 + ':00–' + i3 + ':59 · ' + fmtI(arr[i3]) + ' 次请求</title></rect>';
+      if (i3 % 3 === 0) out += '<text x="' + (x + bw / 2) + '" y="' + (Hh - 4) + '" text-anchor="middle" font-size="10" fill="var(--muted-foreground)">' + i3 + '</text>';
+    }
+    host.innerHTML = '<svg width="' + (cw * 24) + '" height="' + Hh + '" role="img" aria-label="24 小时请求分布"><desc>峰值 ' + peak + ' 点</desc>' + out + '</svg>';
+    var note = $('ud-hours-note');
+    if (note) note.textContent = '峰值 ' + peak + ' 点 · ' + fmtI(arr[peak]) + ' 次请求';
+  }
   function renderHeatmap(rows) {
     var host = $('ud-heatmap');
     if (!host) return;
@@ -868,32 +947,111 @@ function __usageBoot(D) {
     }).join('');
   }
 
+  function sessionDetailHTML(o) {
+    var rs = R.filter(function (r) { return r[0] === o.g; }).sort(function (a, b) { return a[1] - b[1]; });
+    var dir = SD[o.g] ? esc(SD[o.g]) : '<span class="text-muted">–</span>';
+    var mm = {}, pv2 = {};
+    rs.forEach(function (r) {
+      var nm = String(MD[r[2]] || '?').toLowerCase();
+      mm[nm] = (mm[nm] || 0) + N(r[4]) + N(r[5]);
+      pv2[r[3]] = (pv2[r[3]] || 0) + 1;
+    });
+    var mtot = 0; for (var k in mm) mtot += mm[k];
+    var mix = Object.keys(mm).sort(function (a, b) { return mm[b] - mm[a]; }).map(function (k) { return '<span class="text-small text-muted">' + esc(k) + ' ' + Math.round(mm[k] / mtot * 100) + '%</span>'; }).join(' · ');
+    var pvm = Object.keys(pv2).map(function (k) { return '<span class="text-small text-muted">' + pvLabel(k) + ' ×' + pv2[k] + '</span>'; }).join(' · ');
+    var tl = (toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6)
+      .map(function (t) { return '<span class="text-small text-muted">' + esc(String(t[0]).replace(/^mcp__/, '')) + ' ×' + fmtI(t[1]) + '</span>'; }).join(' · ');
+    var cm = cmpMap[o.g];
+    var cmpHtml = cm ? '压缩 ' + cm.cnt + ' 次 · 压缩前水位最高 ' + fmt(cm.pre) + ' token' : '无压缩记录';
+    var W = 600, H = 90, maxIn = 1;
+    rs.forEach(function (r) { if (N(r[4]) > maxIn) maxIn = N(r[4]); });
+    var pts = rs.map(function (r, i) {
+      var x = rs.length > 1 ? i / (rs.length - 1) * (W - 8) + 4 : W / 2;
+      var y = H - 8 - (H - 16) * N(r[4]) / maxIn;
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    var curve = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="上下文水位曲线"><polyline points="' + pts + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/></svg>';
+    function kv(l, v) { return '<div><div class="ud-kv-l">' + l + '</div><div class="ud-kv-v">' + v + '</div></div>'; }
+    return '<div class="ud-kv">' +
+      kv('项目目录', dir) +
+      kv('起止', fullTs(rs.length ? rs[0][1] : 0) + ' ~ ' + fullTs(o.last)) +
+      kv('请求 / 缓存率', fmtI(o.req) + ' 次 · ' + o.rate + '%') +
+      kv('上下文压缩', cmpHtml) +
+      (costOn && o.hasCost ? kv('估算成本', fmtCost(o.cost)) : '') +
+      '</div>' +
+      '<div class="ud-sec"><div class="ud-kv-l">模型占比（按 token）</div>' + mix + '</div>' +
+      '<div class="ud-sec"><div class="ud-kv-l">来源</div>' + pvm + '</div>' +
+      (tl ? '<div class="ud-sec"><div class="ud-kv-l">使用工具 Top 6</div>' + tl + '</div>' : '') +
+      '<div class="ud-sec"><div class="ud-kv-l">上下文水位（按请求输入 token 近似，峰值 ' + fmt(maxIn) + '）</div>' + curve + '</div>';
+  }
   function renderSessions(rows) {
     var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost', 7: 'rate' };
     var list = sessAgg(rows).sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
+    var hasCmp = (D.compactions || []).length > 0;
     var cols = [
       { h: '会话', k: null }, { h: '请求数', k: 1, end: 1 }, { h: '输入 token', k: 2, end: 1 },
       { h: '生成 token', k: 3, end: 1 }, { h: 'token 合计', k: 4, end: 1 },
       { h: '缓存率', k: 7, end: 1 },
+      hasCmp ? { h: '压缩', k: null, end: 1 } : null,
       costOn ? { h: '估算成本', k: 6, end: 1 } : null,
       { h: '最后活动', k: 5, end: 1 }
     ].filter(Boolean);
+    var span = cols.length;
     $('ud-sessions-head').innerHTML = '<tr>' + cols.map(function (c) {
       var arrow = sortS.k === c.k ? (sortS.d < 0 ? ' ↓' : ' ↑') : '';
       return c.k == null ? '<th>' + c.h + '</th>' : '<th class="ud-sortable' + (c.end ? ' text-end' : '') + '" data-k="' + c.k + '"' + (sortS.k === c.k ? ' aria-sort="' + (sortS.d < 0 ? 'descending' : 'ascending') + '"' : '') + '>' + c.h + arrow + '</th>';
     }).join('') + '</tr>';
-    $('ud-sessions-body').innerHTML = list.length ? list.slice(0, 30).map(function (o) {
-      return '<tr><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmtI(o.inn) + '</td><td class="text-end tabular-nums">' + fmtI(o.out) + '</td><td class="text-end tabular-nums">' + fmtI(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td>' + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
-    }).join('') : '<tr><td colspan="8" class="text-muted">当前筛选下暂无数据</td></tr>';
+    var shown = list.slice(0, 30);
+    var body = '';
+    shown.forEach(function (o) {
+      body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmtI(o.inn) + '</td><td class="text-end tabular-nums">' + fmtI(o.out) + '</td><td class="text-end tabular-nums">' + fmtI(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + ' 次' : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+      if (o.g === sessExp) body += '<tr class="ud-exp"><td colspan="' + span + '">' + sessionDetailHTML(o) + '</td></tr>';
+    });
+    $('ud-sessions-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
+    Array.prototype.forEach.call($('ud-sessions-body').querySelectorAll('tr.ud-click'), function (tr) {
+      tr.addEventListener('click', function () {
+        var g = +tr.getAttribute('data-sg');
+        sessExp = (sessExp === g) ? -1 : g;
+        renderSessions(frows(false));
+      });
+    });
     Array.prototype.forEach.call($('ud-sessions-head').querySelectorAll('.ud-sortable'), function (th) {
       th.addEventListener('click', function () {
         var k = +th.getAttribute('data-k');
         if (sortS.k === k) sortS.d = -sortS.d; else { sortS.k = k; sortS.d = -1; }
+        sessExp = -1;
         renderSessions(frows(false));
       });
     });
   }
 
+  function requestDetailHTML(r) {
+    function kv(l, v) { return '<div><div class="ud-kv-l">' + l + '</div><div class="ud-kv-v">' + v + '</div></div>'; }
+    var ttftpct = r[11] != null && r[7] ? Math.round(r[11] / r[7] * 100) + '%' : '–';
+    var c = costOn ? rowCost(r) : null;
+    return '<div class="ud-kv">' +
+      kv('Token 构成', '输入 ' + fmtI(r[4]) + '（缓存读 ' + fmtI(r[6]) + ' · 缓存写 ' + fmtI(r[10]) + '）+ 生成 ' + fmtI(r[5]) + ' = 合计 ' + fmtI(N(r[4]) + N(r[5]))) +
+      kv('时序', '总耗时 ' + fmtI(r[7]) + ' ms · 首字 ' + (r[11] == null ? '–' : fmtI(r[11]) + ' ms（' + ttftpct + '）')) +
+      kv('模型 / 来源 / 类型', esc(MD[r[2]]) + ' · ' + pvLabel(r[3]) + ' · ' + QT[r[9]]) +
+      kv('会话', TL[r[0]] ? esc(TL[r[0]]) : '–') +
+      (costOn ? kv('估算成本', c == null ? '–' : fmtCost(c)) : '') +
+      '</div>' +
+      (window.__USAGE_SERVE__ ? '<div class="ud-sec" id="ud-reqraw"><div class="ud-kv-l">正在拉取 provider 上报的原始用量…</div></div>' : '');
+  }
+  function fillRawUsage(id) {
+    var el = $('ud-reqraw');
+    if (!el) return;
+    fetch('/api/request?id=' + encodeURIComponent(id)).then(function (x) { return x.json(); }).then(function (j) {
+      if (j.error) { el.innerHTML = '<div class="ud-kv-l">原始用量：' + esc(j.error) + '</div>'; return; }
+      var usage = '(无)';
+      try { usage = j.raw_usage_json ? JSON.stringify(JSON.parse(j.raw_usage_json), null, 1) : usage; } catch (e) { usage = j.raw_usage_json || usage; }
+      var extra = [];
+      if (j.finish_reason) extra.push('finish_reason: ' + j.finish_reason);
+      if (j.error_code || j.error_message) extra.push('错误: ' + (j.error_code || '') + ' ' + (j.error_message || ''));
+      if (j.agent) extra.push('agent: ' + j.agent);
+      el.innerHTML = '<div class="ud-kv-l">provider 上报的原始用量</div><pre class="ud-raw">' + esc(usage) + '</pre>' + (extra.length ? '<div class="text-small text-muted">' + esc(extra.join(' · ')) + '</div>' : '');
+    }).catch(function (e) { el.innerHTML = '<div class="ud-kv-l">拉取失败：' + esc(String(e)) + '</div>'; });
+  }
   function renderDetail(rows) {
     var ACC = {
       0: function (r) { return r[1]; },
@@ -915,6 +1073,7 @@ function __usageBoot(D) {
       { h: '状态', k: null },
       costOn ? { h: '成本', k: 13, end: 1 } : null
     ].filter(Boolean);
+    var span = cols.length;
     $('ud-detail-head').innerHTML = '<tr>' + cols.map(function (c) {
       var arrow = sortD.k === c.k ? (sortD.d < 0 ? ' ↓' : ' ↑') : '';
       return c.k == null ? '<th>' + c.h + '</th>' : '<th class="ud-sortable' + (c.end ? ' text-end' : '') + '" data-k="' + c.k + '"' + (sortD.k === c.k ? ' aria-sort="' + (sortD.d < 0 ? 'descending' : 'ascending') + '"' : '') + '>' + c.h + arrow + '</th>';
@@ -923,9 +1082,9 @@ function __usageBoot(D) {
     if (page > totalPages) page = totalPages;
     if (page < 1) page = 1;
     var view = list.slice((page - 1) * pageSize, page * pageSize);
-    $('ud-detail-body').innerHTML = view.length ? view.map(function (r) {
-      var c = costOn ? rowCost(r) : null;
-      return '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
+    var body = '';
+    view.forEach(function (r, i) {
+      body += '<tr class="ud-click" data-di="' + i + '"><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
         '<td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
         '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
         '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
@@ -936,19 +1095,30 @@ function __usageBoot(D) {
         '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
         '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
         '<td>' + stHtml(r[8]) + '</td>' +
-        (costOn ? '<td class="text-end tabular-nums">' + (c == null ? '–' : fmtCost(c)) + '</td>' : '') +
+        (costOn ? '<td class="text-end tabular-nums">' + (rowCost(r) == null ? '–' : fmtCost(rowCost(r))) + '</td>' : '') +
         '</tr>';
-    }).join('') : '<tr><td colspan="14" class="text-muted">当前筛选下暂无数据</td></tr>';
+      if (detExp === i) body += '<tr class="ud-exp"><td colspan="' + span + '">' + requestDetailHTML(r) + '</td></tr>';
+    });
+    $('ud-detail-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
     $('ud-pager').innerHTML = '<button type="button" class="btn" id="ud-prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
       '<span class="text-small text-muted tabular-nums">第 ' + page + ' / ' + totalPages + ' 页 · 共 ' + fmtI(list.length) + ' 条</span>' +
       '<button type="button" class="btn" id="ud-next"' + (page >= totalPages ? ' disabled' : '') + '>下一页</button>';
     var prevBtn = $('ud-prev'), nextBtn = $('ud-next');
-    if (prevBtn) prevBtn.addEventListener('click', function () { page--; renderDetail(frows(false)); });
-    if (nextBtn) nextBtn.addEventListener('click', function () { page++; renderDetail(frows(false)); });
+    if (prevBtn) prevBtn.addEventListener('click', function () { page--; detExp = -1; renderDetail(frows(false)); });
+    if (nextBtn) nextBtn.addEventListener('click', function () { page++; detExp = -1; renderDetail(frows(false)); });
+    Array.prototype.forEach.call($('ud-detail-body').querySelectorAll('tr.ud-click'), function (tr) {
+      tr.addEventListener('click', function () {
+        var i = +tr.getAttribute('data-di');
+        detExp = (detExp === i) ? -1 : i;
+        renderDetail(frows(false));
+        if (detExp >= 0 && window.__USAGE_SERVE__) fillRawUsage(view[detExp][12]);
+      });
+    });
     Array.prototype.forEach.call($('ud-detail-head').querySelectorAll('.ud-sortable'), function (th) {
       th.addEventListener('click', function () {
         var k = +th.getAttribute('data-k');
         if (sortD.k === k) sortD.d = -sortD.d; else { sortD.k = k; sortD.d = -1; }
+        detExp = -1;
         renderDetail(frows(false));
       });
     });
@@ -1044,6 +1214,7 @@ function __usageBoot(D) {
     renderProviders(frows(true));
     renderModels(rows);
     renderTopSessions(rows);
+    renderHours(rows);
     renderHeatmap(rows);
     renderBlocks(rows);
     renderSessions(rows);
@@ -1056,8 +1227,8 @@ function __usageBoot(D) {
   fillSelect($('ud-f-pv'), '全部来源', PV.map(function (p, i) { return { v: i, label: pvLabel(i) + '（' + pvTag(i) + '）' }; }));
   fillSelect($('ud-f-model'), '全部模型', MD.map(function (m, i) { return { v: i, label: String(m) }; }));
   if (PRICE && Object.keys(PRICE).length) { $('ud-cost-wrap').hidden = false; }
-  $('ud-f-pv').addEventListener('change', function () { st.p = +this.value; page = 1; apply(); });
-  $('ud-f-model').addEventListener('change', function () { st.m = +this.value; page = 1; apply(); });
+  $('ud-f-pv').addEventListener('change', function () { st.p = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
+  $('ud-f-model').addEventListener('change', function () { st.m = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-stat').addEventListener('change', function () { detailStat = +this.value; page = 1; renderDetail(frows(false)); });
   $('ud-f-cost').addEventListener('change', function () { costOn = this.checked; renderProviders(frows(true)); renderSessions(frows(false)); renderInsights(frows(false)); });
   Array.prototype.forEach.call(document.querySelectorAll('#ud-f-range .ud-toggle'), function (b) {
@@ -1066,7 +1237,7 @@ function __usageBoot(D) {
       Array.prototype.forEach.call(document.querySelectorAll('#ud-f-range .ud-toggle'), function (x) {
         x.setAttribute('aria-pressed', String(x === b));
       });
-      page = 1; apply();
+      page = 1; sessExp = -1; detExp = -1; apply();
     });
   });
   Array.prototype.forEach.call(document.querySelectorAll('#ud-series-toggle .ud-toggle'), function (b) {
@@ -1114,6 +1285,24 @@ function __usageBoot(D) {
     }).observe($('ud-heatmap'));
   }
 
+  function renderQuota(j) {
+    var el = $('ud-quota');
+    if (!el) return;
+    el.hidden = false;
+    if (!j || !j.ok || !j.limits || !j.limits.length) {
+      el.innerHTML = '<div class="card" style="grid-column:1/-1"><span class="text-small text-muted">实时配额条不可用：' + esc((j && j.error) || '监控接口未返回配额') + '。桌面 OAuth 登录态不适用于该接口；如用 API Key 接入，可在 ~/.zcode/usage-quota-token.json 写入 {"token":"你的KEY","base":"https://open.bigmodel.cn"}。</span></div>';
+      return;
+    }
+    var names = { TOKENS_LIMIT: '5 小时池已用', TIME_LIMIT: 'MCP（月）已用', WEEKLY_LIMIT: '周配额已用', TOKENS_WEEKLY_LIMIT: '周配额已用' };
+    el.innerHTML = j.limits.map(function (l) {
+      var pct = Math.round(N(l.percentage));
+      var name = names[l.type] || l.type;
+      var reset = l.resetTime ? '<span class="text-small text-muted">' + esc(String(l.resetTime)) + ' 重置</span>' : '';
+      return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="text-small text-muted">' + esc(name) + '</span>' + reset + '</div><div class="viz-stat-value tabular-nums">' + pct + '%</div><div class="progress" style="margin-top:6px"><div class="progress-bar" style="width:' + pct + '%"></div></div></div>';
+    }).join('');
+  }
+  window.__usageRenderQuota = renderQuota;
+
   apply();
   window.__usageBootDone = true;
 }
@@ -1127,6 +1316,11 @@ if (window.__USAGE_DATA_URL__) {
 UD_TAIL
     } > "$out"
     echo "已生成用量界面：$out"
+    ;;
+  quota)
+    # 官方配额：5 小时/周/MCP 池用量百分比（凭据解析见 quota.mjs）
+    command -v node >/dev/null 2>&1 || { echo "quota 需要 node" >&2; exit 1; }
+    exec node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/quota.mjs"
     ;;
   serve)
     # 本地常驻面板：浏览器打开，自动轮询燃烧率（只监听 127.0.0.1，只读）
@@ -1157,6 +1351,7 @@ UD_TAIL
                            生成交互式用量界面（HTML 片段，供 ZCode 内嵌渲染）；
                            条数默认 3000，可用 ZCODE_USAGE_LIMIT 覆盖，范围 1-20000
   serve [端口]             本地常驻面板（默认端口 7741），浏览器打开、5s 轮询实时燃烧率
+  quota                    官方套餐配额（5小时/周/MCP 池用量百分比，凭据不可用时提示）
 环境变量：ZCODE_USAGE_DB 覆盖数据库路径；ZCODE_USAGE_PRICES 覆盖价格表路径；ZCODE_USAGE_LIMIT 覆盖默认内嵌条数；ZCODE_USAGE_NO_AUTOSYNC=1 关闭价格表每日自动同步。
 EOF
     ;;
