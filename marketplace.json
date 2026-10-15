@@ -4,7 +4,7 @@
     {
       "name": "usage-detail",
       "source": "./usage-detail",
-      "version": "0.12.0",
+      "version": "0.12.1",
       "description": "ZCode 本地用量明细：会话侧栏面板、逐条请求钻取、tok/s 速率、来源/项目/模型区分、每日趋势与每日明细钻取、零密钥配额条（客户端日志）、分时计价、热力图与图表悬停明细、缓存率全链路、官方牌价（CNY）折算成本与本地预算、面板内价格表管理、健康度卡片、月历热力图、官方配额可选接入（API Key）、本地常驻面板与导出（只读）。",
       "displayName": "Usage Detail",
       "displayName_i18n": {

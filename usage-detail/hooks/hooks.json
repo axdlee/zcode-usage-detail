@@ -13,6 +13,20 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/stop-notify.mjs"],
+            "async": true,
+            "timeoutMs": 20000,
+            "statusMessage": "usage-detail: 本轮用量通知…"
+          }
+        ]
+      }
     ]
   }
 }

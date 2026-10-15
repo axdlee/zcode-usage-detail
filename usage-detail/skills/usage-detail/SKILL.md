@@ -32,7 +32,7 @@ bash "<本技能目录>/../../scripts/usage.sh" <子命令> [参数]
 | `prices [show\|sync]` | 查看价格表 / 从 models.dev 同步官方价 | "更新一下官方价格" |
 | `live [秒]` | 终端实时燃烧率监控（默认 3s 刷新）。**只在用户明确要实时监控且在终端运行时使用，不要在会话里执行（会一直阻塞）** | "帮我盯着燃烧率" |
 | `serve [端口]` | 本地常驻面板（默认 7741，浏览器打开、5s 轮询实时燃烧率）。用户要"常驻看板/实时面板/浏览器打开"时使用：以后台方式启动（run_in_background），把 http://127.0.0.1:7741 以 Markdown 链接交付，并说明仅监听本机、停止方式 | "我要一个常驻的用量看板" |
-| `turnstats [on|off|status]` | 每轮对话末尾统计行开关（默认关闭；开启后每轮约增加 0.3k token 模型开销） | "打开/关闭每轮统计行" |
+| `turnstats [notify|inject|off|status]` | 每轮用量统计开关：notify=每轮结束弹系统通知（本地计算，零模型开销，推荐）；inject=对话内统计行（每轮约 0.3k token）；默认关闭 | "打开/关闭每轮统计" |
 | `doctor` | 环境自检（"统计不见了/数字不对吗"先跑这个）：数据库与表结构、价格表时效、配额数据源、node 依赖逐项排查 | "统计好像不对"、"怎么没数据了" |
 | `quota` | 查询 Coding Plan 套餐配额余量（智谱官方监控接口）。桌面 OAuth 不适用于该接口，用户以 API Key 接入且写了 ~/.zcode/usage-quota-token.json（`{"token":"KEY","base":"https://open.bigmodel.cn"}`）时才可用；未配置时如实说明并引导用 Usage Stats → Coding Plan | "套餐还剩多少额度" |
 | `export csv\|json [路径]` | 导出全部记录 | "导出成 CSV" |

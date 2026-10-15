@@ -27,13 +27,16 @@ try {
 // 开关：~/.zcode/usage-turnstats.json {"enabled":true}，缺省关闭。
 // 统计行机制必须经由模型（hook 无法直接向消息追加文本）：注入指令约 0.5k token/轮
 // + 模型一次工具调用（结果约 0.1k）+ 输出统计行约 0.05k，默认关闭由用户显式开启。
-function turnStatsEnabled() {
+// 模式语义：notify（系统通知，零上下文）不注入指令；inject（对话内统计行）才注入。
+// 兼容旧 {"enabled":true}（无 mode 字段）= inject。
+function turnStatsMode() {
   try {
     const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-turnstats.json'), 'utf8'));
-    return v && v.enabled === true;
-  } catch (e) { return false; }
+    if (!v || v.enabled !== true) return null;
+    return v.mode === 'notify' ? 'notify' : 'inject';
+  } catch (e) { return null; }
 }
-if (!turnStatsEnabled()) {
+if (turnStatsMode() !== 'inject') {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit' } }));
   process.exit(0);
 }
