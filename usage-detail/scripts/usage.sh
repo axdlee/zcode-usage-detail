@@ -70,7 +70,7 @@ case "$cmd" in
   errors [N]               最近 N 条失败请求（默认 10）
   dashboard <输出.html> [条数]
                            生成交互式用量界面（HTML 片段，供 ZCode 内嵌渲染）；
-                           条数默认 3000，可用 ZCODE_USAGE_LIMIT 覆盖，范围 1-20000
+                           条数默认全部（-1），可用 ZCODE_USAGE_LIMIT 覆盖，范围 1-20000
   serve [端口]             本地常驻面板（默认端口 7741），浏览器打开、5s 轮询实时燃烧率
   quota                    官方套餐配额（5小时/周/MCP 池用量百分比，凭据不可用时提示）
 环境变量：ZCODE_USAGE_DB 覆盖数据库路径；ZCODE_USAGE_PRICES 覆盖价格表路径；ZCODE_USAGE_LIMIT 覆盖默认内嵌条数；ZCODE_USAGE_NO_AUTOSYNC=1 关闭价格表每日自动同步。

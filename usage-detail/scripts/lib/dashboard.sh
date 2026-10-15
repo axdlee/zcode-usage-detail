@@ -19,6 +19,7 @@ cmd_dashboard() {
         'selection',$(sql_quote "$SESSION_MODE"))
         FROM (SELECT 1) LEFT JOIN session s ON s.id=$SESSION_SQL)"
     fi
+    [[ "$limit_arg" == "-1" ]] && limit_arg=''   # 显式 -1 = 全部
     limit=$(num_arg "${ZCODE_USAGE_LIMIT:--1}" "$limit_arg")
     # 默认 -1 = 全部历史；显式给定条数时校验范围
     [[ "$limit" == "-1" ]] || { is_num "$limit" && [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间或 -1（全部）：${limit}" >&2; exit 1; }; }
@@ -114,6 +115,12 @@ cmd_dashboard() {
 #usage-dashboard .ud-legend .form-check{display:inline-flex;align-items:center;gap:4px;margin:0;}
 #usage-dashboard .ud-click{cursor:pointer;}
 #usage-dashboard .ud-flink{cursor:pointer;text-decoration:underline dotted var(--muted-foreground);text-underline-offset:3px;}
+#usage-dashboard .ud-leg{display:flex;flex-direction:column;gap:5px;min-width:0;}
+#usage-dashboard .ud-leg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;line-height:1.4;}
+#usage-dashboard .ud-leg-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#usage-dashboard .ud-leg-row .n{flex:0 0 auto;color:var(--muted-foreground);font-variant-numeric:tabular-nums;}
+#usage-dashboard .ud-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start;}
+@media (max-width:900px){#usage-dashboard .ud-grid3{grid-template-columns:1fr;}}
 #usage-dashboard .ud-timeline{position:relative;margin:6px 0 0 4px;padding-left:14px;border-left:2px solid var(--border);}
 #usage-dashboard .ud-tl-item{position:relative;display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;}
 #usage-dashboard .ud-tl-dot{position:absolute;left:-20px;top:50%;transform:translateY(-50%);width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 3px var(--card);}
@@ -148,6 +155,7 @@ UD_HEAD
     <button type="button" class="ud-toggle" data-r="all" aria-pressed="true">全部</button>
   </div>
   <span id="ud-sess-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除会话筛选"></span>
+  <span id="ud-day-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除日期筛选"></span>
   <label class="form-check form-switch" id="ud-cost-wrap" hidden><input type="checkbox" class="form-check-input" id="ud-f-cost"><span class="form-check-label text-small">成本估算</span></label>
   <button type="button" class="btn" id="ud-price-sync" style="margin:0;padding:2px 10px;font-size:12px">同步价格</button>
   <span class="text-small text-muted" id="ud-meta"></span>
@@ -168,13 +176,21 @@ UD_HEAD
     <div class="card viz-stat"><div class="text-muted text-small">活跃会话</div><div class="viz-stat-value tabular-nums" id="ud-k4">–</div><div class="text-small text-muted" id="ud-k4c"></div></div>
   </div>
   <div class="ud-insights text-small" id="ud-insights" aria-live="polite"></div>
-  <h3>来源构成</h3>
-  <div id="ud-pv-stack"></div>
-  <div id="ud-pv-rows"></div>
-  <h3>模型分布</h3>
-  <div id="ud-model-bars"></div>
-  <h3>常用工具</h3>
-  <div class="card" style="padding:12px 14px"><div id="ud-tools-donut"></div></div>
+  <div class="ud-grid3">
+    <div>
+      <h3>来源构成</h3>
+      <div id="ud-pv-stack"></div>
+      <div id="ud-pv-rows"></div>
+    </div>
+    <div>
+      <h3>模型分布</h3>
+      <div id="ud-model-bars"></div>
+    </div>
+    <div>
+      <h3>常用工具</h3>
+      <div class="card" style="padding:12px 14px"><div id="ud-tools-donut"></div></div>
+    </div>
+  </div>
   <h3>最活跃会话（Top 5）</h3>
   <div id="ud-top-sessions"></div>
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -205,10 +221,11 @@ UD_HEAD
   </div>
   <div class="ud-legend" id="ud-pv-legend"></div>
   <div id="ud-trend-chart"></div>
+  <div id="ud-daily-wrap"></div>
 </div>
 <div id="ud-blocks" role="tabpanel" aria-labelledby="ud-tab-blocks" hidden>
-  <p class="text-small text-muted">相邻请求间隔满 5 小时即开启新窗口（同 ccusage 口径）。此为本地记录的近似口径，服务端套餐配额以 Usage Stats → Coding Plan 为准。</p>
   <div class="card" id="ud-block-now" style="margin:8px 0"></div>
+  <p class="text-small text-muted" style="margin:2px 0 10px">相邻请求间隔满 5 小时即开启新窗口（同 ccusage 口径）。此为本地记录的近似口径，服务端套餐配额以 Usage Stats → Coding Plan 为准。</p>
   <div class="table-responsive"><table class="table table-sm">
     <thead><tr><th>开始</th><th>最近活动</th><th class="text-end">时长</th><th class="text-end">请求数</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th></tr></thead>
     <tbody id="ud-blocks-body"></tbody>
@@ -318,14 +335,14 @@ function __usageBoot(D) {
       } else {
         paths += '<path d="M' + x0.toFixed(1) + ' ' + y0.toFixed(1) + ' A' + R1 + ' ' + R1 + ' 0 ' + large + ' 1 ' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' L' + xi.toFixed(1) + ' ' + yi.toFixed(1) + ' A' + R0 + ' ' + R0 + ' 0 ' + large + ' 0 ' + xj.toFixed(1) + ' ' + yj.toFixed(1) + ' Z" fill="' + color + '" fill-opacity="0.88"><title>' + esc(tipTxt) + '</title></path>';
       }
-      legend += '<div class="row"><span class="nm" title="' + esc(it.name) + '"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + color + ';margin-right:5px"></i>' + esc(it.name) + '</span><span class="n">' + Math.round(frac * 100) + '%</span></div>';
+      legend += '<div class="ud-leg-row"><span class="nm" title="' + esc(it.name) + '"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + color + ';margin-right:5px"></i>' + esc(it.name) + '</span><span class="n">' + Math.round(frac * 100) + '%</span></div>';
       a0 = a1;
     });
     return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">' +
       '<svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="甜甜圈图" style="flex:0 0 auto">' + paths +
       '<text x="60" y="57" text-anchor="middle" font-size="11" fill="var(--muted-foreground)" pointer-events="none">' + esc(centerLabel || '') + '</text>' +
       '<text x="60" y="72" text-anchor="middle" font-size="13" font-weight="600" fill="var(--foreground)" pointer-events="none">' + esc(fmt(total)) + '</text></svg>' +
-      '<div style="flex:1;min-width:150px">' + legend + '</div></div>';
+      '<div class="ud-leg" style="flex:1;min-width:150px">' + legend + '</div></div>';
   }
   function stHtml(s) { return '<span style="white-space:nowrap"><span style="color:' + SCOLOR[s] + '">●</span> ' + STAT[s] + '</span>'; }
 
@@ -374,7 +391,7 @@ function __usageBoot(D) {
   (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [] }; });
   (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
-  var st = { p: -1, m: -1, s: -1, rng: 'all', hidePv: {} };
+  var st = { p: -1, m: -1, s: -1, rng: 'all', day: null, hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
   var heatMode = 'day', heatLastW = -1, sessExp = -1, detExp = -1;
@@ -390,6 +407,7 @@ function __usageBoot(D) {
       if (!ignorePv && st.p >= 0 && r[3] !== st.p) return false;
       if (st.m >= 0 && r[2] !== st.m) return false;
       if (st.s >= 0 && r[0] !== st.s) return false;
+      if (st.day && dayKey(r[1]) !== st.day) return false;
       if (cut && r[1] < cut) return false;
       return true;
     });
@@ -487,9 +505,6 @@ function __usageBoot(D) {
       ['平均耗时', a.req ? (a.dur / a.req / 1000).toFixed(1) + ' s' : '–'],
       ['主会话 / 子代理', fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub)]
     ];
-    if (TOOLS.length) {
-      items.push(['最常用工具', esc(String(TOOLS[0][0])).replace(/^mcp__/, '') + ' ×' + fmtI(TOOLS[0][1])]);
-    }
     if (D.hours) {
       var pk = -1, pv2 = -1;
       for (var hh = 0; hh < 24; hh++) { var kk2 = (hh < 10 ? '0' : '') + hh; var c2 = N(D.hours[kk2]); if (c2 > pv2) { pv2 = c2; pk = hh; } }
@@ -1121,6 +1136,31 @@ function __usageBoot(D) {
     host.innerHTML = '<svg width="' + w + '" height="' + H + '" role="img" aria-label="每日用量堆叠柱状图（按来源）"><desc>按天按来源堆叠展示 ' + days.length + ' 天数据</desc>' + out + '</svg>';
     var total = agg(rows);
     $('ud-trend-readout').textContent = '当前指标合计：请求数 ' + fmtI(total.req) + ' · 输入 ' + fmt(total.inn) + ' · 生成 ' + fmt(total.out) + ' · 缓存读 ' + fmt(total.ca);
+    // 每日明细表：与图表同口径，点击某天切换全站日期筛选（再点一次取消）
+    var perDur = {};
+    rows.forEach(function (r) { var k = dayKey(r[1]); perDur[k] = (perDur[k] || 0) + N(r[7]); });
+    var dayRows = days.slice().reverse().map(function (k) {
+      var o = perDay[k] || {}, req = 0, inn = 0, out = 0, ca = 0;
+      for (var p in o) { var m = o[p]; req += m.req; inn += m.inn; out += m.out; ca += m.ca; }
+      var dur = perDur[k] || 0;
+      var hit = inn ? Math.round(ca / inn * 100) : 0;
+      var rate = dur > 0 ? fmtI(Math.round(out / (dur / 1000))) + ' tok/s' : '–';
+      var sel = st.day === k;
+      return '<tr class="ud-click" data-day="' + k + '" title="点击查看该日的请求明细"><td class="text-nowrap">' + k + (sel ? ' <span class="ud-tag">已选</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(req) + '</td><td class="text-end tabular-nums">' + fmt(inn) + '</td><td class="text-end tabular-nums">' + fmt(out) + '</td><td class="text-end tabular-nums">' + fmt(ca) + '</td><td class="text-end tabular-nums">' + hit + '%</td><td class="text-end text-nowrap tabular-nums">' + rate + '</td></tr>';
+    });
+    $('ud-daily-wrap').innerHTML = '<h3 style="margin-top:18px">每日明细</h3><div class="table-responsive" style="max-height:420px;overflow:auto"><table class="table table-sm"><thead><tr><th>日期</th><th class="text-end">请求</th><th class="text-end">输入</th><th class="text-end">生成</th><th class="text-end">缓存读</th><th class="text-end">缓存命中</th><th class="text-end">生成速率</th></tr></thead><tbody>' + dayRows.join('') + '</tbody></table></div>';
+    Array.prototype.forEach.call($('ud-daily-wrap').querySelectorAll('tr.ud-click'), function (tr) {
+      tr.addEventListener('click', function () {
+        var d = tr.getAttribute('data-day');
+        st.day = st.day === d ? null : d;
+        page = 1; sessExp = -1; detExp = -1;
+        if (st.day) {
+          var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-detail"]');
+          if (btn) btn.click();
+        }
+        apply();
+      });
+    });
   }
 
   function fillSelect(el, allLabel, items) {
@@ -1134,6 +1174,11 @@ function __usageBoot(D) {
     if (sf) {
       sf.hidden = st.s < 0;
       if (st.s >= 0) sf.textContent = '会话：' + (TL[st.s] ? TL[st.s].slice(0, 24) : '#' + st.s) + ' ✕';
+    }
+    var df = $('ud-day-filter');
+    if (df) {
+      df.hidden = !st.day;
+      if (st.day) df.textContent = '日期：' + st.day + ' ✕';
     }
     var rows = frows(false);
     if (D.session) { renderSession(rows); renderDetail(rows); return; }
@@ -1174,6 +1219,10 @@ function __usageBoot(D) {
   (function () {
     var sf = $('ud-sess-filter');
     if (sf) sf.addEventListener('click', function () { st.s = -1; page = 1; sessExp = -1; detExp = -1; apply(); });
+  })();
+  (function () {
+    var df = $('ud-day-filter');
+    if (df) df.addEventListener('click', function () { st.day = null; page = 1; sessExp = -1; detExp = -1; apply(); });
   })();
   $('ud-f-pv').addEventListener('change', function () { st.p = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-model').addEventListener('change', function () { st.m = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });

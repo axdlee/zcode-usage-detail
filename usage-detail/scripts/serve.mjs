@@ -84,8 +84,15 @@ const META_SQL = (pfText, limit, disk) => `
             LEFT JOIN M MI ON MI.v = R.model_id
             LEFT JOIN P PI ON PI.v = R.provider_id));`;
 
+// limit 归一：未指定/非正数 = 全部（LIMIT -1），正数钳到 1-20000
+function clampLimit(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return -1;
+  return Math.max(1, Math.min(20000, Math.round(n)));
+}
+
 function dataJSON(limit) {
-  limit = Math.max(1, Math.min(20000, Number(limit) || 3000));
+  limit = clampLimit(limit);
   // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
   const pp = pricePath();
   const pfText = pp ? fs.readFileSync(pp, 'utf8') : null;
@@ -160,7 +167,9 @@ function requestJSON(id) {
 
 function renderFragment(limit) {
   const out = path.join(os.tmpdir(), 'zcode-usage-serve-' + process.pid + '.html');
-  execFileSync('bash', [USAGE_SH, 'dashboard', out, String(limit)], { encoding: 'utf8', timeout: 120000 });
+  const args = [USAGE_SH, 'dashboard', out];
+  if (limit > 0) args.push(String(limit)); // -1（全部）走脚本默认，避免 num_arg 校验负数
+  execFileSync('bash', args, { encoding: 'utf8', timeout: 120000 });
   let html = fs.readFileSync(out, 'utf8');
   try { fs.unlinkSync(out); } catch (e) {}
   // 切换为服务模式：数据走 /api/data，由 boot 函数异步加载
@@ -201,7 +210,7 @@ const { SHELL_CSS, TAB_JS } = await import('./shell.mjs');
 
 let frag = { html: null, limit: 0, at: 0 };
 function getFragment(limit) {
-  limit = Math.max(1, Math.min(20000, Number(limit) || 3000));
+  limit = clampLimit(limit);
   if (!frag.html || frag.limit !== limit || Date.now() - frag.at > 30000) {
     frag = { html: renderFragment(limit), limit, at: Date.now() };
   }
@@ -223,13 +232,13 @@ const server = http.createServer(function (req, res) {
   const u = new URL(req.url, 'http://127.0.0.1');
   try {
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
-      const limit = u.searchParams.get('limit') || 3000;
+      const limit = u.searchParams.get('limit');
       const fragHtml = getFragment(limit);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZCode 用量面板</title><style>' + SHELL_CSS + '</style></head><body>' + fragHtml + '<script>' + TAB_JS + '</scr' + 'ipt></body></html>');
     } else if (req.method === 'GET' && u.pathname === '/api/data') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(dataJSON(u.searchParams.get('limit') || 3000));
+      res.end(dataJSON(u.searchParams.get('limit')));
     } else if (req.method === 'GET' && u.pathname === '/api/quota') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(quotaJSON()));
