@@ -24,6 +24,7 @@
 
 - **逐条明细**：每次模型请求一行——时间、会话、模型、来源、主会话/子代理、输入/缓存读/缓存写/生成/合计 token、耗时、首字延迟、状态、每行估算成本（开关）；分页浏览、点表头排序
 - **两级钻取**：点击会话行展开该会话详情——项目目录、起止、上下文压缩次数与压缩前水位、模型占比（按 token）、来源分布、使用工具 Top 6、**上下文水位曲线**；点击请求行展开该条完整信息——Token 构成（输入/缓存读/缓存写/生成）、时序（总耗时/首字占比），本地面板模式还能查看 provider 上报的**原始用量 JSON**
+- **当前会话**（感谢 [@Garfielk](https://github.com/Garfielk)）：`/usage-this` 查看当前会话汇总、按模型/来源分组和最近失败/取消请求；`/usage-this-ui` 使用精简面板，首屏展示请求/输入/生成/缓存读，模型分布和请求明细按需展开，支持直接查看失败/取消记录
 - **来源区分**：自动区分 `account:*` 官方套餐（如 GLM Coding Plan）与自定义/BYOK 接入，仪表盘按来源堆叠展示每日趋势
 - **交互式仪表盘**（`/usage-ui`）：总览 / 每日趋势 / 5 小时窗口 / 会话排行 / 请求明细 / 失败请求六个标签页；来源、模型、时间范围（近 7 天 / 30 天 / 全部）全局筛选即时生效；请求明细**分页浏览**（每页 50 条 + 页码翻页）；表格点击表头排序；界面自动适配 ZCode 明暗主题。默认内嵌最近 3000 条请求，`/usage-ui <条数>` 可调（1–20000）
 - **5 小时窗口**：按相邻请求间隔 ≥5h 切分用量窗口（同 ccusage 口径），当前窗口显示进行中进度与剩余时间
@@ -93,6 +94,10 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 |---|---|
 | `/usage-ui` | 生成交互式仪表盘，内嵌渲染在会话中 |
 | `/usage-ui 8000` | 同上，内嵌最近 8000 条 |
+| `/usage-this` | 推断当前会话，显示身份、用量汇总、模型/来源与最近失败/取消请求 |
+| `/usage-this-ui` | 当前会话的精简面板：四项用量统计、折叠模型分布与请求明细 |
+| `/usage-this --session sess_xxx` | 显式指定会话（UI 命令同样支持） |
+| `/usage-this --directory /绝对/项目路径` | 选择指定项目目录内最近请求的会话（UI 命令同样支持） |
 | `/usage` | 文本总览（累计 + 今日） |
 | `/usage blocks` | 5 小时窗口用量（含进行中的窗口） |
 | `/usage recent 50` | 最近 50 条逐条明细 |
@@ -108,6 +113,24 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 | `/usage sessions 10` | 会话用量排行 Top 10 |
 | `/usage errors` | 最近的失败/取消请求 |
 | “看看我哪个会话最烧 token” | 自然语言同样可以，会自动路由到对应查询 |
+
+### 当前会话定位
+
+ZCode 命令环境尚未提供可靠的当前会话 ID，因此默认使用本地数据库中**最近一次模型请求的 `session_id`**，一次执行中固定该 ID。多窗口并行请求时可能定位到另一会话，请核对输出中的会话标题、ID 和最近请求时间；有歧义时用 `--session ID` 指定，或用 `--directory "项目绝对路径"` 限制候选范围（两者互斥）。目录匹配为精确匹配，可使用报告中的项目目录。
+
+只统计所选 `session_id` 的请求，不递归合并其他 ID 的子会话。文本版统计全部状态，生成 token = 输出 + 思考；失败和取消单独计数，进行中的请求归入其他状态。正在进行的请求可能尚未写入完整 token，重新运行可刷新。
+
+会话 UI 首屏展示标题、最近请求和四项用量；会话 ID、项目目录与创建时间可展开查看。模型分布和请求明细默认折叠，有失败/取消请求时可直接跳到对应筛选。会话排行、热力图、每日趋势和 5 小时窗口仍在全量 `/usage-ui` 中查看。
+
+UI 在会话过滤后默认加载最近 3000 条，可用 `ZCODE_USAGE_LIMIT` 调整为 1-20000；超过时标注覆盖范围，卡片和明细均只统计已加载记录。结果是生成时的本地快照，不表示服务端套餐余量。
+
+直接运行脚本：
+
+```bash
+bash usage-detail/scripts/usage.sh this
+bash usage-detail/scripts/usage.sh this --session sess_xxx
+bash usage-detail/scripts/usage.sh dashboard-this /tmp/usage-this.html --directory "/path/to/project"
+```
 
 ### 成本估算（默认官方价，可自定义）
 
@@ -156,6 +179,15 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 - 本地库结构可能随 ZCode 版本演进变化（当前在 0.16.x 验证通过）
 - 界面基于 ZCode Desktop 的 Gen UI 内嵌渲染，需在桌面端使用
 - 5 小时窗口与成本均为**本地近似口径**，服务端套餐配额以 ZCode 的 Usage Stats → Coding Plan 为准
+
+## 开发验证
+
+运行会话过滤、聚合、空记录、参数转义及仪表盘回归测试（开发环境需要 Python 3；插件运行仍仅需 bash + sqlite3）：
+
+```bash
+python3 -m unittest discover -s tests -v
+bash -n usage-detail/scripts/usage.sh
+```
 
 ## 致谢
 

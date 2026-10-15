@@ -42,8 +42,91 @@ num_arg() {
 # 供应商标签：官方账号 / 自定义接入
 PV_LABEL="CASE WHEN provider_id LIKE 'account:%' THEN '官方·'||substr(provider_id,9) ELSE '自定义·'||provider_id END"
 
+# SQL 字符串字面量；会话 ID、目录、价格表路径都可能含单引号。
+sql_quote() {
+  local value="$1"
+  # Bash 3.2 的替换表达式置于双引号内会保留多余反斜杠。
+  value=${value//\'/\'\'}
+  printf "'%s'" "$value"
+}
+
+# 定位一次后固定 ID，后续查询不会因其他窗口的新请求切换会话。
+resolve_session() {
+  local requested='' directory='' directory_sql=''
+  SESSION_MODE='最近请求推断（多窗口时请核对）'
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --session|--directory)
+        [[ $# -ge 2 && -n "$2" ]] || { echo "$1 需要非空参数" >&2; exit 1; }
+        [[ -z "$requested$directory" ]] || { echo "--session 与 --directory 只能指定一个且不能重复" >&2; exit 1; }
+        if [[ "$1" == --session ]]; then requested="$2"; else directory="$2"; fi
+        shift 2
+        ;;
+      *) echo "未知会话参数：${1}（可用 --session ID 或 --directory DIR）" >&2; exit 1 ;;
+    esac
+  done
+  if [[ -n "$requested" ]]; then
+    SESSION_ID="$requested"
+    SESSION_MODE='显式指定会话'
+    SESSION_SQL=$(sql_quote "$SESSION_ID")
+    [[ "$(qr "SELECT EXISTS(SELECT 1 FROM session WHERE id=$SESSION_SQL) OR EXISTS(SELECT 1 FROM model_usage WHERE session_id=$SESSION_SQL);")" == 1 ]] || {
+      echo "未找到指定会话：$SESSION_ID" >&2; exit 1;
+    }
+  else
+    if [[ -n "$directory" ]]; then
+      directory_sql="AND session_id IN (SELECT id FROM session WHERE directory=$(sql_quote "$directory"))"
+      SESSION_MODE='指定目录内最近请求推断（多窗口时请核对）'
+    fi
+    SESSION_ID=$(qr "SELECT session_id FROM model_usage WHERE session_id IS NOT NULL AND session_id<>'' $directory_sql ORDER BY started_at DESC, id DESC LIMIT 1;")
+    [[ -n "$SESSION_ID" ]] || { echo "未找到可用于定位会话的模型请求${directory:+（目录：${directory}）}；可用 --session ID 指定会话" >&2; exit 1; }
+    SESSION_SQL=$(sql_quote "$SESSION_ID")
+  fi
+}
+
+session_info() {
+  q "SELECT $SESSION_SQL AS 会话ID,
+            coalesce(nullif(s.title,''),'（无标题或会话已删除）') AS 会话标题,
+            coalesce(s.directory,'-') AS 项目目录,
+            datetime(s.time_created/1000,'unixepoch','localtime') AS 创建时间,
+            (SELECT datetime(max(started_at)/1000,'unixepoch','localtime') FROM model_usage WHERE session_id=$SESSION_SQL) AS 最近请求
+     FROM (SELECT 1) LEFT JOIN session s ON s.id=$SESSION_SQL;"
+  echo "定位方式：${SESSION_MODE}；仅统计该 session_id 的记录。"
+}
+
 cmd="${1:-summary}"
 case "$cmd" in
+  this)
+    resolve_session "${@:2}"
+    session_info
+    echo
+    echo "—— 会话汇总（全部状态；输入含缓存读，生成=输出+思考）——"
+    q "SELECT count(*) AS 总请求数,
+              coalesce(sum(status='completed'),0) AS 完成数,
+              coalesce(sum(status='error'),0) AS 失败数,
+              coalesce(sum(status='cancelled'),0) AS 取消数,
+              coalesce(sum(status NOT IN ('completed','error','cancelled')),0) AS 其他状态数,
+              coalesce(sum(input_tokens),0) AS 输入token,
+              coalesce(sum(output_tokens+reasoning_tokens),0) AS 生成token,
+              coalesce(sum(cache_read_input_tokens),0) AS 缓存读token
+       FROM model_usage WHERE session_id=$SESSION_SQL;"
+    echo
+    echo "—— 按模型与来源（全部状态）——"
+    q "SELECT model_id AS 模型, $PV_LABEL AS 来源,
+              count(*) AS 请求数,
+              sum(input_tokens) AS 输入token,
+              sum(output_tokens+reasoning_tokens) AS 生成token,
+              sum(cache_read_input_tokens) AS 缓存读token
+       FROM model_usage WHERE session_id=$SESSION_SQL
+       GROUP BY model_id, provider_id ORDER BY sum(input_tokens+output_tokens+reasoning_tokens) DESC;"
+    echo
+    echo "—— 最近失败/取消请求（最多 10 条）——"
+    q "SELECT datetime(started_at/1000,'unixepoch','localtime') AS 时间,
+              model_id AS 模型, $PV_LABEL AS 来源, status AS 状态,
+              coalesce(error_code,'-') AS 错误码,
+              substr(coalesce(error_message,'-'),1,60) AS 错误信息
+       FROM model_usage WHERE session_id=$SESSION_SQL AND status IN ('error','cancelled')
+       ORDER BY started_at DESC, id DESC LIMIT 10;"
+    ;;
   summary)
     q "SELECT count(*) AS 总请求数,
               datetime(min(started_at)/1000,'unixepoch','localtime') AS 首次请求,
@@ -372,13 +455,27 @@ NODE
        FROM model_usage WHERE status<>'completed'
        ORDER BY started_at DESC LIMIT $n;"
     ;;
-  dashboard)
+  dashboard|dashboard-this)
     # 生成交互式用量界面（HTML 片段），输出路径必须由调用方指定。
-    # 数据以原始请求行内嵌（默认最近 3000 条，可用第三参数或 ZCODE_USAGE_LIMIT 调整），筛选/聚合全部在前端完成。
+    # 默认最近 3000 条；全量 dashboard 可用第三参数调整，会话版用 ZCODE_USAGE_LIMIT 调整。
     out="${2:-}"
-    [[ -n "$out" ]] || { echo "用法：usage.sh dashboard <输出.html> [条数]" >&2; exit 1; }
-    limit=$(num_arg "${ZCODE_USAGE_LIMIT:-3000}" "${3:-}")
-    [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间：$limit（过大可能超出会话内嵌渲染的体积限制，更多历史请用 export json）" >&2; exit 1; }
+    [[ -n "$out" ]] || { echo "用法：usage.sh $cmd <输出.html> [条数]" >&2; exit 1; }
+    scope=''
+    session_meta='null'
+    limit_arg="${3:-}"
+    if [[ "$cmd" == dashboard-this ]]; then
+      limit_arg=''
+      resolve_session "${@:3}"
+      scope="WHERE session_id=$SESSION_SQL"
+      session_meta="(SELECT json_object('id',$SESSION_SQL,
+        'title',coalesce(nullif(s.title,''),'（无标题或会话已删除）'),
+        'directory',s.directory,'created',s.time_created,
+        'latest',(SELECT max(started_at) FROM model_usage $scope),
+        'selection',$(sql_quote "$SESSION_MODE"))
+        FROM (SELECT 1) LEFT JOIN session s ON s.id=$SESSION_SQL)"
+    fi
+    limit=$(num_arg "${ZCODE_USAGE_LIMIT:-3000}" "$limit_arg")
+    [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间：${limit}（过大可能超出会话内嵌渲染的体积限制，更多历史请用 export json）" >&2; exit 1; }
     # 价格表每日自动同步一次（需要 node + curl；ZCODE_USAGE_NO_AUTOSYNC=1 关闭）
     if [[ -z "${ZCODE_USAGE_NO_AUTOSYNC:-}" ]] && command -v node >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
       upf="${ZCODE_USAGE_PRICES:-$HOME/.zcode/usage-prices.json}"
@@ -392,7 +489,7 @@ NODE
     fi
     pf=$(price_file)
     if [[ -n "$pf" ]]; then
-      PJ_SQL="(SELECT CAST(readfile('$pf') AS text) AS pj)"
+      PJ_SQL="(SELECT CAST(readfile($(sql_quote "$pf")) AS text) AS pj)"
     else
       PJ_SQL="(SELECT NULL AS pj)"
     fi
@@ -401,19 +498,21 @@ NODE
     artifacts_mb=$(du -sm "$HOME/.zcode/cli/artifacts" 2>/dev/null | cut -f1); artifacts_mb=${artifacts_mb:-0}
     db_mb=$(du -m "$DB" 2>/dev/null | cut -f1); db_mb=${db_mb:-0}
     META=$(qr "
-      WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
-           M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
-           S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM model_usage)),
+      WITH U AS (SELECT * FROM model_usage $scope),
+           P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM U)),
+           M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM U)),
+           S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM U)),
            PJ AS $PJ_SQL,
-           R AS (SELECT * FROM model_usage ORDER BY started_at DESC LIMIT $limit)
+           R AS (SELECT * FROM U ORDER BY started_at DESC, id DESC LIMIT $limit)
       SELECT json_object(
+        'session',$session_meta,
         'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
         'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
         'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
-        'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
+        'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage $scope GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
         'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
-        'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM model_usage),
-        'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM model_usage GROUP BY hr)),
+        'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM U),
+        'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM U GROUP BY hr)),
         'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre)),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
         'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
@@ -422,12 +521,12 @@ NODE
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
                    'models', COALESCE(CASE WHEN json_type(pj,'$.models')='object'
                      THEN (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj,'$.models') je
-                           WHERE je.key IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
+                           WHERE lower(je.key) IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
                      ELSE (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj) je
-                           WHERE je.key IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
+                           WHERE lower(je.key) IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
                    END, json('{}')))
             END FROM PJ),
-        'total',(SELECT count(*) FROM model_usage),
+        'total',(SELECT count(*) FROM U),
         'covered',(SELECT count(*) FROM R),
         'gen',(SELECT datetime('now','localtime')),
         'rows',(SELECT json_group_array(json_array(
@@ -476,6 +575,11 @@ NODE
 #usage-dashboard .ud-sec{margin-top:12px;}
 #usage-dashboard pre.ud-raw{font-size:11px;background:var(--muted);border-radius:8px;padding:8px 10px;overflow-x:auto;white-space:pre;}
 </style>
+UD_HEAD
+      if [[ "$cmd" == dashboard-this ]]; then
+        cat "$(dirname "${BASH_SOURCE[0]}")/../assets/session-dashboard.html"
+      else
+        cat <<'UD_ALL_HEAD'
 <div class="viz-controls" role="group" aria-label="用量筛选">
   <label class="form-label text-small text-muted" for="ud-f-pv">来源</label>
   <select class="form-select" id="ud-f-pv"></select>
@@ -577,10 +681,14 @@ NODE
     <tbody id="ud-errors-body"></tbody>
   </table></div>
 </div>
+UD_ALL_HEAD
+      fi
+      cat <<'UD_DATA_HEAD'
 <script>
 const DATA =
-UD_HEAD
-      printf '%s\n' "$META"
+UD_DATA_HEAD
+      # JSON 位于 script 中：转义 < 防止会话标题中的 </script> 提前闭合标签。
+      printf '%s\n' "${META//</\\u003c}"
       cat <<'UD_TAIL'
 ;
 function __usageBoot(D) {
@@ -600,6 +708,15 @@ function __usageBoot(D) {
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
   function dayKey(ts) { var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function fullTs(ts) { var d = new Date(ts); return dayKey(ts) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+
+  if (D.session) {
+    $('ud-session-title').textContent = '会话用量 · ' + D.session.title;
+    $('ud-session-last').textContent = '最近请求：' + (D.session.latest == null ? '暂无请求' : fullTs(D.session.latest)) + ' · 会话信息';
+    $('ud-session-selection').textContent = '定位：' + D.session.selection;
+    $('ud-session-info').textContent = '会话 ID：' + D.session.id + '\n项目目录：' + (D.session.directory || '–')
+      + '\n创建：' + (D.session.created == null ? '–' : fullTs(D.session.created))
+      + '\n仅统计该 session_id 的记录。';
+  }
 
   var STAT = ['完成', '失败', '已取消', '进行中'];
   var SCOLOR = ['var(--green)', 'var(--red)', 'var(--yellow)', 'var(--blue)'];
@@ -653,7 +770,7 @@ function __usageBoot(D) {
 
   var st = { p: -1, m: -1, rng: 'all', hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
-  var page = 1, pageSize = 50, detailStat = -1, curMetric = 'req', costOn = false;
+  var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
   var heatMode = 'day', heatLastW = -1, sessExp = -1, detExp = -1;
 
   function cutOf() { if (st.rng === 'all') return 0; return maxTs - (st.rng === '7' ? 7 : 30) * 864e5; }
@@ -681,6 +798,39 @@ function __usageBoot(D) {
     var s = {};
     rows.forEach(function (r) { s[dayKey(r[1])] = 1; });
     return Object.keys(s).sort();
+  }
+
+  function renderSession(rows) {
+    var a = agg(rows), states = [0, 0, 0, 0];
+    rows.forEach(function (r) { states[r[8]]++; });
+    $('ud-k1').textContent = fmtI(a.req);
+    $('ud-k1c').textContent = '完成 ' + fmtI(states[0]) + (states[3] ? ' · 进行中 ' + fmtI(states[3]) : '');
+    $('ud-k2').textContent = fmt(a.inn);
+    $('ud-k3').textContent = fmt(a.out);
+    $('ud-k4').textContent = fmt(a.ca);
+    $('ud-k4c').textContent = '缓存命中率 ' + (a.inn ? Math.round(a.ca / a.inn * 100) + '%' : '–');
+    $('ud-meta').textContent = '本地快照 ' + (D.gen || '') + ' · 已加载 ' + fmtI(D.covered) + ' / ' + fmtI(D.total) + ' 条'
+      + (D.covered < D.total ? '，统计仅含已加载记录' : '');
+    var failures = states[1] + states[2];
+    $('ud-failures').hidden = failures === 0;
+    $('ud-failures').textContent = '查看失败 / 取消（' + fmtI(failures) + '）';
+    $('ud-request-count').textContent = fmtI(rows.length) + ' 条';
+
+    var groups = {}, models = {};
+    rows.forEach(function (r) {
+      var key = r[2] + ':' + r[3];
+      var g = groups[key] || (groups[key] = { m: r[2], p: r[3], req: 0, inn: 0, out: 0, ca: 0 });
+      g.req++; g.inn += N(r[4]); g.out += N(r[5]); g.ca += N(r[6]);
+      models[r[2]] = true;
+    });
+    $('ud-model-count').textContent = Object.keys(models).length + ' 个模型';
+    var list = Object.keys(groups).map(function (key) { return groups[key]; })
+      .sort(function (a, b) { return (b.inn + b.out) - (a.inn + a.out); });
+    $('ud-session-models').innerHTML = list.length ? list.map(function (g) {
+      return '<tr><td>' + esc(MD[g.m]) + '</td><td>' + pvLabel(g.p) + '</td><td class="text-end tabular-nums">' + fmtI(g.req)
+        + '</td><td class="text-end tabular-nums">' + fmtI(g.inn) + '</td><td class="text-end tabular-nums">' + fmtI(g.out)
+        + '</td><td class="text-end tabular-nums">' + fmtI(g.ca) + '</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="text-muted">该会话暂无模型请求</td></tr>';
   }
 
   function renderKpis(rows) {
@@ -1064,7 +1214,7 @@ function __usageBoot(D) {
       12: function (r) { return N(r[4]) + N(r[5]); },
       13: function (r) { return rowCost(r) || 0; }
     };
-    var list = rows.filter(function (r) { return detailStat < 0 || r[8] === detailStat; })
+    var list = rows.filter(function (r) { return detailStat === -2 ? (r[8] === 1 || r[8] === 2) : (detailStat < 0 || r[8] === detailStat); })
       .sort(function (a, b) { return (ACC[sortD.k](a) - ACC[sortD.k](b)) * sortD.d; });
     var cols = [
       { h: '时间', k: 0 }, { h: '会话', k: null }, { h: '模型', k: null }, { h: '来源', k: null }, { h: '类型', k: null },
@@ -1073,6 +1223,7 @@ function __usageBoot(D) {
       { h: '状态', k: null },
       costOn ? { h: '成本', k: 13, end: 1 } : null
     ].filter(Boolean);
+    if (D.session) { cols = cols.filter(function (c) { return c.h !== '会话' && c.h !== '类型'; }); }
     var span = cols.length;
     $('ud-detail-head').innerHTML = '<tr>' + cols.map(function (c) {
       var arrow = sortD.k === c.k ? (sortD.d < 0 ? ' ↓' : ' ↑') : '';
@@ -1083,37 +1234,61 @@ function __usageBoot(D) {
     if (page < 1) page = 1;
     var view = list.slice((page - 1) * pageSize, page * pageSize);
     var body = '';
-    view.forEach(function (r, i) {
-      body += '<tr class="ud-click" data-di="' + i + '"><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
-        '<td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
-        '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
-        '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
-        '<td class="text-end tabular-nums">' + fmtI(r[6]) + '</td>' +
-        '<td class="text-end tabular-nums">' + fmtI(r[10]) + '</td>' +
-        '<td class="text-end tabular-nums">' + fmtI(r[5]) + '</td>' +
-        '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
-        '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
-        '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
-        '<td>' + stHtml(r[8]) + '</td>' +
-        (costOn ? '<td class="text-end tabular-nums">' + (rowCost(r) == null ? '–' : fmtCost(rowCost(r))) + '</td>' : '') +
-        '</tr>';
-      if (detExp === i) body += '<tr class="ud-exp"><td colspan="' + span + '">' + requestDetailHTML(r) + '</td></tr>';
-    });
-    $('ud-detail-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
-    $('ud-pager').innerHTML = '<button type="button" class="btn" id="ud-prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
-      '<span class="text-small text-muted tabular-nums">第 ' + page + ' / ' + totalPages + ' 页 · 共 ' + fmtI(list.length) + ' 条</span>' +
-      '<button type="button" class="btn" id="ud-next"' + (page >= totalPages ? ' disabled' : '') + '>下一页</button>';
-    var prevBtn = $('ud-prev'), nextBtn = $('ud-next');
-    if (prevBtn) prevBtn.addEventListener('click', function () { page--; detExp = -1; renderDetail(frows(false)); });
-    if (nextBtn) nextBtn.addEventListener('click', function () { page++; detExp = -1; renderDetail(frows(false)); });
-    Array.prototype.forEach.call($('ud-detail-body').querySelectorAll('tr.ud-click'), function (tr) {
-      tr.addEventListener('click', function () {
-        var i = +tr.getAttribute('data-di');
-        detExp = (detExp === i) ? -1 : i;
-        renderDetail(frows(false));
-        if (detExp >= 0 && window.__USAGE_SERVE__) fillRawUsage(view[detExp][12]);
+    if (D.session) {
+      view = list.slice(0, sessShown);
+      view.forEach(function (r) {
+        body += '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
+          '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[6]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[10]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[5]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
+          '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
+          '<td>' + stHtml(r[8]) + '</td></tr>';
       });
-    });
+    } else {
+      view.forEach(function (r, i) {
+        body += '<tr class="ud-click" data-di="' + i + '"><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
+          '<td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
+          '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[6]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[10]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[5]) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
+          '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
+          '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
+          '<td>' + stHtml(r[8]) + '</td>' +
+          (costOn ? '<td class="text-end tabular-nums">' + (rowCost(r) == null ? '–' : fmtCost(rowCost(r))) + '</td>' : '') +
+          '</tr>';
+        if (detExp === i) body += '<tr class="ud-exp"><td colspan="' + span + '">' + requestDetailHTML(r) + '</td></tr>';
+      });
+    }
+    $('ud-detail-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
+    if (D.session) {
+      var more = $('ud-more');
+      if (more) {
+        if (sessShown >= list.length) { more.hidden = true; }
+        else { more.hidden = false; more.textContent = '加载更多（已显示 ' + sessShown + ' / ' + list.length + '）'; }
+      }
+    } else {
+      $('ud-pager').innerHTML = '<button type="button" class="btn" id="ud-prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
+        '<span class="text-small text-muted tabular-nums">第 ' + page + ' / ' + totalPages + ' 页 · 共 ' + fmtI(list.length) + ' 条</span>' +
+        '<button type="button" class="btn" id="ud-next"' + (page >= totalPages ? ' disabled' : '') + '>下一页</button>';
+      var prevBtn = $('ud-prev'), nextBtn = $('ud-next');
+      if (prevBtn) prevBtn.addEventListener('click', function () { page--; detExp = -1; renderDetail(frows(false)); });
+      if (nextBtn) nextBtn.addEventListener('click', function () { page++; detExp = -1; renderDetail(frows(false)); });
+      Array.prototype.forEach.call($('ud-detail-body').querySelectorAll('tr.ud-click'), function (tr) {
+        tr.addEventListener('click', function () {
+          var i = +tr.getAttribute('data-di');
+          detExp = (detExp === i) ? -1 : i;
+          renderDetail(frows(false));
+          if (detExp >= 0 && window.__USAGE_SERVE__) fillRawUsage(view[detExp][12]);
+        });
+      });
+    }
     Array.prototype.forEach.call($('ud-detail-head').querySelectorAll('.ud-sortable'), function (th) {
       th.addEventListener('click', function () {
         var k = +th.getAttribute('data-k');
@@ -1125,7 +1300,7 @@ function __usageBoot(D) {
   }
 
   function renderErrors(rows) {
-    var list = rows.filter(function (r) { return r[8] !== 0; }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 30);
+    var list = rows.filter(function (r) { return r[8] === 1 || r[8] === 2; }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 30);
     $('ud-errors-body').innerHTML = list.length ? list.map(function (r) {
       return '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td><td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td><td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td><td>' + stHtml(r[8]) + '</td></tr>';
     }).join('') : '<tr><td colspan="6" class="text-muted">当前筛选下没有失败或取消的请求</td></tr>';
@@ -1209,6 +1384,7 @@ function __usageBoot(D) {
 
   function apply() {
     var rows = frows(false);
+    if (D.session) { renderSession(rows); renderDetail(rows); return; }
     renderKpis(rows);
     renderInsights(rows);
     renderProviders(frows(true));
@@ -1223,7 +1399,22 @@ function __usageBoot(D) {
     drawTrend();
   }
 
-  // 筛选控件
+  // 会话视图只初始化明细交互；全量分析与筛选控件留给 dashboard。
+  if (D.session) {
+    $('ud-f-stat').addEventListener('change', function () { detailStat = +this.value; sessShown = 50; renderDetail(R); });
+    $('ud-more').addEventListener('click', function () { sessShown += 50; renderDetail(R); });
+    $('ud-failures').addEventListener('click', function () {
+      detailStat = -2; sessShown = 50;
+      $('ud-request-section').open = true;
+      $('ud-f-stat').value = '-2';
+      renderDetail(R);
+      $('ud-f-stat').focus();
+    });
+    apply();
+    return;
+  }
+
+  // 全量仪表盘筛选控件
   fillSelect($('ud-f-pv'), '全部来源', PV.map(function (p, i) { return { v: i, label: pvLabel(i) + '（' + pvTag(i) + '）' }; }));
   fillSelect($('ud-f-model'), '全部模型', MD.map(function (m, i) { return { v: i, label: String(m) }; }));
   if (PRICE && Object.keys(PRICE).length) { $('ud-cost-wrap').hidden = false; }
@@ -1331,6 +1522,10 @@ UD_TAIL
   help|*)
     cat <<'EOF'
 用法：usage.sh [子命令] [参数]
+  this [--session ID | --directory DIR]
+                           当前会话汇总、模型/来源与最近失败/取消请求（默认按最近请求推断）
+  dashboard-this <输出.html> [--session ID | --directory DIR]
+                           当前会话仪表盘（会话过滤后再取最近 3000 条）
   summary                  总览：累计 + 今日（默认）
   providers                按来源（官方套餐 / 自定义接入）汇总
   blocks                   5 小时窗口用量（末尾窗口若在 5h 内即进行中）

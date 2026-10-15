@@ -52,9 +52,9 @@ const META_SQL = (pf, limit, disk) => `
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
                    'models', COALESCE(CASE WHEN json_type(pj,'$.models')='object'
                      THEN (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj,'$.models') je
-                           WHERE je.key IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
+                           WHERE lower(je.key) IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
                      ELSE (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj) je
-                           WHERE je.key IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
+                           WHERE lower(je.key) IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
                    END, json('{}')))
             END FROM PJ),
     'total',(SELECT count(*) FROM model_usage),
