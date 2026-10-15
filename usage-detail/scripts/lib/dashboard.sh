@@ -83,7 +83,7 @@ cmd_dashboard() {
                   R.duration_ms,
                   CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
                   CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-                  R.cache_creation_input_tokens, R.time_to_first_token_ms))
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
                 FROM R
                 LEFT JOIN S SI ON SI.v = R.session_id
                 LEFT JOIN M MI ON MI.v = R.model_id
@@ -143,6 +143,10 @@ cmd_dashboard() {
 #usage-dashboard .ud-kv-v{font-size:13px;font-weight:500;}
 #usage-dashboard .ud-sec{margin-top:12px;}
 #usage-dashboard pre.ud-raw{font-size:11px;background:var(--muted);border-radius:8px;padding:8px 10px;overflow-x:auto;white-space:pre;}
+#usage-dashboard .table-responsive{overflow-x:auto;}
+#usage-dashboard #ud-detail table{min-width:1080px;}
+#usage-dashboard #ud-sessions table{min-width:900px;}
+#usage-dashboard #ud-errors table{min-width:760px;}
 #usage-dashboard .ud-turn{display:flex;align-items:baseline;gap:8px;padding:7px 12px;margin:0 0 10px;border-radius:10px;background:var(--muted);font-size:12.5px;line-height:1.6;}
 #usage-dashboard .ud-turn[hidden]{display:none;}
 #usage-dashboard .ud-turn-t{color:var(--muted-foreground);white-space:nowrap;font-size:11px;}
@@ -185,6 +189,7 @@ UD_HEAD
   <button class="nav-link active" id="ud-tab-overview" role="tab" aria-controls="ud-overview" aria-selected="true" type="button">总览</button>
   <button class="nav-link" id="ud-tab-trend" role="tab" aria-controls="ud-trend" aria-selected="false" type="button">每日趋势</button>
   <button class="nav-link" id="ud-tab-sessions" role="tab" aria-controls="ud-sessions" aria-selected="false" type="button">会话排行</button>
+  <button class="nav-link" id="ud-tab-models" role="tab" aria-controls="ud-models" aria-selected="false" type="button">模型效率</button>
   <button class="nav-link" id="ud-tab-detail" role="tab" aria-controls="ud-detail" aria-selected="false" type="button">请求明细</button>
   <button class="nav-link" id="ud-tab-errors" role="tab" aria-controls="ud-errors" aria-selected="false" type="button">失败请求</button>
 </div>
@@ -251,6 +256,13 @@ UD_HEAD
   <div class="table-responsive"><table class="table table-sm">
     <thead id="ud-sessions-head"></thead>
     <tbody id="ud-sessions-body"></tbody>
+  </table></div>
+</div>
+<div id="ud-models" role="tabpanel" aria-labelledby="ud-tab-models" hidden>
+  <p class="text-small text-muted">按模型对比效率与成本：平均输出速率（生成 token / 生成耗时）、平均首字延迟、失败率、每 1k token 折算成本。随上方全局筛选联动；点击模型名只看该模型。</p>
+  <div class="table-responsive"><table class="table table-sm">
+    <thead id="ud-models-head"></thead>
+    <tbody id="ud-models-body"></tbody>
   </table></div>
 </div>
 <div id="ud-detail" role="tabpanel" aria-labelledby="ud-tab-detail" hidden>
@@ -532,6 +544,12 @@ function __usageBoot(D) {
       var aTok = a.inn + a.out;
       items.push(['折算成本（API 牌价）', fmtCost(totalCost) + (unpricedTok > 0 && aTok ? ' · 未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : '')]);
     }
+    // 浪费取证：失败/取消请求白耗的 token（本地口径，CLI 详单见 usage.sh waste）
+    (function () {
+      var wReq = 0, wTok = 0;
+      rows.forEach(function (r) { if (r[8] === 1 || r[8] === 2) { wReq++; wTok += N(r[4]) + N(r[5]); } });
+      if (wReq > 0) items.push(['浪费取证', fmtI(wReq) + ' 次失败/取消 · 白耗 ' + fmt(wTok) + ' token']);
+    })();
     // 本地预算：日 / 30 天折算金额进度（价格/预算对话框里设置）
     if (st.budget && (N(st.budget.daily) > 0 || N(st.budget.monthly) > 0)) {
       var nowD = new Date();
@@ -616,14 +634,20 @@ function __usageBoot(D) {
   function sessAgg(rows) {
     var per = {};
     rows.forEach(function (r) {
-      var o = per[r[0]] || (per[r[0]] = { tl: TL[r[0]] || '', req: 0, inn: 0, out: 0, ca: 0, sub: 0, last: 0, cost: 0, hasCost: false });
+      var o = per[r[0]] || (per[r[0]] = { tl: TL[r[0]] || '', req: 0, inn: 0, out: 0, ca: 0, sub: 0, last: 0, cost: 0, hasCost: false, err: 0, cancel: 0, retry: 0 });
       o.req++; o.inn += N(r[4]); o.out += N(r[5]); o.ca += N(r[6]); if (r[1] > o.last) o.last = r[1];
       if (r[9] === 1) o.sub++;
+      if (r[8] === 1) o.err++; else if (r[8] === 2) o.cancel++;
+      o.retry += N(r[13]);
       var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; }
     });
     return Object.keys(per).map(function (g) {
       var o = per[g]; o.g = +g; o.tot = o.inn + o.out;
       o.rate = o.inn ? Math.round(o.ca / o.inn * 100) : 0;
+      // 健康分：100 − 失败率×60 − 取消率×25 − 每请求重试率×10（封顶 15），可解释的纯本地加权
+      o.health = Math.max(0, Math.min(100, Math.round(100 -
+        (o.req ? o.err / o.req * 60 : 0) - (o.req ? o.cancel / o.req * 25 : 0) -
+        Math.min(15, o.req ? o.retry / o.req * 10 : 0))));
       return o;
     });
   }
@@ -745,7 +769,7 @@ function __usageBoot(D) {
           var c = cells.find(function (x) { return x.k === mk; });
           var vv = c ? c.v : 0;
           var st2 = shade(vv, qs3);
-          g += '<div title="' + mk + ' · ' + fmtI(c ? c.req : 0) + ' 次请求 · ' + fmt(vv) + ' token" style="width:26px;height:22px;border-radius:3px;background:' + st2.fill + ';opacity:' + (st2.op ? st2.op.replace(' fill-opacity="', '').replace('"', '') : (vv > 0 ? 1 : 0.35)) + ';font-size:9px;line-height:22px;text-align:center;color:var(--muted-foreground)">' + dd + '</div>';
+          g += '<div class="ud-mcal-day" data-tip="' + mk + ' · ' + fmtI(c ? c.req : 0) + ' 次请求 · ' + fmt(vv) + ' token" style="width:26px;height:22px;border-radius:3px;background:' + st2.fill + ';opacity:' + (st2.op ? st2.op.replace(' fill-opacity="', '').replace('"', '') : (vv > 0 ? 1 : 0.35)) + ';font-size:9px;line-height:22px;text-align:center;color:var(--muted-foreground)">' + dd + '</div>';
         }
         g += '</div></div>';
         mHtml += g;
@@ -868,15 +892,32 @@ function __usageBoot(D) {
     var startT = fullTs(rs.length ? rs[0][1] : 0), endT = fullTs(o.last);
     var curve = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="上下文水位曲线">' +
       '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/>' + dots.join('') + '</svg>';
-    var curveHead = '<div class="ud-kv-l">' + esc(startT) + ' <span style="color:var(--muted-foreground)">→</span> ' + esc(endT) + ' · 按请求输入 token 近似 · 峰值 ' + fmt(maxIn) + ' · 悬停看点明细</div>';
+    // 起止时间直接标在水位曲线两端上方
+    var curveWrap = '<div style="position:relative">' +
+      '<span class="text-small text-muted" style="position:absolute;left:0;top:0">' + esc(startT) + '</span>' +
+      '<span class="text-small text-muted" style="position:absolute;right:0;top:0;text-align:right">' + esc(endT) + '</span>' +
+      '<div style="padding-top:16px">' + curve + '</div></div>';
+    var curveHead = '<div class="ud-kv-l" style="margin:2px 0 2px">按请求输入 token 近似 · 峰值 ' + fmt(maxIn) + ' · 悬停看点明细</div>';
     var toolDonut = (toolsMap[o.g] || []).length
-      ? '<div class="ud-sec"><div class="ud-kv-l">使用工具（调用次数占比）</div>' + donut((toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6).map(function (t) {
+      ? donut((toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6).map(function (t) {
           return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + ' 次调用' + (t[3] ? ' · 累计 ' + fmtI(t[3]) + ' ms' : '') };
-        }), '调用') + '</div>'
-      : '';
+        }), '调用')
+      : '<span class="text-muted text-small">无工具调用</span>';
     function kv(l, v) { return '<div><div class="ud-kv-l">' + l + '</div><div class="ud-kv-v">' + v + '</div></div>'; }
-    return '<div class="ud-kv">' +
-      kv('项目目录', dir) +
+    // 主/子代理 token 拆分条（双色堆叠，悬停看明细；rows r[9]：0 主会话 1 子代理）
+    var tot2 = mainTok + subTok;
+    var subBar = tot2 > 0
+      ? '<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin:6px 0 6px;max-width:460px">' +
+        (mainTok > 0 ? '<div data-tip="主会话 · ' + fmtI(mainReq) + ' 次 · ' + fmt(mainTok) + ' tok（' + Math.round(mainTok / tot2 * 100) + '%）" style="width:' + (mainTok / tot2 * 100) + '%;background:var(--viz-series-1)"></div>' : '') +
+        (subTok > 0 ? '<div data-tip="子代理 · ' + fmtI(subReq) + ' 次 · ' + fmt(subTok) + ' tok（' + Math.round(subTok / tot2 * 100) + '%）" style="width:' + (subTok / tot2 * 100) + '%;background:var(--viz-series-3)"></div>' : '') +
+        '</div><div class="text-small text-muted">' +
+        (mainReq ? '<span style="color:var(--viz-series-1)">■</span> 主会话 ' + fmt(mainTok) + ' tok × ' + fmtI(mainReq) : '') +
+        (subReq ? (mainReq ? '　' : '') + '<span style="color:var(--viz-series-3)">■</span> 子代理 ' + fmt(subTok) + ' tok × ' + fmtI(subReq) : '') + '</div>'
+      : '';
+    return '<div class="ud-sec"><div class="ud-kv-l">项目目录</div><div class="ud-kv-v" style="word-break:break-all">' + dir + '</div>' +
+      (subReq ? subBar : '') +
+      (pvm ? '<div class="text-small text-muted" style="margin-top:4px">来源：' + pvm + '</div>' : '') + '</div>' +
+      '<div class="ud-kv">' +
       kv('请求 / 缓存率', fmtI(o.req) + ' 次 · ' + o.rate + '%') +
       (function () {
         var gen = 0, ms = 0;
@@ -887,21 +928,71 @@ function __usageBoot(D) {
       kv('上下文压缩', cmpHtml) +
       (costOn && o.hasCost ? kv('折算成本', fmtCost(o.cost)) : '') +
       '</div>' +
-      '<div class="ud-sec"><div class="ud-kv-l">模型占比（按 token）</div>' + mix +
+      '<div class="ud-grid3" style="margin-top:14px">' +
+      '<div><div class="ud-kv-l">模型占比（按 token）</div>' + mix +
       '<button type="button" class="btn ud-sess-logs" data-sg="' + o.g + '" style="margin:8px 0 0;padding:2px 10px;font-size:12px">查看该会话请求日志 →</button></div>' +
-      '<div class="ud-sec"><div class="ud-kv-l">来源</div>' + pvm + '</div>' +
-      toolDonut +
-      tl8 +
-      '<div class="ud-sec">' + curveHead + curve + '</div>';
+      '<div><div class="ud-kv-l">使用工具（调用次数占比）</div>' + toolDonut + '</div>' +
+      '<div>' + (tl8 || '<div class="ud-kv-l">事件时间线</div><span class="text-muted text-small">无压缩 / 模型切换事件</span>') + '</div>' +
+      '</div>' +
+      '<div class="ud-sec" style="margin-top:14px">' + curveHead + curveWrap + '</div>';
+  }
+  function renderModelBoard(rows) {
+    var headEl = $('ud-models-head'), bodyEl = $('ud-models-body');
+    if (!headEl || !bodyEl) return;
+    var per = {};
+    rows.forEach(function (r) {
+      var o = per[r[2]] || (per[r[2]] = { req: 0, inn: 0, out: 0, ca: 0, err: 0, genMs: 0, ttft: 0, ttftN: 0, cost: 0, hasCost: false });
+      o.req++; o.inn += N(r[4]); o.out += N(r[5]); o.ca += N(r[6]);
+      if (r[8] === 1) o.err++;
+      if (r[8] === 0) o.genMs += Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11])));
+      if (r[11] != null) { o.ttft += N(r[11]); o.ttftN++; }
+      var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; }
+    });
+    var list = Object.keys(per).map(function (m) {
+      var o = per[m]; o.m = m; o.tot = o.inn + o.out;
+      o.tps = o.genMs > 0 ? Math.round(o.out / o.genMs * 1000) : null;
+      o.avgTtft = o.ttftN ? Math.round(o.ttft / o.ttftN) : null;
+      o.rate = o.inn ? Math.round(o.ca / o.inn * 100) : 0;
+      o.errRate = o.req ? Math.round(o.err / o.req * 100) : 0;
+      o.per1k = o.hasCost && o.tot > 0 ? o.cost / (o.tot / 1000) : null;
+      return o;
+    }).sort(function (a, b) { return b.tot - a.tot; });
+    headEl.innerHTML = '<tr><th>模型</th><th class="text-end">请求数</th><th class="text-end">平均 tok/s</th><th class="text-end">平均首字 ms</th><th class="text-end">失败率</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th><th class="text-end">合计</th><th class="text-end">缓存率</th>' + (costOn ? '<th class="text-end">折算成本</th><th class="text-end">成本 / 1k tok</th>' : '') + '</tr>';
+    bodyEl.innerHTML = list.length ? list.map(function (o) {
+      return '<tr><td class="ud-flink" data-k="m" data-v="' + o.m + '" title="点击只看该模型">' + esc(MD[o.m]) + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(o.req) + '</td>' +
+        '<td class="text-end">' + (o.tps == null ? '–' : tpsHtml(o.tps)) + '</td>' +
+        '<td class="text-end tabular-nums">' + (o.avgTtft == null ? '–' : fmtI(o.avgTtft)) + '</td>' +
+        '<td class="text-end tabular-nums" style="color:' + (o.errRate >= 10 ? 'var(--red)' : o.errRate > 0 ? 'var(--yellow)' : 'inherit') + '">' + o.errRate + '%</td>' +
+        '<td class="text-end tabular-nums">' + fmt(o.inn) + '</td><td class="text-end tabular-nums">' + fmt(o.out) + '</td><td class="text-end tabular-nums">' + fmt(o.tot) + '</td>' +
+        '<td class="text-end tabular-nums">' + o.rate + '%</td>' +
+        (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td><td class="text-end tabular-nums">' + (o.per1k == null ? '–' : fmtCost(o.per1k)) + '</td>' : '') +
+        '</tr>';
+    }).join('') : '<tr><td colspan="11" class="text-muted">当前筛选下暂无数据</td></tr>';
+    if (!bodyEl.dataset.flinkBound) {
+      bodyEl.dataset.flinkBound = '1';
+      bodyEl.addEventListener('click', function (e) {
+        var fl = e.target.closest ? e.target.closest('.ud-flink') : null;
+        if (!fl) return;
+        st.m = (st.m === +fl.dataset.v ? -1 : +fl.dataset.v);
+        var ms = $('ud-f-model');
+        if (ms) ms.value = String(st.m);
+        apply();
+      });
+    }
+  }
+  function healthBadge(h) {
+    var c = h >= 90 ? 'var(--green)' : h >= 70 ? 'var(--yellow)' : 'var(--red)';
+    return '<span data-tip="健康分 ' + h + '／100：失败率×60 + 取消率×25 + 重试率（封顶 15）加权扣分" style="color:' + c + ';font-weight:600">' + h + '</span>';
   }
   function renderSessions(rows) {
-    var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost', 7: 'rate' };
+    var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost', 7: 'rate', 8: 'health' };
     var list = sessAgg(rows).sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
     var hasCmp = (D.compactions || []).length > 0;
     var cols = [
       { h: '会话', k: null }, { h: '请求数', k: 1, end: 1 }, { h: '输入 token', k: 2, end: 1 },
       { h: '生成 token', k: 3, end: 1 }, { h: 'token 合计', k: 4, end: 1 },
-      { h: '缓存率', k: 7, end: 1 },
+      { h: '缓存率', k: 7, end: 1 }, { h: '健康', k: 8, end: 1 },
       hasCmp ? { h: '压缩', k: null, end: 1 } : null,
       costOn ? { h: '折算成本', k: 6, end: 1 } : null,
       { h: '最后活动', k: 5, end: 1 }
@@ -914,7 +1005,7 @@ function __usageBoot(D) {
     var shown = list.slice(0, 30);
     var body = '';
     shown.forEach(function (o) {
-      body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmtI(o.inn) + '</td><td class="text-end tabular-nums">' + fmtI(o.out) + '</td><td class="text-end tabular-nums">' + fmtI(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + ' 次' : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+      body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmtI(o.inn) + '</td><td class="text-end tabular-nums">' + fmtI(o.out) + '</td><td class="text-end tabular-nums">' + fmtI(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td><td class="text-end">' + healthBadge(o.health) + '</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + ' 次' : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       if (o.g === sessExp) body += '<tr class="ud-exp"><td colspan="' + span + '">' + sessionDetailHTML(o) + '</td></tr>';
     });
     $('ud-sessions-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
@@ -949,17 +1040,11 @@ function __usageBoot(D) {
   }
 
   function requestDetailHTML(r) {
-    function kv(l, v) { return '<div><div class="ud-kv-l">' + l + '</div><div class="ud-kv-v">' + v + '</div></div>'; }
+    // 列里已有的信息不再重复；展开区只放增量：生成耗时拆解、首字占比、（serve）provider 原始用量
+    var genMs = fmtI(Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11]))));
     var ttftpct = r[11] != null && r[7] ? Math.round(r[11] / r[7] * 100) + '%' : '–';
-    var c = costOn ? rowCost(r) : null;
-    return '<div class="ud-kv">' +
-      kv('Token 构成', '输入 ' + fmtI(r[4]) + '（缓存读 ' + fmtI(r[6]) + ' · 缓存写 ' + fmtI(r[10]) + '）+ 生成 ' + fmtI(r[5]) + ' = 合计 ' + fmtI(N(r[4]) + N(r[5]))) +
-      kv('时序', '总耗时 ' + fmtI(r[7]) + ' ms · 首字 ' + (r[11] == null ? '–' : fmtI(r[11]) + ' ms（' + ttftpct + '）')) +
-      kv('输出速率', tpsHtml(tpsOf(r)) + ' tok/s（生成 ' + fmtI(r[5]) + ' tok / 生成耗时 ' + fmtI(Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11])))) + ' ms）') +
-      kv('模型 / 来源 / 类型', esc(MD[r[2]]) + ' · ' + pvLabel(r[3]) + ' · ' + QT[r[9]]) +
-      kv('会话', TL[r[0]] ? esc(TL[r[0]]) : '–') +
-      (costOn ? kv('折算成本', c == null ? '–' : fmtCost(c)) : '') +
-      '</div>' +
+    return '<div class="text-small text-muted" style="line-height:1.9">生成耗时 ' + genMs + ' ms · 首字占比 ' + ttftpct +
+      (window.__USAGE_SERVE__ ? ' · 以下为 provider 上报的原始用量' : '') + '</div>' +
       (window.__USAGE_SERVE__ ? '<div class="ud-sec" id="ud-reqraw"><div class="ud-kv-l">正在拉取 provider 上报的原始用量…</div></div>' : '');
   }
   function fillRawUsage(id) {
@@ -1246,6 +1331,7 @@ function __usageBoot(D) {
     if (!wireHoursToggle.done) { wireHoursToggle.done = true; wireHoursToggle(); }
     renderHeatmap(rows);
     renderSessions(rows);
+    renderModelBoard(rows);
     renderDetail(rows);
     renderErrors(rows);
     drawTrend();
@@ -1439,10 +1525,16 @@ function __usageBoot(D) {
   document.body.appendChild(tip);
   document.addEventListener('mousemove', function (e) {
     var t = e.target;
-    var rect = t && t.closest ? t.closest('svg rect, svg circle, svg path') : null;
-    var title = rect && rect.querySelector('title');
-    if (title && title.textContent) {
-      tip.textContent = title.textContent;
+    // SVG 图元读内嵌 <title>；任意 data-tip 元素（月历格、拆分条）读 data-tip（统一即时 tooltip）
+    var el2 = t && t.closest ? t.closest('svg rect, svg circle, svg path, [data-tip]') : null;
+    var text = '';
+    if (el2) {
+      var dt = el2.getAttribute && el2.getAttribute('data-tip');
+      if (dt) text = dt;
+      else { var tt = el2.querySelector && el2.querySelector('title'); text = (tt && tt.textContent) || ''; }
+    }
+    if (text) {
+      tip.textContent = text;
       tip.style.display = 'block';
       var x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 10);
       var y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 10);

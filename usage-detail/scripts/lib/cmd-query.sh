@@ -214,7 +214,7 @@ cmd_export() {
                       R.duration_ms,
                       CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
                       CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id))
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
                     FROM R
                     LEFT JOIN S SI ON SI.v = R.session_id
                     LEFT JOIN M MI ON MI.v = R.model_id

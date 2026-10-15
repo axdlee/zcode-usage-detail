@@ -13,6 +13,9 @@ const port = Number(process.argv[2]) || 7741;
 const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
 const USER_PRICE = process.env.ZCODE_USAGE_PRICES || path.join(os.homedir(), '.zcode/usage-prices.json');
 const HERE = path.dirname(fs.realpathSync(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')));
+// 版本握手：panel-server 拉起常驻面板时对比版本，不一致则重启旧进程（旧 serve 缺新路由会 404）
+let PLUGIN_VERSION = 'unknown';
+try { PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '.zcode-plugin', 'plugin.json'), 'utf8')).version || 'unknown'; } catch (e) {}
 const USAGE_SH = path.join(HERE, 'usage.sh');
 
 if (!fs.existsSync(DB)) {
@@ -78,7 +81,7 @@ const META_SQL = (pfText, limit, disk) => `
               R.duration_ms,
               CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
               CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id))
+              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
             FROM R
             LEFT JOIN S SI ON SI.v = R.session_id
             LEFT JOIN M MI ON MI.v = R.model_id
@@ -271,6 +274,66 @@ try {
   }
 } catch (e) {}
 
+// ---------- 预算 / 燃烧告警（macOS 本地通知，零模型开销；本服务常驻时生效）----------
+// 成本按模型均价折算（不含分时 tariff，告警用途足够）；token = 输入 + 生成。
+// 开关 ~/.zcode/usage-alerts.json {"budget":true}（缺省开）；当日提醒状态 ~/.zcode/usage-alerts-state.json
+const ALERTS_FILE = path.join(os.homedir(), '.zcode', 'usage-alerts.json');
+const ALERTS_STATE = path.join(os.homedir(), '.zcode', 'usage-alerts-state.json');
+const nn = (v) => Number(v) || 0;
+function alertsEnabled() {
+  try { return JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8')).budget !== false; } catch (e) { return true; }
+}
+function notifyMac(sub, msg) {
+  if (process.platform !== 'darwin') return;
+  try {
+    const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    spawn('osascript', ['-e', `display notification "${esc(msg)}" with title "ZCode 用量" subtitle "${esc(sub)}"`], { detached: true, stdio: 'ignore' }).unref();
+  } catch (e) {}
+}
+function alertOnce(key, sub, msg) {
+  const today = new Date().toISOString().slice(0, 10);
+  let st = {};
+  try { st = JSON.parse(fs.readFileSync(ALERTS_STATE, 'utf8')); } catch (e) {}
+  if (st.date !== today) st = { date: today };
+  if (st[key]) return;
+  st[key] = true;
+  try { fs.writeFileSync(ALERTS_STATE, JSON.stringify(st)); } catch (e) {}
+  notifyMac(sub, msg);
+}
+function fmtK(n) { return n >= 1e8 ? (n / 1e8).toFixed(2) + '亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + '万' : String(Math.round(n)); }
+function budgetWatchTick() {
+  try {
+    if (!alertsEnabled()) return;
+  let budget = { daily: 0, monthly: 0 };
+  try { budget = readBudget() || budget; } catch (e) {}
+  const D = dataJSON(-1);
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const w0 = t0.getTime() - 7 * 86400000;
+  const PR = (D.prices && D.prices.models) || {};
+  const sym = ((D.prices && D.prices.currency) || 'CNY') === 'CNY' ? '¥' : '$';
+  let tok = 0, cost = 0, base = 0;
+  for (const r of (D.rows || [])) {           // rows 按时间降序，越界即断
+    if (r[1] < w0) break;
+    const t = nn(r[4]) + nn(r[5]);
+    if (r[1] >= t0.getTime()) {
+      tok += t;
+      const pj = PR[String(D.models[r[2]] || '').toLowerCase()];
+      if (pj && Number(pj.in) >= 0) cost += (nn(r[4]) * nn(pj.in) + nn(r[5]) * nn(pj.out) + nn(r[6]) * nn(pj.cache)) / 1e6;
+    } else base += t;
+  }
+  const daily = nn(budget.daily);
+  if (daily > 0 && cost > 0) {
+    const pct = Math.round(cost / daily * 100);
+    if (pct >= 100) alertOnce('b100', '日预算已超出', '今日折算 ' + sym + cost.toFixed(2) + '，已超日预算 ' + sym + daily.toFixed(2));
+    else if (pct >= 80) alertOnce('b80', '日预算 80%', '今日折算 ' + sym + cost.toFixed(2) + ' / ' + sym + daily.toFixed(2) + '（' + pct + '%）');
+  }
+  const avg7 = base / 7;
+  if (avg7 > 0 && tok > avg7 * 1.5 && tok > 100000) {
+    alertOnce('burn', '今日用量偏高', fmtK(tok) + ' token，已达近 7 天日均的 ' + Math.round(tok / avg7 * 100) + '%');
+  }
+  } catch (e) { /* 告警失败静默：不能影响常驻服务 */ }
+}
+
 const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://127.0.0.1');
   try {
@@ -290,7 +353,7 @@ const server = http.createServer(async function (req, res) {
       res.end(JSON.stringify(requestJSON(u.searchParams.get('id') || '')));
     } else if (req.method === 'GET' && u.pathname === '/api/live') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify(liveJSON()));
+      res.end(JSON.stringify(Object.assign({ v: PLUGIN_VERSION }, liveJSON())));
     } else if (req.method === 'GET' && u.pathname === '/api/turn') {
       // 「本轮」横幅的浏览器轮询端点（侧栏面板走 MCP 资源订阅，不经此）
       let text = '';
@@ -348,7 +411,9 @@ const server = http.createServer(async function (req, res) {
 
 server.listen(port, '127.0.0.1', function () {
   const url = 'http://127.0.0.1:' + port;
-  console.log('ZCode 用量面板已启动：' + url + '  （Ctrl-C 退出，仅监听本机）');
+  console.log('ZCode 用量面板已启动：' + url + '  （Ctrl-C 退出，仅监听本机，v' + PLUGIN_VERSION + '）');
+  try { fs.writeFileSync(path.join(os.homedir(), '.zcode', 'usage-serve.json'), JSON.stringify({ pid: process.pid, version: PLUGIN_VERSION, port })); } catch (e) {}
+  setInterval(budgetWatchTick, 60000).unref(); // 预算/燃烧告警：每分钟检查，当日每档最多提醒一次
   if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
   else if (process.platform === 'linux') spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
 });

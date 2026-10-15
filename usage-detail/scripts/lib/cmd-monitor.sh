@@ -90,3 +90,87 @@ cmd_turnstats() {
         ;;
     esac
 }
+
+# 浪费取证：失败/取消请求与重试的 token 消耗（本地只读聚合，灵感：codeburn optimize）
+cmd_waste() {
+    local days="${2:-7}"
+    is_num "$days" || { echo "参数应为数字：$days" >&2; exit 1; }
+    local since=$(( ($(date +%s) - days * 86400) * 1000 ))
+    local row
+    row=$(qr "
+      WITH W AS (SELECT * FROM model_usage WHERE started_at >= ${since})
+      SELECT
+        (SELECT count(*) FROM W WHERE status='error') ||'|'||
+        (SELECT COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0) FROM W WHERE status='error') ||'|'||
+        (SELECT count(*) FROM W WHERE status='cancelled') ||'|'||
+        (SELECT COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0) FROM W WHERE status='cancelled') ||'|'||
+        (SELECT COALESCE(sum(retry_count),0) FROM W) ||'|'||
+        (SELECT count(*) FROM W WHERE retry_count>0) ||'|'||
+        (SELECT COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0) FROM W WHERE retry_count>0) ||'|'||
+        (SELECT COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0) FROM W)
+      FROM (SELECT 1)")
+    local err_req err_tok cc_req cc_tok retries retry_req retry_tok all_tok
+    IFS='|' read -r err_req err_tok cc_req cc_tok retries retry_req retry_tok all_tok <<< "$row"
+    err_req=${err_req:-0}; err_tok=${err_tok:-0}; cc_req=${cc_req:-0}; cc_tok=${cc_tok:-0}
+    retries=${retries:-0}; retry_req=${retry_req:-0}; retry_tok=${retry_tok:-0}; all_tok=${all_tok:-0}
+    local waste_tok=$((err_tok + cc_tok))
+    local pct=0
+    [[ "$all_tok" -gt 0 ]] && pct=$(awk -v w="$waste_tok" -v a="$all_tok" 'BEGIN{printf "%.1f", w/a*100}')
+    echo "近 ${days} 天浪费取证（token 口径：失败/取消请求的输入与生成 token 同样已消耗）"
+    echo "----------------------------------------------------------"
+    echo "失败请求：${err_req} 次 · 白耗 $(fmt_n "$err_tok") token"
+    echo "取消请求：${cc_req} 次 · 白耗 $(fmt_n "$cc_tok") token"
+    echo "重试：${retries} 次（涉及 ${retry_req} 条请求 / $(fmt_n "$retry_tok") token）"
+    echo "合计浪费：$(fmt_n "$waste_tok") token（占同期 $pct%）"
+    echo ""
+    echo "反复失败会话 Top 5："
+    local t
+    t=$(qr "
+      SELECT COALESCE((SELECT title FROM session WHERE id=m.session_id),'（无标题）') ||' | '||
+        count(*) ||' 次失败 · '|| COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0) ||' tok'
+      FROM model_usage m WHERE m.status='error' AND m.started_at >= ${since} AND m.session_id IS NOT NULL
+      GROUP BY m.session_id ORDER BY count(*) DESC LIMIT 5")
+    [[ -n "$t" ]] && echo "$t" | sed 's/ | /：/;s/^/  · /' || echo "  · 无"
+    echo ""
+    echo "重试最多的模型 Top 3："
+    t=$(qr "
+      SELECT model_id ||'：'|| sum(retry_count) ||' 次重试'
+      FROM model_usage WHERE started_at >= ${since} AND retry_count > 0
+      GROUP BY model_id ORDER BY sum(retry_count) DESC LIMIT 3")
+    [[ -n "$t" ]] && echo "$t" | sed 's/^/  · /' || echo "  · 无"
+    echo ""
+    echo "提示：失败/取消多为网络或权限问题；重试偏高常与超时相关，可关注对应时段稳定性。"
+}
+fmt_n() { printf '%s\n' "$1" | awk '{ n = $1; s = ""; while (length(n) > 3) { s = "," substr(n, length(n) - 2) s; n = substr(n, 1, length(n) - 3) } print n s }'; }
+
+# 通知类开关（~/.zcode/usage-alerts.json）：
+#   budget  日预算 80%/100% 与用量偏高提醒（serve 常驻时本地检查，默认开）
+#   permission  Agent 等待权限批准时弹系统提醒（默认关）
+cmd_alerts() {
+    local f="$HOME/.zcode/usage-alerts.json"
+    local what="${2:-status}" act="${3:-}"
+    [[ -f "$f" ]] || echo '{}' > "$f"
+    local cur
+    cur=$(node -e "const v=JSON.parse(require('fs').readFileSync('$f','utf8'));console.log(v['$what']==null?'(默认)':v['$what'])" 2>/dev/null || echo '(默认)')
+    case "$act" in
+      on|off)
+        local bv cn='开启'; [[ "$act" == off ]] && { bv=false; cn='关闭'; } || bv=true
+        ALERTS_VAL="$bv" node -e "
+          const fs=require('fs');
+          const p='$f';
+          let v={};try{v=JSON.parse(fs.readFileSync(p,'utf8'))}catch(e){}
+          v['$what']=process.env.ALERTS_VAL==='true';
+          fs.writeFileSync(p,JSON.stringify(v)+'\n');"
+        echo "已${cn}：${what}"
+        ;;
+      status)
+        local def='开（默认）'; [[ "$what" == permission ]] && def='关（默认）'
+        local d="$def"; [[ "$cur" == false ]] && d='关'; [[ "$cur" == true ]] && d='开'
+        echo "${what}：${d}"
+        ;;
+      *)
+        echo "用法：usage.sh alerts <budget|permission> [on|off|status]" >&2
+        exit 1
+        ;;
+    esac
+}

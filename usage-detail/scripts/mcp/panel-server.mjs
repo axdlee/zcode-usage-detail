@@ -77,7 +77,7 @@ function metaSQL(limit, disk) {
               R.duration_ms,
               CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
               CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id))
+              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
             FROM R
             LEFT JOIN S SI ON SI.v = R.session_id
             LEFT JOIN M MI ON MI.v = R.model_id
@@ -315,7 +315,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.12.2' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.13.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -445,20 +445,54 @@ const TOOLS = [
 
 import http2 from 'node:http';
 import { spawn } from 'node:child_process';
+// 本插件版本（与 serve.mjs 常驻进程做版本握手，不一致即重启旧进程）
+let PLUGIN_VERSION = 'unknown';
+try { PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', '.zcode-plugin', 'plugin.json'), 'utf8')).version || 'unknown'; } catch (e) {}
+
 function serveRunning() {
   return new Promise((resolve) => {
-    const req = http2.get('http://127.0.0.1:7741/api/live', { timeout: 1200 }, (res) => { res.resume(); resolve(res.statusCode === 200); });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
+    const req = http2.get('http://127.0.0.1:7741/api/live', { timeout: 1200 }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => {
+        let v = null;
+        try { v = JSON.parse(b).v || null; } catch (e) {}
+        resolve({ ok: res.statusCode === 200, v });
+      });
+      res.resume();
+    });
+    req.on('error', () => resolve({ ok: false, v: null }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, v: null }); });
   });
 }
+
+// 旧版本常驻 serve 缺新路由（如 /report.html、/api/turn）会 404：按 pid 文件重启它
+function killStaleServe() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-serve.json'), 'utf8'));
+    if (!meta.pid || (meta.port && meta.port !== 7741)) return;
+    const cmd = execFileSync('ps', ['-p', String(meta.pid), '-o', 'command='], { encoding: 'utf8' });
+    if (cmd.includes('serve.mjs')) {
+      try { process.kill(meta.pid); } catch (e) {}
+    }
+  } catch (e) {}
+}
+
 async function ensureServe() {
-  if (await serveRunning()) return { url: 'http://127.0.0.1:7741', started: false };
+  const cur = await serveRunning();
+  if (cur.ok) {
+    if (cur.v === PLUGIN_VERSION) return { url: 'http://127.0.0.1:7741', started: false };
+    killStaleServe();
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      if (!(await serveRunning()).ok) break;
+    }
+  }
   const child = spawn('node', [path.join(HERE, '..', 'serve.mjs'), '7741'], { detached: true, stdio: 'ignore' });
   child.unref();
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 400));
-    if (await serveRunning()) return { url: 'http://127.0.0.1:7741', started: true };
+    if (await serveRunning().then((r) => r.ok)) return { url: 'http://127.0.0.1:7741', started: true };
   }
   return { url: 'http://127.0.0.1:7741', started: false, error: '启动超时，可手动运行 usage.sh serve' };
 }

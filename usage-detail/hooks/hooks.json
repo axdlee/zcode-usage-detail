@@ -27,6 +27,20 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/permission-notify.mjs"],
+            "async": true,
+            "timeoutMs": 10000,
+            "statusMessage": "usage-detail: 权限等待提醒…"
+          }
+        ]
+      }
     ]
   }
 }
