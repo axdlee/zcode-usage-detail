@@ -1,0 +1,182 @@
+#!/usr/bin/env node
+// ZCode 用量明细 · 本地常驻面板服务
+// 只读查询本地 SQLite，仅监听 127.0.0.1。页面数据一次加载 /api/data，
+// 燃烧率等实时指标轻量轮询 /api/live（默认 5s），不重复拉全量。
+import http from 'node:http';
+import { execFileSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const port = Number(process.argv[2]) || 7741;
+const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
+const USER_PRICE = process.env.ZCODE_USAGE_PRICES || path.join(os.homedir(), '.zcode/usage-prices.json');
+const HERE = path.dirname(fs.realpathSync(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')));
+const USAGE_SH = path.join(HERE, 'usage.sh');
+
+if (!fs.existsSync(DB)) {
+  console.error('未找到 ZCode 本地数据库：' + DB);
+  process.exit(1);
+}
+
+function q(sql) {
+  return execFileSync('sqlite3', ['-readonly', DB, sql], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+}
+
+function pricePath() {
+  if (process.env.ZCODE_USAGE_PRICES && fs.existsSync(process.env.ZCODE_USAGE_PRICES)) return process.env.ZCODE_USAGE_PRICES;
+  if (fs.existsSync(USER_PRICE)) return USER_PRICE;
+  const d = path.join(HERE, 'default-prices.json');
+  return fs.existsSync(d) ? d : null;
+}
+
+const META_SQL = (pf, limit) => `
+  WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
+       M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
+       S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM model_usage)),
+       PJ AS (SELECT ${pf ? `CAST(readfile('${pf}') AS text)` : 'NULL'} AS pj),
+       R AS (SELECT * FROM model_usage ORDER BY started_at DESC LIMIT ${limit})
+  SELECT json_object(
+    'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
+    'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
+    'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
+    'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
+    'prices',(SELECT CASE
+              WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
+              ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
+                   'models', COALESCE(CASE WHEN json_type(pj,'$.models')='object'
+                     THEN (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj,'$.models') je
+                           WHERE je.key IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
+                     ELSE (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj) je
+                           WHERE je.key IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
+                   END, json('{}')))
+            END FROM PJ),
+    'total',(SELECT count(*) FROM model_usage),
+    'covered',(SELECT count(*) FROM R),
+    'gen',(SELECT datetime('now','localtime')),
+    'rows',(SELECT json_group_array(json_array(
+              SI.i, R.started_at, MI.i, PI.i,
+              R.input_tokens, R.output_tokens+R.reasoning_tokens, R.cache_read_input_tokens,
+              R.duration_ms,
+              CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
+              CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END))
+            FROM R
+            LEFT JOIN S SI ON SI.v = R.session_id
+            LEFT JOIN M MI ON MI.v = R.model_id
+            LEFT JOIN P PI ON PI.v = R.provider_id));`;
+
+function dataJSON(limit) {
+  limit = Math.max(1, Math.min(20000, Number(limit) || 3000));
+  return q(META_SQL(pricePath(), limit));
+}
+
+function liveJSON() {
+  const win = q(`WITH cur AS (SELECT count(*) AS req,
+                       COALESCE(sum(input_tokens),0) AS inn,
+                       COALESCE(sum(output_tokens+reasoning_tokens),0) AS gen,
+                       min(started_at) AS st
+                FROM model_usage WHERE started_at > (unixepoch()*1000 - 18000000))
+         SELECT req, inn+gen AS tok,
+                CAST(round((inn+gen) / max(0.1,(unixepoch()*1000 - COALESCE(st, unixepoch()*1000))/3600000.0)) AS int),
+                COALESCE(st, 0)
+         FROM cur;`).trim().split('|').map(Number);
+  const today = q(`SELECT count(*), COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0),
+                          sum(CASE WHEN status<>'completed' THEN 1 ELSE 0 END)
+                   FROM model_usage WHERE date(started_at/1000,'unixepoch','localtime')=date('now','localtime');`).trim().split('|').map(Number);
+  return {
+    window: { req: win[0] || 0, tok: win[1] || 0, rateH: win[2] || 0, start: win[3] || 0 },
+    today: { req: today[0] || 0, tok: today[1] || 0, fail: today[2] || 0 },
+    gen: Date.now()
+  };
+}
+
+function renderFragment(limit) {
+  const out = path.join(os.tmpdir(), 'zcode-usage-serve-' + process.pid + '.html');
+  execFileSync('bash', [USAGE_SH, 'dashboard', out, String(limit)], { encoding: 'utf8', timeout: 120000 });
+  let html = fs.readFileSync(out, 'utf8');
+  try { fs.unlinkSync(out); } catch (e) {}
+  // 切换为服务模式：数据走 /api/data，由 boot 函数异步加载
+  html = html.replace(/^const DATA =\n.*$/m, "const DATA = null;\nwindow.__USAGE_DATA_URL__ = '/api/data';\nwindow.__USAGE_SERVE__ = true;");
+  if (html.indexOf('__USAGE_DATA_URL__') < 0) throw new Error('dashboard 生成结果异常');
+  // 服务态附加：刷新按钮 + 实时燃烧率角标（5s 轻轮询）
+  html += `<script>
+(function () {
+  var t = setInterval(function () {
+    var c = document.querySelector('.viz-controls');
+    if (!c || !window.__usageBootDone) return;
+    clearInterval(t);
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn'; b.style.margin = '0'; b.style.fontSize = '12px';
+    b.textContent = '刷新数据';
+    b.addEventListener('click', function () { b.disabled = true; b.textContent = '刷新中…'; location.reload(); });
+    c.appendChild(b);
+    var badge = document.createElement('span');
+    badge.id = 'ud-live-badge'; badge.className = 'text-small text-muted';
+    c.appendChild(badge);
+    function tick() {
+      fetch('/api/live').then(function (r) { return r.json(); }).then(function (j) {
+        badge.textContent = '● 实时 · 燃烧率 ' + Number(j.window.rateH || 0).toLocaleString('zh-CN') + ' token/h · 本窗 ' + Number(j.window.tok || 0).toLocaleString('zh-CN') + ' token · 今日 ' + Number(j.today.req || 0).toLocaleString('zh-CN') + ' 次';
+      }).catch(function () {});
+    }
+    tick();
+    setInterval(tick, 5000);
+  }, 200);
+})();
+</script>`;
+  return html;
+}
+
+let frag = { html: null, limit: 0, at: 0 };
+function getFragment(limit) {
+  limit = Math.max(1, Math.min(20000, Number(limit) || 3000));
+  if (!frag.html || frag.limit !== limit || Date.now() - frag.at > 30000) {
+    frag = { html: renderFragment(limit), limit, at: Date.now() };
+  }
+  return frag.html;
+}
+
+// 启动时价格表每日自动同步一次（与 dashboard 口径一致，可 env 关闭）
+try {
+  if (process.env.ZCODE_USAGE_NO_AUTOSYNC !== '1') {
+    let stale = !fs.existsSync(USER_PRICE);
+    if (!stale) stale = Date.now() - fs.statSync(USER_PRICE).mtimeMs >= 86400e3;
+    if (stale && fs.existsSync(process.env.ZCODE_USAGE_PRICES || '/dev/null') === false || stale) {
+      spawn('bash', [USAGE_SH, 'prices', 'sync'], { detached: true, stdio: 'ignore' }).unref();
+    }
+  }
+} catch (e) {}
+
+const server = http.createServer(function (req, res) {
+  const u = new URL(req.url, 'http://127.0.0.1');
+  try {
+    if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
+      const limit = u.searchParams.get('limit') || 3000;
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(getFragment(limit));
+    } else if (req.method === 'GET' && u.pathname === '/api/data') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(dataJSON(u.searchParams.get('limit') || 3000));
+    } else if (req.method === 'GET' && u.pathname === '/api/live') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(liveJSON()));
+    } else if (req.method === 'POST' && u.pathname === '/api/sync-prices') {
+      const out = execFileSync('bash', [USAGE_SH, 'prices', 'sync'], { encoding: 'utf8', timeout: 90000 });
+      frag.html = null;
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, message: out.trim().split('\n').pop() }));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not Found');
+    }
+  } catch (e) {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('错误：' + (e.message || e));
+  }
+});
+
+server.listen(port, '127.0.0.1', function () {
+  const url = 'http://127.0.0.1:' + port;
+  console.log('ZCode 用量面板已启动：' + url + '  （Ctrl-C 退出，仅监听本机）');
+  if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+  else if (process.platform === 'linux') spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+});

@@ -20,11 +20,12 @@
 
 - **逐条明细**：每次模型请求一行——时间、会话、模型、来源、主会话/子代理、输入/生成/缓存读 token、耗时、状态
 - **来源区分**：自动区分 `account:*` 官方套餐（如 GLM Coding Plan）与自定义/BYOK 接入，仪表盘按来源堆叠展示每日趋势
-- **交互式仪表盘**（`/usage-ui`）：总览 / 每日趋势 / 5 小时窗口 / 会话排行 / 请求明细 / 失败请求六个标签页；来源、模型、时间范围（近 7 天 / 30 天 / 全部）全局筛选即时生效；表格点击表头排序；界面自动适配 ZCode 明暗主题。默认内嵌最近 3000 条请求，`/usage-ui <条数>` 可调（1–20000）
+- **交互式仪表盘**（`/usage-ui`）：总览 / 每日趋势 / 5 小时窗口 / 会话排行 / 请求明细 / 失败请求六个标签页；来源、模型、时间范围（近 7 天 / 30 天 / 全部）全局筛选即时生效；请求明细**分页浏览**（每页 50 条 + 页码翻页）；表格点击表头排序；界面自动适配 ZCode 明暗主题。默认内嵌最近 3000 条请求，`/usage-ui <条数>` 可调（1–20000）
 - **5 小时窗口**：按相邻请求间隔 ≥5h 切分用量窗口（同 ccusage 口径），当前窗口显示进行中进度与剩余时间
 - **洞察指标**：活跃天数、当前/最长连续活跃、峰值日、缓存命中率、平均耗时、主会话/子代理拆分、最常用工具
 - **活跃热力图**：GitHub 提交风格，按天 token 四分位着色，悬停看当日明细
-- **成本估算**（可选）：在 `~/.zcode/usage-prices.json` 配置价格表后，`cost` 命令与仪表盘"成本估算"开关即可按官方牌价估算花费
+- **成本估算**（默认官方价）：内置从 [models.dev](https://models.dev) 打包的官方牌价（覆盖 GLM 全系）；`prices sync` 可**全量同步 models.dev 所有供应商模型价**（BYOK 场景下的 Claude / GPT / DeepSeek / Qwen 等都支持），自定义条目不会被覆盖；仪表盘有"成本估算"开关与"同步价格"按钮
+- **本地常驻面板**（`serve`）：一条命令在本机起一个只读 Web 服务，浏览器打开即得常驻看板——数据一次加载，燃烧率每 5 秒轻量轮询实时刷新，不占会话上下文
 - **导出**：`export csv` / `export json` 全量记录（CSV 遵循 RFC 4180）
 - **零依赖**：只用 macOS / Linux 自带的 `bash` + `sqlite3`，不需要 Node / Python
 
@@ -89,10 +90,11 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 
 ### 成本估算（默认官方价，可自定义）
 
-价格表解析顺序：`ZCODE_USAGE_PRICES` 环境变量 → `~/.zcode/usage-prices.json`（你的自定义文件）→ 插件内置官方价（自动打包自 [models.dev](https://models.dev) 的 zai/zhipuai 官方牌价，美元/百万 token）。所以开箱即有官方价，无需任何配置。
+价格表解析顺序：`ZCODE_USAGE_PRICES` 环境变量 → `~/.zcode/usage-prices.json`（你的文件）→ 插件内置官方价（打包自 [models.dev](https://models.dev)，美元/百万 token）。开箱即有官方价，无需配置。
 
-- `usage.sh prices show` 查看当前生效的价格表
-- `usage.sh prices sync` 从 models.dev 同步最新官方价（保留你的自定义条目；需要 node + curl）
+- **每日自动同步**：生成仪表盘/启动面板时若价格表超过 1 天未更新，自动从 models.dev 全量同步（`ZCODE_USAGE_NO_AUTOSYNC=1` 关闭）
+- `usage.sh prices show` 查看当前生效的价格表；`usage.sh prices sync` 手动全量同步所有供应商模型价（保留自定义条目；需要 node + curl）
+- 仪表盘顶部"同步价格"按钮：会话内点击会请求 Agent 执行同步并重渲染，本地面板点击直接同步后刷新
 - 自定义：编辑 `~/.zcode/usage-prices.json`，可加任意模型、改币种：
 
   ```json
@@ -105,8 +107,9 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 
 ### 实时燃烧率监控
 
-- 仪表盘"5 小时窗口"页：当前窗口的燃烧率（token/小时）、时间进度条、与近 3 个完整窗口均值的对比和满窗预测
-- 终端实时监控（claude-monitor 风格）：`usage.sh live [秒]`，默认 3s 刷新、Ctrl-C 退出；只查最近 5h/48h 数据并走索引，开销极低，适合挂在一个终端角落
+- 仪表盘"5 小时窗口"页：剩余百分比 + 重置时间点 + 燃烧率（token/小时）+ 与近 3 个完整窗口均值的对比和满窗预测
+- **本地常驻面板**：`usage.sh serve`（默认端口 7741，`serve 8080` 可换），自动打开浏览器。页面数据一次加载，燃烧率/今日用量每 5 秒轻量轮询刷新（只查最近 5h 数据，走索引，开销极低）；也可让 ZCode 里的 Agent 后台启动后把 `http://127.0.0.1:7741` 发给你。仅监听 127.0.0.1、只读、不写任何文件
+- 终端监控（claude-monitor 风格）：`usage.sh live [秒]`，默认 3s 刷新、Ctrl-C 退出，适合挂在一个终端角落
 
 ### 仪表盘预览
 
