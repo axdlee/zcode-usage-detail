@@ -705,10 +705,10 @@ function __usageBoot(D) {
 
   function renderTopSessions(rows) {
     var list = sessAgg(rows).sort(function (a, b) { return b.tot - a.tot; }).slice(0, 5);
-    $('ud-top-sessions').innerHTML = list.length ? '<table class="table table-sm"><thead><tr><th>会话</th><th class="text-end">请求数</th><th class="text-end">token 合计</th><th class="text-end">最后活动</th></tr></thead><tbody>' +
+    $('ud-top-sessions').innerHTML = list.length ? '<div class="table-responsive"><table class="table table-sm" style="min-width:520px;margin:0"><thead><tr><th>会话</th><th class="text-end">请求数</th><th class="text-end">token 合计</th><th class="text-end">最后活动</th></tr></thead><tbody>' +
       list.map(function (o) {
         return '<tr class="ud-click" data-sg="' + o.g + '" title="点击查看会话详情"><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
-      }).join('') + '</tbody></table>' : '<p class="text-muted">当前筛选下暂无数据</p>';
+      }).join('') + '</tbody></table></div>' : '<p class="text-muted">当前筛选下暂无数据</p>';
     var donutEl = $('ud-tools-donut');
     if (donutEl) {
       donutEl.innerHTML = donut((D.tools || []).slice(0, 6).map(function (t) {
