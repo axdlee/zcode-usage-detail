@@ -1,6 +1,6 @@
 {
   "name": "usage-detail",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "查询 ZCode 本地用量明细：逐条请求、来源/模型/项目区分、5 小时窗口、活跃热力图、洞察指标、成本估算与导出（只读本地 SQLite）。",
   "author": { "name": "yeelight" },
   "commands": "./commands",

@@ -255,15 +255,17 @@ case "$cmd" in
     ;;
   dashboard)
     # 生成交互式用量界面（HTML 片段），输出路径必须由调用方指定。
-    # 数据以原始请求行（上限 3000 条）内嵌，筛选/聚合全部在前端完成。
+    # 数据以原始请求行内嵌（默认最近 3000 条，可用第三参数或 ZCODE_USAGE_LIMIT 调整），筛选/聚合全部在前端完成。
     out="${2:-}"
-    [[ -n "$out" ]] || { echo "用法：usage.sh dashboard <输出.html>" >&2; exit 1; }
+    [[ -n "$out" ]] || { echo "用法：usage.sh dashboard <输出.html> [条数]" >&2; exit 1; }
+    limit=$(num_arg "${ZCODE_USAGE_LIMIT:-3000}" "${3:-}")
+    [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间：$limit（过大可能超出会话内嵌渲染的体积限制，更多历史请用 export json）" >&2; exit 1; }
     META=$(qr "
       WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
            M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
            S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM model_usage)),
            PJ AS (SELECT CAST(readfile('$PRICE_FILE') AS text) AS pj),
-           R AS (SELECT * FROM model_usage ORDER BY started_at DESC LIMIT 3000)
+           R AS (SELECT * FROM model_usage ORDER BY started_at DESC LIMIT $limit)
       SELECT json_object(
         'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
         'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
@@ -831,8 +833,10 @@ UD_TAIL
   sessions [N]             按会话用量 Top N（默认 15）
   models                   按模型汇总
   errors [N]               最近 N 条失败请求（默认 10）
-  dashboard <输出.html>    生成交互式用量界面（HTML 片段，供 ZCode 内嵌渲染）
-环境变量：ZCODE_USAGE_DB 覆盖数据库路径；ZCODE_USAGE_PRICES 覆盖价格表路径。
+  dashboard <输出.html> [条数]
+                           生成交互式用量界面（HTML 片段，供 ZCode 内嵌渲染）；
+                           条数默认 3000，可用 ZCODE_USAGE_LIMIT 覆盖，范围 1-20000
+环境变量：ZCODE_USAGE_DB 覆盖数据库路径；ZCODE_USAGE_PRICES 覆盖价格表路径；ZCODE_USAGE_LIMIT 覆盖默认内嵌条数。
 EOF
     ;;
 esac
