@@ -315,7 +315,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.10.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.12.2' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -337,6 +337,48 @@ function getPanelHtml() {
       } catch (e) { reject(e); }
     });
   });
+}
+
+// ---------- 本轮统计资源（ui://usage-detail/turn.txt）----------
+// Stop 钩子每轮写 ~/.zcode/usage-detail-turn-done.json 标记；这里轮询 mtime，
+// 变化即向宿主发 notifications/resources/updated，订阅了该资源的侧栏面板实时刷新。
+// 宿主已声明 resources.subscribe 能力（app.asar / zcode.cjs 均实证），面板桥有
+// subscribeResource/onResourceUpdated/readResource（UI_PLUGIN.md「资源订阅」）。
+const TURN_URI = 'ui://usage-detail/turn.txt';
+const TURN_DONE = path.join(os.homedir(), '.zcode', 'usage-detail-turn-done.json');
+let turnSubs = 0;            // 已订阅连接数（本进程单宿主会话，计数即可）
+let turnDoneMtime = 0;       // 上次已通知的标记 mtime
+let turnWatchStarted = false;
+let turnCache = { at: 0, text: null };
+
+function computeTurnText() {
+  if (turnCache.text != null && Date.now() - turnCache.at < 5000) return turnCache.text;
+  let text = '';
+  try {
+    text = execFileSync(process.execPath, [path.join(HERE, '..', 'turn-stats.mjs'), '--turn', '--current'], { encoding: 'utf8', timeout: 15000 }).trim();
+  } catch (e) { /* 静默：无数据即空 */ }
+  turnCache = { at: Date.now(), text };
+  return text;
+}
+
+function notifyTurnUpdated() {
+  turnCache = { at: 0, text: null }; // 下次读取强制重算
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/resources/updated', params: { uri: TURN_URI } }) + '\n');
+}
+
+function watchTurnDone() {
+  let mtime = 0;
+  try { mtime = fs.statSync(TURN_DONE).mtimeMs || 0; } catch (e) {}
+  if (!mtime || mtime === turnDoneMtime) return;
+  turnDoneMtime = mtime;
+  if (turnSubs > 0) notifyTurnUpdated();
+}
+
+function startTurnWatch() {
+  if (turnWatchStarted) return;
+  turnWatchStarted = true;
+  try { turnDoneMtime = fs.statSync(TURN_DONE).mtimeMs || 0; } catch (e) { turnDoneMtime = 0; }
+  setInterval(watchTurnDone, 2000).unref();
 }
 
 const TOOLS = [
@@ -471,7 +513,7 @@ function dispatch(msg) {
       case 'initialize':
         reply({
           protocolVersion: params && params.protocolVersion || '2025-06-18',
-          capabilities: { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } },
+          capabilities: { tools: { listChanged: false }, resources: { subscribe: true, listChanged: false } },
           serverInfo: SERVER_INFO,
         });
         return;
@@ -483,10 +525,25 @@ function dispatch(msg) {
         return;
       }
       case 'resources/list':
-        reply({ resources: [{ uri: 'ui://usage-detail/panel.html', mimeType: 'text/html;profile=mcp-app', name: '用量面板' }] });
+        reply({ resources: [
+          { uri: 'ui://usage-detail/panel.html', mimeType: 'text/html;profile=mcp-app', name: '用量面板' },
+          { uri: TURN_URI, mimeType: 'text/plain', name: '本轮统计', description: '最近一次回复结束时的单行用量摘要（本地计算，零模型开销）' },
+        ] });
+        return;
+      case 'resources/subscribe':
+        if (params && params.uri === TURN_URI) { turnSubs++; startTurnWatch(); }
+        reply({});
+        return;
+      case 'resources/unsubscribe':
+        if (params && params.uri === TURN_URI && turnSubs > 0) turnSubs--;
+        reply({});
         return;
       case 'resources/read': {
         const uri = params && params.uri;
+        if (uri === TURN_URI) {
+          reply({ contents: [{ uri, mimeType: 'text/plain', text: computeTurnText() }] });
+          return;
+        }
         if (uri !== 'ui://usage-detail/panel.html') { replyErr(-32602, '未知资源：' + uri); return; }
         getPanelHtml().then((html) => {
           reply({ contents: [{ uri, mimeType: 'text/html;profile=mcp-app', text: html }] });

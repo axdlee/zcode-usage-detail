@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Stop hook（async: true，fire-and-forget）：每轮回复结束时本地计算统计并发系统通知。
-// 官方语义：async hook 的后台 stdout 不会注入上下文、不影响回合——正好：我们要的就是
-// 「零模型开销」的统计出口。统计行不进对话（进对话必经模型，见 README），改走系统通知。
-// 开关：~/.zcode/usage-turnstats.json {"enabled":true,"mode":"notify"}；任何异常静默退出。
+// Stop hook（async: true，fire-and-forget）：每轮回复结束时本地做两件事，全部零模型开销。
+//  1. 写回合结束标记（~/.zcode/usage-detail-turn-done.json）：侧栏面板的 MCP 服务轮询到
+//     该文件变化后向宿主发 notifications/resources/updated，打开着的用量面板实时刷新「本轮」横幅。
+//  2. mode=notify 时（usage.sh turnstats notify）追加一条 macOS 系统通知，作为面板未打开时的兜底。
+// 官方语义：async hook 的后台 stdout 不会注入上下文、不影响回合；统计行不进对话（进对话必经模型）。
+// 开关：~/.zcode/usage-turnstats.json {"enabled":true,"mode":"notify"|"inject"}；任何异常静默退出。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STATS_SCRIPT = path.join(HERE, '..', 'scripts', 'turn-stats.mjs');
+const DONE_FILE = path.join(os.homedir(), '.zcode', 'usage-detail-turn-done.json');
 
 function readSwitch() {
   try {
@@ -21,6 +24,8 @@ function readSwitch() {
 }
 
 try {
+  // 标记始终写（仅一次本地文件写）：面板实时卡不依赖 turnstats 开关
+  fs.writeFileSync(DONE_FILE, JSON.stringify({ ts: Date.now() }) + '\n');
   if (readSwitch() !== 'notify') process.exit(0);
   if (process.platform !== 'darwin') process.exit(0); // osascript 通知仅 macOS；其他平台静默
   const line = execFileSync(process.execPath, [STATS_SCRIPT, '--turn', '--current'], { encoding: 'utf8', timeout: 15000 }).trim();

@@ -291,6 +291,14 @@ const server = http.createServer(async function (req, res) {
     } else if (req.method === 'GET' && u.pathname === '/api/live') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(liveJSON()));
+    } else if (req.method === 'GET' && u.pathname === '/api/turn') {
+      // 「本轮」横幅的浏览器轮询端点（侧栏面板走 MCP 资源订阅，不经此）
+      let text = '';
+      try {
+        text = execFileSync(process.execPath, [path.join(HERE, 'turn-stats.mjs'), '--turn', '--current'], { encoding: 'utf8', timeout: 15000 }).trim();
+      } catch (e) { /* 静默：无数据即空 */ }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ text }));
     } else if (req.method === 'GET' && u.pathname === '/api/prices') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(readPrices()));

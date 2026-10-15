@@ -143,12 +143,16 @@ cmd_dashboard() {
 #usage-dashboard .ud-kv-v{font-size:13px;font-weight:500;}
 #usage-dashboard .ud-sec{margin-top:12px;}
 #usage-dashboard pre.ud-raw{font-size:11px;background:var(--muted);border-radius:8px;padding:8px 10px;overflow-x:auto;white-space:pre;}
+#usage-dashboard .ud-turn{display:flex;align-items:baseline;gap:8px;padding:7px 12px;margin:0 0 10px;border-radius:10px;background:var(--muted);font-size:12.5px;line-height:1.6;}
+#usage-dashboard .ud-turn[hidden]{display:none;}
+#usage-dashboard .ud-turn-t{color:var(--muted-foreground);white-space:nowrap;font-size:11px;}
 </style>
 UD_HEAD
       if [[ "$cmd" == dashboard-this ]]; then
         cat "$SCRIPT_DIR/../assets/session-dashboard.html"
       else
         cat <<'UD_ALL_HEAD'
+<div id="ud-turn" hidden></div>
 <div class="viz-controls" role="group" aria-label="用量筛选">
   <label class="form-label text-small text-muted" for="ud-f-pv">来源</label>
   <select class="form-select" id="ud-f-pv"></select>
@@ -1461,6 +1465,43 @@ if (window.__USAGE_DATA_URL__) {
 } else {
   __usageBoot(DATA || {});
 }
+// 「本轮」实时横幅：侧栏面板内走宿主资源订阅（MCP resources/updated 推送，零轮询）；
+// 浏览器/serve 模式退化为轮询本机 /api/turn。统计由本地脚本计算，不经过模型。
+(function () {
+  var el = document.getElementById('ud-turn');
+  if (!el) return;
+  function render(text) {
+    text = String(text || '').trim();
+    if (!text) { el.hidden = true; return; }
+    var d = new Date();
+    var p2 = function (n) { return n < 10 ? '0' + n : '' + n; };
+    el.innerHTML = '<span>⏱</span><span>' + text.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }) +
+      '</span><span class="ud-turn-t">' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ' 更新</span>';
+    el.hidden = false;
+  }
+  var zc = window.zcode || null;
+  function refreshZc() {
+    try {
+      zc.readResource({ uri: 'ui://usage-detail/turn.txt' }).then(function (res) {
+        render(res && res.contents && res.contents[0] && res.contents[0].text);
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function refreshHttp() {
+    fetch('/api/turn', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { render(j && j.text); }).catch(function () {});
+  }
+  if (zc && typeof zc.subscribeResource === 'function' && typeof zc.onResourceUpdated === 'function') {
+    try {
+      zc.subscribeResource({ uri: 'ui://usage-detail/turn.txt' });
+      zc.onResourceUpdated(function (u) { if (!u || !u.uri || u.uri === 'ui://usage-detail/turn.txt') refreshZc(); });
+    } catch (e) {}
+    refreshZc();
+  } else if (location.protocol === 'http:' || location.protocol === 'https:') {
+    refreshHttp();
+    setInterval(refreshHttp, 15000);
+  }
+})();
 </script>
 </div>
 UD_TAIL
