@@ -293,6 +293,13 @@ document.querySelectorAll('.nav-pills [role=tab]').forEach(function (t) {
     });
   });
 });
+// 支持 #tab hash 定位（侧栏面板跳转：#trend/#blocks/#sessions/#detail/#errors）
+(function () {
+  var h = (location.hash || '').replace('#', '');
+  if (!h) return;
+  var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-' + h + '"]');
+  if (btn) btn.click();
+})();
 `;
 
 let frag = { html: null, limit: 0, at: 0 };

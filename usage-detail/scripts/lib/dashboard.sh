@@ -1084,6 +1084,12 @@ function __usageBoot(D) {
   window.__usageRenderQuota = renderQuota;
 
   apply();
+  // 支持 #tab hash 定位（本地面板跳转：#trend/#blocks/#sessions/#detail/#errors）
+  var h = (location.hash || '').replace('#', '');
+  if (h) {
+    var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-' + h + '"]');
+    if (btn) btn.click();
+  }
   window.__usageBootDone = true;
 }
 if (window.__USAGE_DATA_URL__) {
