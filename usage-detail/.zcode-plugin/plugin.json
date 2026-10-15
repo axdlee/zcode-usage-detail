@@ -1,6 +1,6 @@
 {
   "name": "usage-detail",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "ZCode 本地用量明细：会话侧栏面板、逐条请求钻取、tok/s 速率、来源/项目/模型区分、5 小时窗口燃烧率与剩余请求估算、零密钥配额条（客户端日志）、分时计价、热力图与图表悬停明细、缓存率全链路、models.dev 官方价成本估算、本地常驻面板与导出（只读）。",
   "author": {
     "name": "yeelight"
@@ -19,6 +19,18 @@
       "title": "面板聚合条数",
       "description": "侧栏与仪表盘默认聚合的最近请求条数（1-20000，-1 表示全部）",
       "default": "-1"
+    },
+    "quotaToken": {
+      "type": "string",
+      "title": "官方配额 API Key（可选）",
+      "description": "智谱开放平台 API Key（bigmodel.cn 创建）。配置后 MCP 工具 usage_quota 可查官方 coding-plan 配额（5小时/周池）；不配置则该工具提示如何配置",
+      "default": ""
+    },
+    "quotaBase": {
+      "type": "string",
+      "title": "官方配额接口地址（可选）",
+      "description": "默认 https://open.bigmodel.cn，一般无需修改",
+      "default": ""
     }
   },
   "mcpServers": {
@@ -30,7 +42,9 @@
       ],
       "env": {
         "ZCODE_USAGE_DB": "${user_config.dbPath}",
-        "ZCODE_USAGE_LIMIT": "${user_config.panelLimit}"
+        "ZCODE_USAGE_LIMIT": "${user_config.panelLimit}",
+        "ZCODE_USAGE_QUOTA_TOKEN": "${user_config.quotaToken}",
+        "ZCODE_USAGE_QUOTA_BASE": "${user_config.quotaBase}"
       }
     }
   },

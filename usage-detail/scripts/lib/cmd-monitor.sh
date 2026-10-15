@@ -53,3 +53,32 @@ cmd_serve() {
     exec node "$SCRIPT_DIR/serve.mjs" "$port"
 }
 
+
+# 每轮统计行开关（写 ~/.zcode/usage-turnstats.json；hook 每次提交时读取）
+cmd_turnstats() {
+    local f="$HOME/.zcode/usage-turnstats.json"
+    case "${2:-status}" in
+      on)
+        mkdir -p "$(dirname "$f")"
+        echo '{"enabled":true}' > "$f"
+        echo "已开启：每轮回复末尾附统计行。"
+        echo "开销提示：统计行必须经由模型输出——每轮注入指令约 0.5k token（持续保留在上下文）+ 一次工具调用（结果约 0.1k）+ 统计行输出约 0.05k；"
+        echo "相对百万级上下文占比 <0.1%，短会话约 1-2%。关闭：usage.sh turnstats off"
+        ;;
+      off)
+        echo '{"enabled":false}' > "$f"
+        echo "已关闭：不再注入统计指令（侧栏面板的请求明细仍可查看每轮速率/首字/缓存率）。"
+        ;;
+      status)
+        if [[ -f "$f" ]] && grep -q '"enabled"[: ]*true' "$f" 2>/dev/null; then
+          echo "当前：开启（每轮约增加 0.5-1k token 模型开销；usage.sh turnstats off 关闭）"
+        else
+          echo "当前：关闭（默认）。开启：usage.sh turnstats on"
+        fi
+        ;;
+      *)
+        echo "用法：usage.sh turnstats [on|off|status]" >&2
+        exit 1
+        ;;
+    esac
+}

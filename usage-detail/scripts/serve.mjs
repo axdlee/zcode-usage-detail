@@ -84,6 +84,49 @@ const META_SQL = (pfText, limit, disk) => `
             LEFT JOIN M MI ON MI.v = R.model_id
             LEFT JOIN P PI ON PI.v = R.provider_id));`;
 
+// ---------- 价格表与预算的用户设置（serve 模式的面板内管理） ----------
+let pricesCache = { at: 0, v: null };
+function readPrices() {
+  const pp = pricePath();
+  if (!pp || !fs.existsSync(pp)) return { currency: 'CNY', models: {} };
+  if (pricesCache.v && Date.now() - pricesCache.at < 5000) return pricesCache.v;
+  let v;
+  try { v = JSON.parse(fs.readFileSync(pp, 'utf8')); } catch (e) { v = { currency: 'CNY', models: {} }; }
+  if (!v.models || typeof v.models !== 'object') v = { currency: v.currency || 'CNY', models: v };
+  pricesCache = { at: Date.now(), v };
+  return v;
+}
+function writePrices(next) {
+  const pp = pricePath();
+  if (!pp) throw new Error('价格文件路径不可用');
+  const tmp = pp + '.tmp';
+  fs.mkdirSync(path.dirname(pp), { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+  fs.renameSync(tmp, pp);
+  pricesCache = { at: 0, v: null };
+  frag.html = null; // 改价后立即重算
+}
+function priceEntry(m) {
+  const i = Number(m.in), o = Number(m.out), c = Number(m.cache);
+  return { in: Number.isFinite(i) ? Math.max(0, i) : 0, out: Number.isFinite(o) ? Math.max(0, o) : 0, cache: Number.isFinite(c) ? Math.max(0, c) : 0 };
+}
+function budgetPath() { return path.join(os.homedir(), '.zcode', 'usage-budget.json'); }
+function readBudget() {
+  try { return JSON.parse(fs.readFileSync(budgetPath(), 'utf8')); } catch (e) { return { daily: 0, monthly: 0 }; }
+}
+function writeBudget(b) {
+  const tmp = budgetPath() + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify({ daily: Number(b.daily) || 0, monthly: Number(b.monthly) || 0 }) + '\n');
+  fs.renameSync(tmp, budgetPath());
+}
+function readBody(req) {
+  return new Promise(function (resolve, reject) {
+    let t = '';
+    req.on('data', function (c) { t += c; if (t.length > 1e6) { reject(new Error('body too large')); req.destroy(); } });
+    req.on('end', function () { try { resolve(JSON.parse(t || '{}')); } catch (e) { reject(e); } });
+  });
+}
+
 // limit 归一：未指定/非正数 = 全部（LIMIT -1），正数钳到 1-20000
 function clampLimit(v) {
   const n = Number(v);
@@ -228,7 +271,7 @@ try {
   }
 } catch (e) {}
 
-const server = http.createServer(function (req, res) {
+const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://127.0.0.1');
   try {
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
@@ -248,6 +291,38 @@ const server = http.createServer(function (req, res) {
     } else if (req.method === 'GET' && u.pathname === '/api/live') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(liveJSON()));
+    } else if (req.method === 'GET' && u.pathname === '/api/prices') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(readPrices()));
+    } else if (req.method === 'POST' && u.pathname === '/api/prices/set') {
+      const b = await readBody(req);
+      const model = String(b.model || '').trim();
+      if (!model) throw new Error('模型名不能为空');
+      const next = readPrices();
+      next.models[model] = priceEntry(b);
+      writePrices(next);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, model: model }));
+    } else if (req.method === 'POST' && u.pathname === '/api/prices/remove') {
+      const b = await readBody(req);
+      const next = readPrices();
+      delete next.models[String(b.model || '')];
+      writePrices(next);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true }));
+    } else if (req.method === 'GET' && u.pathname === '/api/budget') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(readBudget()));
+    } else if (req.method === 'POST' && u.pathname === '/api/budget') {
+      const b = await readBody(req);
+      writeBudget(b);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true }));
+    } else if (req.method === 'GET' && (u.pathname === '/report.html' || u.pathname === '/report')) {
+      // 自包含报表：内嵌全部数据的一次性快照（供存档/分享/打印）
+      const html = renderFragment(-1).replace('window.__USAGE_SERVE__ = true;', 'window.__USAGE_SERVE__ = false;');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': 'attachment; filename="zcode-usage-report.html"' });
+      res.end(html);
     } else if (req.method === 'POST' && u.pathname === '/api/sync-prices') {
       const out = execFileSync('bash', [USAGE_SH, 'prices', 'sync'], { encoding: 'utf8', timeout: 90000 });
       frag.html = null;

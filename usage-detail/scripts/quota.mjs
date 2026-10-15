@@ -13,6 +13,10 @@ import { readQuotaFromLog } from './quota-log.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveEndpoint() {
+  // 0) 插件设置注入的官方配额 Key（userConfig.quotaToken → panel-server env；命令行也可直接 export）
+  if (process.env.ZCODE_USAGE_QUOTA_TOKEN) {
+    return { token: process.env.ZCODE_USAGE_QUOTA_TOKEN, base: process.env.ZCODE_USAGE_QUOTA_BASE || 'https://open.bigmodel.cn' };
+  }
   if (process.env.ANTHROPIC_AUTH_TOKEN && process.env.ANTHROPIC_BASE_URL) {
     return { token: process.env.ANTHROPIC_AUTH_TOKEN, base: process.env.ANTHROPIC_BASE_URL };
   }

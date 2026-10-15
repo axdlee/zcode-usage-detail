@@ -45,6 +45,7 @@ case "$cmd" in
   quota) cmd_quota "$@" ;;
   serve) cmd_serve "$@" ;;
   doctor) cmd_doctor "$@" ;;
+  turnstats) cmd_turnstats "$@" ;;
   help|*)
     cat <<'EOF'
 用法：usage.sh [子命令] [参数]
@@ -73,6 +74,7 @@ case "$cmd" in
                            条数默认全部（-1），可用 ZCODE_USAGE_LIMIT 覆盖，范围 1-20000
   serve [端口]             本地常驻面板（默认端口 7741），浏览器打开、5s 轮询实时燃烧率
   quota                    官方套餐配额（5小时/周/MCP 池用量百分比，凭据不可用时提示）
+  turnstats [on|off|status] 每轮对话末尾统计行开关（默认关闭；开启后每轮约增加 0.5-1k token 模型开销）
 环境变量：ZCODE_USAGE_DB 覆盖数据库路径；ZCODE_USAGE_PRICES 覆盖价格表路径；ZCODE_USAGE_LIMIT 覆盖默认内嵌条数；ZCODE_USAGE_NO_AUTOSYNC=1 关闭价格表每日自动同步。
 EOF
     ;;

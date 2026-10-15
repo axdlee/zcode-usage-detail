@@ -24,14 +24,27 @@ try {
   fs.writeFileSync(STATE_FILE, JSON.stringify({ sessionId: sid, ts: now, promptTs: now, source: 'prompt-submit' }));
 } catch (e) {}
 
+// 开关：~/.zcode/usage-turnstats.json {"enabled":true}，缺省关闭。
+// 统计行机制必须经由模型（hook 无法直接向消息追加文本）：注入指令约 0.5k token/轮
+// + 模型一次工具调用（结果约 0.1k）+ 输出统计行约 0.05k，默认关闭由用户显式开启。
+function turnStatsEnabled() {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-turnstats.json'), 'utf8'));
+    return v && v.enabled === true;
+  } catch (e) { return false; }
+}
+if (!turnStatsEnabled()) {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit' } }));
+  process.exit(0);
+}
+
+// 精简指令：注入文本每轮都会永久留在上下文里，是本功能最大的模型开销项
+// （约 150 token；统计行本身仅 ~50）。完整约束靠脚本输出格式与模型习惯兜底。
 const INSTRUCTION = [
   '',
-  '【本轮统计指令】若你在本次回答中已经调用过工具，请严格按以下顺序收尾：',
-  `1. 在开始写最终回复正文之前，运行一次：node "${STATS_SCRIPT}" --turn --current`,
-  '2. 然后输出完整的最终回复正文（用户需要的全部内容），并把脚本输出的那一行原样放入 Markdown 引用块（新行行首加「> 」）附在这条回复的最末尾；不要改写数字、不要追加任何其他内容。',
-  '关键约束：统计行必须与完整回复正文在同一条消息里。绝不能让统计行（或只含统计行的短消息）单独成为你最后一条消息，也绝不能在写完全部回复正文之后再调用任何工具——客户端会折叠之前带工具调用的消息，用户将只能看到一行统计。',
-  '降级规则：若你已经写完回复正文才发现没运行统计脚本，就直接省略统计行结束回答，不要事后补调用工具。',
-  '注意：若脚本没有输出任何统计行（如本次回答没有调用过任何工具），则不要显示统计行、也不要为此额外调用工具。',
+  '【统计】写正文前先运行一次：node "' + STATS_SCRIPT + '" --turn --current',
+  '把它输出的统计行原文放入「> 」引用块，附在本条回复最末尾；统计行必须与正文同一条消息，不要改写数字。',
+  '脚本无输出则直接省略，不要为此额外调用工具。',
 ].join('\n');
 
 process.stdout.write(JSON.stringify({

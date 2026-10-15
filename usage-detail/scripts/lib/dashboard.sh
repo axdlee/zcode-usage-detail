@@ -119,6 +119,12 @@ cmd_dashboard() {
 #usage-dashboard .ud-leg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;line-height:1.4;}
 #usage-dashboard .ud-leg-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #usage-dashboard .ud-leg-row .n{flex:0 0 auto;color:var(--muted-foreground);font-variant-numeric:tabular-nums;}
+#usage-dashboard #ud-mgr-mask{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:60;display:flex;align-items:center;justify-content:center;}
+#usage-dashboard #ud-mgr-mask[hidden]{display:none;}
+#usage-dashboard .ud-mgr-t input{width:86px;padding:1px 6px;font-size:12px;}
+#usage-dashboard .ud-budget-bar{height:6px;border-radius:3px;background:var(--muted);overflow:hidden;margin-top:4px;}
+#usage-dashboard .ud-budget-bar>i{display:block;height:100%;background:var(--viz-series-1);}
+#usage-dashboard .ud-budget-bar.ud-over>i{background:var(--red,var(--viz-series-1));}
 #usage-dashboard .ud-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start;}
 @media (max-width:900px){#usage-dashboard .ud-grid3{grid-template-columns:1fr;}}
 #usage-dashboard .ud-timeline{position:relative;margin:6px 0 0 4px;padding-left:14px;border-left:2px solid var(--border);}
@@ -158,7 +164,18 @@ UD_HEAD
   <span id="ud-day-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除日期筛选"></span>
   <label class="form-check form-switch" id="ud-cost-wrap" hidden><input type="checkbox" class="form-check-input" id="ud-f-cost"><span class="form-check-label text-small">折算成本（API 牌价）</span></label>
   <button type="button" class="btn" id="ud-price-sync" style="margin:0;padding:2px 10px;font-size:12px">同步价格</button>
+  <button type="button" class="btn" id="ud-price-mgr" style="margin:0;padding:2px 10px;font-size:12px">价格 / 预算</button>
+  <button type="button" class="btn" id="ud-export-report" hidden style="margin:0;padding:2px 10px;font-size:12px">导出报表</button>
   <span class="text-small text-muted" id="ud-meta"></span>
+</div>
+<div id="ud-mgr-mask" hidden>
+  <div class="card" style="width:min(760px,94vw);max-height:86vh;overflow:auto;padding:16px 18px" role="dialog" aria-label="价格与预算设置">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">价格与预算（每百万 token，CNY）</h3>
+      <button type="button" class="btn" id="ud-mgr-close" style="margin:0;padding:2px 10px;font-size:12px">关闭</button>
+    </div>
+    <div id="ud-mgr-body"></div>
+  </div>
 </div>
 <div class="nav nav-pills" role="tablist" aria-label="用量视图">
   <button class="nav-link active" id="ud-tab-overview" role="tab" aria-controls="ud-overview" aria-selected="true" type="button">总览</button>
@@ -175,6 +192,8 @@ UD_HEAD
     <div class="card viz-stat"><div class="text-muted text-small">活跃会话</div><div class="viz-stat-value tabular-nums" id="ud-k4">–</div><div class="text-small text-muted" id="ud-k4c"></div></div>
   </div>
   <div class="ud-insights text-small" id="ud-insights" aria-live="polite"></div>
+  <div class="ud-insights text-small" id="ud-health"></div>
+  <div id="ud-quota-card" hidden></div>
   <div class="ud-grid3">
     <div>
       <h3>来源构成</h3>
@@ -206,6 +225,7 @@ UD_HEAD
     <div class="viz-row" role="group" aria-label="热力图粒度" id="ud-heat-toggle">
       <button type="button" class="ud-toggle" data-hm="day" aria-pressed="true">每日</button>
       <button type="button" class="ud-toggle" data-hm="week" aria-pressed="false">每周</button>
+      <button type="button" class="ud-toggle" data-hm="month" aria-pressed="false">月历</button>
     </div>
   </div>
   <div id="ud-heatmap"></div>
@@ -502,10 +522,56 @@ function __usageBoot(D) {
       if (pk >= 0) items.push(['峰值时段', pk + ' 点（' + fmtI(pv2) + ' 次请求）']);
     }
     if (D.disk && D.disk.logs) items.push(['数据体量', '日志 ' + fmtMB(D.disk.logs) + ' · 导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db)]);
-    var totalCost = 0, anyCost = false;
-    rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } });
-    if (anyCost) items.push(['折算成本（API 牌价）', fmtCost(totalCost)]);
+    var totalCost = 0, anyCost = false, unpricedTok = 0;
+    rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } else unpricedTok += N(r[4]) + N(r[5]); });
+    if (anyCost) {
+      var aTok = a.inn + a.out;
+      items.push(['折算成本（API 牌价）', fmtCost(totalCost) + (unpricedTok > 0 && aTok ? ' · 未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : '')]);
+    }
+    // 本地预算：日 / 30 天折算金额进度（价格/预算对话框里设置）
+    if (st.budget && (N(st.budget.daily) > 0 || N(st.budget.monthly) > 0)) {
+      var nowD = new Date();
+      var dayStart = new Date(nowD.toDateString()).getTime();
+      var mStart = new Date(nowD.getFullYear(), nowD.getMonth(), 1).getTime();
+      var dayCost = 0, mCost = 0;
+      rows.forEach(function (r) { var c = rowCost(r); if (c == null) return; if (r[1] >= dayStart) dayCost += c; if (r[1] >= mStart) mCost += c; });
+      var bd = N(st.budget.daily), bm = N(st.budget.monthly);
+      if (bd > 0) {
+        var pd = Math.min(100, Math.round(dayCost / bd * 100));
+        items.push({ l: '今日折算 / 日预算', html: '<div class="ud-ins-v tabular-nums">' + fmtCost(dayCost) + ' / ' + fmtCost(bd) + '（' + pd + '%）</div><div class="ud-budget-bar' + (pd >= 100 ? ' ud-over' : '') + '"><i style="width:' + pd + '%"></i></div>' });
+      }
+      if (bm > 0) {
+        var pm2 = Math.min(100, Math.round(mCost / bm * 100));
+        items.push({ l: '本月折算 / 月预算', html: '<div class="ud-ins-v tabular-nums">' + fmtCost(mCost) + ' / ' + fmtCost(bm) + '（' + pm2 + '%）</div><div class="ud-budget-bar' + (pm2 >= 100 ? ' ud-over' : '') + '"><i style="width:' + pm2 + '%"></i></div>' });
+      }
+    }
     $('ud-insights').innerHTML = items.map(function (it) {
+      if (it && it.html) return '<span class="ud-ins"><div>' + it.html + '</div><div class="ud-ins-l">' + it.l + '</div></span>';
+      return '<span class="ud-ins"><div class="ud-ins-v tabular-nums">' + it[1] + '</div><div class="ud-ins-l">' + it[0] + '</div></span>';
+    }).join('');
+  }
+
+  // 健康度卡片：性能与稳定性体检（全部本地聚合）
+  function renderHealth(rows) {
+    var host = $('ud-health');
+    if (!host) return;
+    var a = agg(rows);
+    var items = [];
+    var ttft = 0, tn = 0, genTok = 0, genMs = 0;
+    rows.forEach(function (r) { var t = N(r[11]); if (t > 0) { ttft += t; tn++; } var d = N(r[7]) - t; if (d > 0) { genMs += d; genTok += N(r[5]); } });
+    if (tn) items.push(['平均首字', (ttft / tn / 1000).toFixed(2) + ' s']);
+    if (genMs > 0) items.push(['生成速率', fmtI(Math.round(genTok / (genMs / 1000))) + ' tok/s']);
+    if (D.stability && a) {
+      var errPct = a.req ? Math.round(D.stability[2] / a.req * 1000) / 10 : 0;
+      items.push(['错误率', errPct + '%']);
+    }
+    var peakCtx = 0;
+    (D.compactions || []).forEach(function (c) { if (N(c[2]) > peakCtx) peakCtx = N(c[2]); });
+    if (peakCtx > 0) items.push(['峰值上下文', fmt(peakCtx) + ' token']);
+    var toolMs = 0, toolC = 0;
+    (D.sessionTools || []).forEach(function (t) { toolC += N(t[2]); toolMs += N(t[3]); });
+    if (toolC) items.push(['工具调用', fmtI(toolC) + ' 次 · ' + (toolMs / 1000).toFixed(0) + ' s']);
+    host.innerHTML = items.map(function (it) {
       return '<span class="ud-ins"><div class="ud-ins-v tabular-nums">' + it[1] + '</div><div class="ud-ins-l">' + it[0] + '</div></span>';
     }).join('');
   }
@@ -656,6 +722,33 @@ function __usageBoot(D) {
     }
     function rect(x, y, cw, ch, st2, tip) {
       return '<rect x="' + x + '" y="' + y + '" width="' + cw + '" height="' + ch + '" rx="3" fill="' + st2.fill + '"' + st2.op + '><title>' + esc(tip) + '</title></rect>';
+    }
+    if (heatMode === 'month') {
+      // 最近 3 个月月历：每格一天，着色同日热力（按 token 分位），悬停明细
+      var vAll = cells.map(function (c) { return c.v; }).filter(function (v) { return v > 0; }).sort(function (a, b) { return a - b; });
+      var qs3 = [0.25, 0.5, 0.75].map(function (pp) { return vAll.length ? vAll[Math.min(vAll.length - 1, Math.floor(vAll.length * pp))] : 1; });
+      var endD = new Date(days[days.length - 1] + 'T00:00:00');
+      var mHtml = '';
+      for (var mi = 2; mi >= 0; mi--) {
+        var m0 = new Date(endD.getFullYear(), endD.getMonth() - mi, 1);
+        var dim = new Date(m0.getFullYear(), m0.getMonth() + 1, 0).getDate();
+        var lead = (new Date(m0.getFullYear(), m0.getMonth(), 1).getDay() + 6) % 7;
+        var g = '<div style="min-width:212px"><div class="text-small text-muted" style="margin:2px 0 4px">' + (m0.getFullYear() + ' 年 ' + (m0.getMonth() + 1) + ' 月') + '</div><div style="display:grid;grid-template-columns:repeat(7,26px);gap:3px">';
+        '一二三四五六'.split('').forEach(function (w) { g += '<div class="text-muted" style="font-size:10px;text-align:center">' + w + '</div>'; });
+        for (var e = 0; e < lead; e++) g += '<div></div>';
+        for (var dd = 1; dd <= dim; dd++) {
+          var mk = m0.getFullYear() + '-' + pad(m0.getMonth() + 1) + '-' + pad(dd);
+          var c = cells.find(function (x) { return x.k === mk; });
+          var vv = c ? c.v : 0;
+          var st2 = shade(vv, qs3);
+          g += '<div title="' + mk + ' · ' + fmtI(c ? c.req : 0) + ' 次请求 · ' + fmt(vv) + ' token" style="width:26px;height:22px;border-radius:3px;background:' + st2.fill + ';opacity:' + (st2.op ? st2.op.replace(' fill-opacity="', '').replace('"', '') : (vv > 0 ? 1 : 0.35)) + ';font-size:9px;line-height:22px;text-align:center;color:var(--muted-foreground)">' + dd + '</div>';
+        }
+        g += '</div></div>';
+        mHtml += g;
+      }
+      host.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap">' + mHtml + '</div><div class="text-muted text-small" style="margin-top:6px">着色深浅按当日 token 用量，悬停查看明细。</div>';
+      heatLastW = w;
+      return;
     }
     if (heatMode === 'week') {
       var lead0 = (new Date(cells[0].k + 'T00:00:00').getDay() + 6) % 7;
@@ -1092,7 +1185,20 @@ function __usageBoot(D) {
       var sel = st.day === k;
       return '<tr class="ud-click" data-day="' + k + '" title="点击查看该日的请求明细"><td class="text-nowrap">' + k + (sel ? ' <span class="ud-tag">已选</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(req) + '</td><td class="text-end tabular-nums">' + fmt(inn) + '</td><td class="text-end tabular-nums">' + fmt(out) + '</td><td class="text-end tabular-nums">' + fmt(ca) + '</td><td class="text-end tabular-nums">' + hit + '%</td><td class="text-end text-nowrap tabular-nums">' + rate + '</td></tr>';
     });
-    $('ud-daily-wrap').innerHTML = '<h3 style="margin-top:18px">每日明细</h3><div class="table-responsive" style="max-height:420px;overflow:auto"><table class="table table-sm"><thead><tr><th>日期</th><th class="text-end">请求</th><th class="text-end">输入</th><th class="text-end">生成</th><th class="text-end">缓存读</th><th class="text-end">缓存命中</th><th class="text-end">生成速率</th></tr></thead><tbody>' + dayRows.join('') + '</tbody></table></div>';
+    var mAgg = {};
+    rows.forEach(function (r) {
+      var mk = dayKey(r[1]).slice(0, 7);
+      var o = mAgg[mk] || (mAgg[mk] = { req: 0, inn: 0, out: 0, ca: 0, cost: 0, hasCost: false });
+      o.req++; o.inn += N(r[4]); o.out += N(r[5]); o.ca += N(r[6]);
+      var cc = rowCost(r); if (cc != null) { o.cost += cc; o.hasCost = true; }
+    });
+    var mRows = Object.keys(mAgg).sort().reverse().map(function (mk) {
+      var o = mAgg[mk];
+      var hit2 = o.inn ? Math.round(o.ca / o.inn * 100) : 0;
+      return '<tr><td class="text-nowrap">' + mk + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmt(o.inn) + '</td><td class="text-end tabular-nums">' + fmt(o.out) + '</td><td class="text-end tabular-nums">' + fmt(o.ca) + '</td><td class="text-end tabular-nums">' + hit2 + '%</td>' + (o.hasCost ? '<td class="text-end tabular-nums">' + fmtCost(o.cost) + '</td>' : '') + '</tr>';
+    }).join('');
+    $('ud-daily-wrap').innerHTML = '<h3 style="margin-top:18px">每日明细</h3><div class="table-responsive" style="max-height:420px;overflow:auto"><table class="table table-sm"><thead><tr><th>日期</th><th class="text-end">请求</th><th class="text-end">输入</th><th class="text-end">生成</th><th class="text-end">缓存读</th><th class="text-end">缓存命中</th><th class="text-end">生成速率</th></tr></thead><tbody>' + dayRows.join('') + '</tbody></table></div>' +
+      '<h3 style="margin-top:18px">每月汇总</h3><div class="table-responsive"><table class="table table-sm"><thead><tr><th>月份</th><th class="text-end">请求</th><th class="text-end">输入</th><th class="text-end">生成</th><th class="text-end">缓存读</th><th class="text-end">缓存命中</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '</tr></thead><tbody>' + mRows + '</tbody></table></div>';
     Array.prototype.forEach.call($('ud-daily-wrap').querySelectorAll('tr.ud-click'), function (tr) {
       tr.addEventListener('click', function () {
         var d = tr.getAttribute('data-day');
@@ -1128,6 +1234,7 @@ function __usageBoot(D) {
     if (D.session) { renderSession(rows); renderDetail(rows); return; }
     renderKpis(rows);
     renderInsights(rows);
+    renderHealth(rows);
     renderProviders(frows(true));
     renderModels(rows);
     renderTopSessions(rows);
@@ -1216,6 +1323,99 @@ function __usageBoot(D) {
       setTimeout(function () { btn.textContent = '同步价格'; btn.disabled = false; }, 3000);
     }
   });
+  // ---- 价格 / 预算管理（serve 模式可编辑并即时重算；其他环境只读引导） ----
+  var mgrState = { q: '', prices: null, budget: null };
+  function mgrRow(m, e, used) {
+    return '<tr data-m="' + esc(m) + '"><td class="text-nowrap">' + esc(m) + (used ? ' <span class="ud-tag">当前用量</span>' : '') + '</td>' +
+      '<td class="ud-mgr-t"><input data-k="in" value="' + e.in + '" inputmode="decimal"></td>' +
+      '<td class="ud-mgr-t"><input data-k="out" value="' + e.out + '" inputmode="decimal"></td>' +
+      '<td class="ud-mgr-t"><input data-k="cache" value="' + e.cache + '" inputmode="decimal"></td>' +
+      '<td class="text-nowrap"><button type="button" class="btn ud-mgr-save" style="margin:0;padding:1px 8px;font-size:12px">保存</button> <button type="button" class="btn ud-mgr-del" style="margin:0;padding:1px 8px;font-size:12px">删除</button></td></tr>';
+  }
+  function renderMgr() {
+    var body = $('ud-mgr-body');
+    var p = mgrState.prices, b = mgrState.budget || {};
+    var models = Object.keys(p.models || {});
+    var used = {};
+    frows(false).forEach(function (r) { used[String(MD[r[2]] || '').toLowerCase()] = 1; });
+    var hit = models.filter(function (m) { return mgrState.q ? m.indexOf(mgrState.q) >= 0 : (used[m.toLowerCase()] || mgrState.builtins.indexOf(m) >= 0); });
+    var list = (mgrState.q ? models.filter(function (m) { return m.indexOf(mgrState.q) >= 0; }) : hit).slice(0, 60);
+    body.innerHTML =
+      '<div class="text-small text-muted" style="margin-bottom:8px">单位：元 / 每百万 token。GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。修改保存后整页按新价重算。</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="搜索模型…" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + ' 个模型' + (list.length >= 60 ? '（仅显示前 60）' : '') + '</span></div>' +
+      '<div class="table-responsive" style="max-height:320px;overflow:auto"><table class="table table-sm"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
+      list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
+      '</tbody></table></div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin:10px 0 4px;flex-wrap:wrap"><b class="text-small">新增模型价</b><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致，不区分大小写）" style="width:260px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:80px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:80px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:80px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
+      '<hr style="border-color:var(--border);opacity:.4">' +
+      '<b class="text-small">本地折算预算（超 80% 黄色进度、100% 红色，总览洞察行显示）</b>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap">' +
+      '<label class="text-small text-muted">日预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bd" value="' + (N(b.daily) || '') + '" style="width:100px" inputmode="decimal"></label>' +
+      '<label class="text-small text-muted">月预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bm" value="' + (N(b.monthly) || '') + '" style="width:100px" inputmode="decimal"></label>' +
+      '<button type="button" class="btn" id="ud-mgr-bsave" style="margin:0;padding:2px 10px;font-size:12px">保存预算</button>' +
+      '</div>';
+    var qi = $('ud-mgr-q');
+    qi.addEventListener('input', function () { mgrState.q = this.value.trim().toLowerCase(); renderMgr(); var q2 = $('ud-mgr-q'); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); });
+    Array.prototype.forEach.call(body.querySelectorAll('tr[data-m]'), function (tr) {
+      var m = tr.getAttribute('data-m');
+      tr.querySelector('.ud-mgr-save').addEventListener('click', function () {
+        var get = function (k) { return tr.querySelector('input[data-k="' + k + '"]').value; };
+        postJSON('/api/prices/set', { model: m, in: get('in'), out: get('out'), cache: get('cache') }).then(function () { location.reload(); });
+      });
+      tr.querySelector('.ud-mgr-del').addEventListener('click', function () {
+        postJSON('/api/prices/remove', { model: m }).then(function () { location.reload(); });
+      });
+    });
+    $('ud-mgr-add').addEventListener('click', function () {
+      var nm = $('ud-mgr-newname').value.trim();
+      if (!nm) return;
+      postJSON('/api/prices/set', { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value }).then(function () { location.reload(); });
+    });
+    $('ud-mgr-bsave').addEventListener('click', function () {
+      var nb = { daily: $('ud-mgr-bd').value, monthly: $('ud-mgr-bm').value };
+      postJSON('/api/budget', nb).then(function () { st.budget = { daily: N(nb.daily), monthly: N(nb.monthly) }; $('ud-mgr-mask').hidden = true; apply(); });
+    });
+  }
+  function postJSON(url, data) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function (r) { return r.json(); });
+  }
+  mgrState.builtins = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'];
+  $('ud-price-mgr').addEventListener('click', function () {
+    $('ud-mgr-mask').hidden = false;
+    var body = $('ud-mgr-body');
+    if (!window.__USAGE_SERVE__) {
+      body.innerHTML = '<p class="text-small text-muted">面板内编辑仅在本地面板（<code>usage.sh serve</code>）可用。当前环境可直接编辑 <code>~/.zcode/usage-prices.json</code>（字段 in / out / cache，每百万 token），或运行 <code>/usage prices sync</code> 同步官方价。</p>';
+      return;
+    }
+    body.innerHTML = '<p class="text-muted text-small">加载中…</p>';
+    Promise.all([
+      fetch('/api/prices').then(function (r) { return r.json(); }),
+      fetch('/api/budget').then(function (r) { return r.json(); })
+    ]).then(function (rs) {
+      mgrState.prices = rs[0];
+      mgrState.budget = rs[1];
+      if (!st.budget) st.budget = rs[1];
+      renderMgr();
+    });
+  });
+  $('ud-mgr-close').addEventListener('click', function () { $('ud-mgr-mask').hidden = true; });
+  $('ud-mgr-mask').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
+  if (window.__USAGE_SERVE__) $('ud-export-report').hidden = false;
+  $('ud-export-report').addEventListener('click', function () { location.href = '/report.html'; });
+  // 官方配额（可选）：配置 API Key 后 serve 模式显示官方口径配额卡
+  if (window.__USAGE_SERVE__) {
+    fetch('/api/quota').then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.ok || !Array.isArray(j.limits) || !j.limits.length) return;
+      var host = $('ud-quota-card');
+      host.hidden = false;
+      host.innerHTML = '<h3 style="margin-top:16px">官方套餐配额' + (j.stale ? ' <span class="ud-tag">观测时间：' + (j.logDate || '–') + '</span>' : '') + '</h3><div class="card" style="padding:12px 14px">' +
+        j.limits.map(function (L) {
+          var pct = Math.max(0, Math.min(100, Math.round(N(L.percentage))));
+          return '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between" class="text-small"><span>' + esc(L.type || '配额') + '</span><span class="tabular-nums text-muted">已用 ' + pct + '%' + (L.resetTime ? ' · ' + esc(String(L.resetTime)) + ' 重置' : '') + '</span></div>' +
+            '<div class="ud-budget-bar' + (pct >= 80 ? ' ud-over' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
+        }).join('') + '</div>';
+    }).catch(function () {});
+  }
   $('ud-tab-trend').addEventListener('click', function () { requestAnimationFrame(drawTrend); });
   if (typeof ResizeObserver === 'function') {
     new ResizeObserver(function () { drawTrend(); }).observe($('ud-trend-chart'));

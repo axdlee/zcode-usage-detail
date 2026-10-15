@@ -1,5 +1,5 @@
 {
-  "description": "usage-detail: 每轮回复末尾附一行本问速率/用量/缓存率统计（模型按注入指令在收尾前自测）",
+  "description": "usage-detail: 每轮回复末尾附一行本问速率/用量/缓存率统计（默认关闭；usage.sh turnstats on 开启，开启后每轮约增加 0.5-1k token 模型开销）",
   "hooks": {
     "UserPromptSubmit": [
       {

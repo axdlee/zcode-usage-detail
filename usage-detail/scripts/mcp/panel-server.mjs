@@ -377,6 +377,11 @@ const TOOLS = [
     },
   },
   {
+    name: 'usage_quota',
+    description: '官方套餐配额查询（可选功能）：需在插件设置里配置智谱开放平台 API Key（quotaToken），未配置时返回配置指引。返回 5 小时池/周池/MCP 桠的官方用量百分比与重置时间。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'open_full_panel',
     description: '打开本地常驻完整面板（http://127.0.0.1:7741）。若服务未运行会自动以只读方式启动（仅监听本机）。返回 { url }。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -432,6 +437,18 @@ function handleToolCall(name, args) {
   }
   if (name === 'usage_session') {
     return { structuredContent: buildSessionDetail(args && args.id), content: [{ type: 'text', text: '会话详情' }] };
+  }
+  if (name === 'usage_quota') {
+    if (!process.env.ZCODE_USAGE_QUOTA_TOKEN) {
+      return {
+        structuredContent: { configured: false },
+        content: [{ type: 'text', text: '未配置官方配额 API Key。请在 ZCode 插件设置里给 usage-detail 填写 quotaToken（智谱开放平台 bigmodel.cn 创建的 API Key），保存后重启即可查询官方 coding-plan 配额；也可以直接看 ZCode 的 Usage Stats → Coding Plan（零配置）。' }],
+      };
+    }
+    const out = execFileSync(process.execPath, [path.join(HERE, 'quota.mjs')], { encoding: 'utf8', timeout: 25000 });
+    const j = JSON.parse(out);
+    const lines = (j.limits || []).map((L) => (L.type || '配额') + '：已用 ' + Math.round(L.percentage || 0) + '%' + (L.resetTime ? '，' + L.resetTime + ' 重置' : ''));
+    return { structuredContent: j, content: [{ type: 'text', text: lines.length ? lines.join('\n') : '凭据可用但暂无配额观测。' }] };
   }
   if (name === 'open_full_panel') {
     return ensureServe().then((r) => ({ structuredContent: r, content: [{ type: 'text', text: r.url + (r.started ? '（已启动）' : '（已在运行）') }] }));
