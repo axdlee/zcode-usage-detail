@@ -42,8 +42,91 @@ num_arg() {
 # 供应商标签：官方账号 / 自定义接入
 PV_LABEL="CASE WHEN provider_id LIKE 'account:%' THEN '官方·'||substr(provider_id,9) ELSE '自定义·'||provider_id END"
 
+# SQL 字符串字面量；会话 ID、目录、价格表路径都可能含单引号。
+sql_quote() {
+  local value="$1"
+  # Bash 3.2 的替换表达式置于双引号内会保留多余反斜杠。
+  value=${value//\'/\'\'}
+  printf "'%s'" "$value"
+}
+
+# 定位一次后固定 ID，后续查询不会因其他窗口的新请求切换会话。
+resolve_session() {
+  local requested='' directory='' directory_sql=''
+  SESSION_MODE='最近请求推断（多窗口时请核对）'
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --session|--directory)
+        [[ $# -ge 2 && -n "$2" ]] || { echo "$1 需要非空参数" >&2; exit 1; }
+        [[ -z "$requested$directory" ]] || { echo "--session 与 --directory 只能指定一个且不能重复" >&2; exit 1; }
+        if [[ "$1" == --session ]]; then requested="$2"; else directory="$2"; fi
+        shift 2
+        ;;
+      *) echo "未知会话参数：${1}（可用 --session ID 或 --directory DIR）" >&2; exit 1 ;;
+    esac
+  done
+  if [[ -n "$requested" ]]; then
+    SESSION_ID="$requested"
+    SESSION_MODE='显式指定会话'
+    SESSION_SQL=$(sql_quote "$SESSION_ID")
+    [[ "$(qr "SELECT EXISTS(SELECT 1 FROM session WHERE id=$SESSION_SQL) OR EXISTS(SELECT 1 FROM model_usage WHERE session_id=$SESSION_SQL);")" == 1 ]] || {
+      echo "未找到指定会话：$SESSION_ID" >&2; exit 1;
+    }
+  else
+    if [[ -n "$directory" ]]; then
+      directory_sql="AND session_id IN (SELECT id FROM session WHERE directory=$(sql_quote "$directory"))"
+      SESSION_MODE='指定目录内最近请求推断（多窗口时请核对）'
+    fi
+    SESSION_ID=$(qr "SELECT session_id FROM model_usage WHERE session_id IS NOT NULL AND session_id<>'' $directory_sql ORDER BY started_at DESC, id DESC LIMIT 1;")
+    [[ -n "$SESSION_ID" ]] || { echo "未找到可用于定位会话的模型请求${directory:+（目录：${directory}）}；可用 --session ID 指定会话" >&2; exit 1; }
+    SESSION_SQL=$(sql_quote "$SESSION_ID")
+  fi
+}
+
+session_info() {
+  q "SELECT $SESSION_SQL AS 会话ID,
+            coalesce(nullif(s.title,''),'（无标题或会话已删除）') AS 会话标题,
+            coalesce(s.directory,'-') AS 项目目录,
+            datetime(s.time_created/1000,'unixepoch','localtime') AS 创建时间,
+            (SELECT datetime(max(started_at)/1000,'unixepoch','localtime') FROM model_usage WHERE session_id=$SESSION_SQL) AS 最近请求
+     FROM (SELECT 1) LEFT JOIN session s ON s.id=$SESSION_SQL;"
+  echo "定位方式：${SESSION_MODE}；仅统计该 session_id 的记录。"
+}
+
 cmd="${1:-summary}"
 case "$cmd" in
+  this)
+    resolve_session "${@:2}"
+    session_info
+    echo
+    echo "—— 会话汇总（全部状态；输入含缓存读，生成=输出+思考）——"
+    q "SELECT count(*) AS 总请求数,
+              coalesce(sum(status='completed'),0) AS 完成数,
+              coalesce(sum(status='error'),0) AS 失败数,
+              coalesce(sum(status='cancelled'),0) AS 取消数,
+              coalesce(sum(status NOT IN ('completed','error','cancelled')),0) AS 其他状态数,
+              coalesce(sum(input_tokens),0) AS 输入token,
+              coalesce(sum(output_tokens+reasoning_tokens),0) AS 生成token,
+              coalesce(sum(cache_read_input_tokens),0) AS 缓存读token
+       FROM model_usage WHERE session_id=$SESSION_SQL;"
+    echo
+    echo "—— 按模型与来源（全部状态）——"
+    q "SELECT model_id AS 模型, $PV_LABEL AS 来源,
+              count(*) AS 请求数,
+              sum(input_tokens) AS 输入token,
+              sum(output_tokens+reasoning_tokens) AS 生成token,
+              sum(cache_read_input_tokens) AS 缓存读token
+       FROM model_usage WHERE session_id=$SESSION_SQL
+       GROUP BY model_id, provider_id ORDER BY sum(input_tokens+output_tokens+reasoning_tokens) DESC;"
+    echo
+    echo "—— 最近失败/取消请求（最多 10 条）——"
+    q "SELECT datetime(started_at/1000,'unixepoch','localtime') AS 时间,
+              model_id AS 模型, $PV_LABEL AS 来源, status AS 状态,
+              coalesce(error_code,'-') AS 错误码,
+              substr(coalesce(error_message,'-'),1,60) AS 错误信息
+       FROM model_usage WHERE session_id=$SESSION_SQL AND status IN ('error','cancelled')
+       ORDER BY started_at DESC, id DESC LIMIT 10;"
+    ;;
   summary)
     q "SELECT count(*) AS 总请求数,
               datetime(min(started_at)/1000,'unixepoch','localtime') AS 首次请求,
@@ -364,32 +447,48 @@ NODE
        FROM model_usage WHERE status<>'completed'
        ORDER BY started_at DESC LIMIT $n;"
     ;;
-  dashboard)
+  dashboard|dashboard-this)
     # 生成交互式用量界面（HTML 片段），输出路径必须由调用方指定。
-    # 数据以原始请求行内嵌（默认最近 3000 条，可用第三参数或 ZCODE_USAGE_LIMIT 调整），筛选/聚合全部在前端完成。
+    # 默认最近 3000 条；全量 dashboard 可用第三参数调整，会话版用 ZCODE_USAGE_LIMIT 调整。
     out="${2:-}"
-    [[ -n "$out" ]] || { echo "用法：usage.sh dashboard <输出.html> [条数]" >&2; exit 1; }
-    limit=$(num_arg "${ZCODE_USAGE_LIMIT:-3000}" "${3:-}")
-    [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间：$limit（过大可能超出会话内嵌渲染的体积限制，更多历史请用 export json）" >&2; exit 1; }
+    [[ -n "$out" ]] || { echo "用法：usage.sh $cmd <输出.html>" >&2; exit 1; }
+    scope=''
+    session_meta='null'
+    limit_arg="${3:-}"
+    if [[ "$cmd" == dashboard-this ]]; then
+      limit_arg=''
+      resolve_session "${@:3}"
+      scope="WHERE session_id=$SESSION_SQL"
+      session_meta="(SELECT json_object('id',$SESSION_SQL,
+        'title',coalesce(nullif(s.title,''),'（无标题或会话已删除）'),
+        'directory',s.directory,'created',s.time_created,
+        'latest',(SELECT max(started_at) FROM model_usage $scope),
+        'selection',$(sql_quote "$SESSION_MODE"))
+        FROM (SELECT 1) LEFT JOIN session s ON s.id=$SESSION_SQL)"
+    fi
+    limit=$(num_arg "${ZCODE_USAGE_LIMIT:-3000}" "$limit_arg")
+    is_num "$limit" && [[ "$limit" -ge 1 && "$limit" -le 20000 ]] || { echo "条数应在 1-20000 之间：${limit}（更多历史请用 export json）" >&2; exit 1; }
     pf=$(price_file)
     if [[ -n "$pf" ]]; then
-      PJ_SQL="(SELECT CAST(readfile('$pf') AS text) AS pj)"
+      PJ_SQL="(SELECT CAST(readfile($(sql_quote "$pf")) AS text) AS pj)"
     else
       PJ_SQL="(SELECT NULL AS pj)"
     fi
     META=$(qr "
-      WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
-           M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
-           S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM model_usage)),
+      WITH U AS (SELECT * FROM model_usage $scope),
+           P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM U)),
+           M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM U)),
+           S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM U)),
            PJ AS $PJ_SQL,
-           R AS (SELECT * FROM model_usage ORDER BY started_at DESC LIMIT $limit)
+           R AS (SELECT * FROM U ORDER BY started_at DESC, id DESC LIMIT $limit)
       SELECT json_object(
+        'session',$session_meta,
         'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
         'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
         'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
-        'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
+        'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage $scope GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
         'prices',(SELECT CASE WHEN pj IS NOT NULL AND json_valid(pj) THEN json(pj) ELSE json('{}') END FROM PJ),
-        'total',(SELECT count(*) FROM model_usage),
+        'total',(SELECT count(*) FROM U),
         'covered',(SELECT count(*) FROM R),
         'gen',(SELECT datetime('now','localtime')),
         'rows',(SELECT json_group_array(json_array(
@@ -421,6 +520,10 @@ NODE
 #usage-dashboard .ud-insights{display:flex;flex-wrap:wrap;gap:4px 18px;padding:6px 0;}
 #usage-dashboard .ud-insights .text-muted{margin-right:4px;}
 </style>
+<div id="ud-session" hidden>
+  <h3 id="ud-session-title"></h3>
+  <p class="text-small text-muted" id="ud-session-info" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
+</div>
 <div class="viz-controls" role="group" aria-label="用量筛选">
   <label class="form-label text-small text-muted" for="ud-f-pv">来源</label>
   <select class="form-select" id="ud-f-pv"></select>
@@ -511,7 +614,8 @@ NODE
 <script>
 const DATA =
 UD_HEAD
-      printf '%s\n' "$META"
+      # JSON 位于 script 中：转义 < 防止会话标题中的 </script> 提前闭合标签。
+      printf '%s\n' "${META//</\\u003c}"
       cat <<'UD_TAIL'
 ;
 (function () {
@@ -532,6 +636,15 @@ UD_HEAD
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
   function dayKey(ts) { var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function fullTs(ts) { var d = new Date(ts); return dayKey(ts) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+
+  if (D.session) {
+    $('ud-session').hidden = false;
+    $('ud-session-title').textContent = '会话用量 · ' + D.session.title;
+    $('ud-session-info').textContent = '会话 ID：' + D.session.id + '\n项目目录：' + (D.session.directory || '–')
+      + '\n创建：' + (D.session.created == null ? '–' : fullTs(D.session.created))
+      + ' · 最近请求：' + (D.session.latest == null ? '暂无请求' : fullTs(D.session.latest))
+      + '\n定位方式：' + D.session.selection + '；仅统计该 session_id 的记录。';
+  }
 
   var STAT = ['完成', '失败', '已取消', '进行中'];
   var SCOLOR = ['var(--green)', 'var(--red)', 'var(--yellow)', 'var(--blue)'];
@@ -850,7 +963,7 @@ UD_HEAD
   }
 
   function renderErrors(rows) {
-    var list = rows.filter(function (r) { return r[8] !== 0; }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 30);
+    var list = rows.filter(function (r) { return r[8] === 1 || r[8] === 2; }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 30);
     $('ud-errors-body').innerHTML = list.length ? list.map(function (r) {
       return '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td><td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td><td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td><td>' + stHtml(r[8]) + '</td></tr>';
     }).join('') : '<tr><td colspan="6" class="text-muted">当前筛选下没有失败或取消的请求</td></tr>';
@@ -972,6 +1085,10 @@ UD_TAIL
   help|*)
     cat <<'EOF'
 用法：usage.sh [子命令] [参数]
+  this [--session ID | --directory DIR]
+                           当前会话汇总、模型/来源与最近失败/取消请求（默认按最近请求推断）
+  dashboard-this <输出.html> [--session ID | --directory DIR]
+                           当前会话仪表盘（会话过滤后再取最近 3000 条）
   summary                  总览：累计 + 今日（默认）
   providers                按来源（官方套餐 / 自定义接入）汇总
   blocks                   5 小时窗口用量（末尾窗口若在 5h 内即进行中）
