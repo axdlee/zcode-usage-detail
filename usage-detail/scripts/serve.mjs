@@ -61,7 +61,7 @@ const META_SQL = (pfText, limit, disk) => `
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
-              ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
+              ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
                    'models', COALESCE(CASE WHEN json_type(pj,'$.models')='object'
                      THEN (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj,'$.models') je
                            WHERE lower(je.key) IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
@@ -192,7 +192,7 @@ function renderFragment(limit) {
     c.appendChild(badge);
     function tick() {
       fetch('/api/live').then(function (r) { return r.json(); }).then(function (j) {
-        badge.textContent = '● 实时 · 燃烧率 ' + Number(j.window.rateH || 0).toLocaleString('zh-CN') + ' token/h · 本窗 ' + Number(j.window.tok || 0).toLocaleString('zh-CN') + ' token · 今日 ' + Number(j.today.req || 0).toLocaleString('zh-CN') + ' 次';
+        badge.textContent = '● 实时 · 燃烧率 ' + Number(j.window.rateH || 0).toLocaleString('zh-CN') + ' token/h · 近 5h ' + Number(j.window.tok || 0).toLocaleString('zh-CN') + ' token · 今日 ' + Number(j.today.req || 0).toLocaleString('zh-CN') + ' 次';
       }).catch(function () {});
     }
     tick();

@@ -1,5 +1,5 @@
 {
-  "currency": "USD",
+  "currency": "CNY",
   "source": "models.dev",
   "updated": "2026-10-15",
   "models": {
@@ -19,9 +19,9 @@
       "cache": 1.2
     },
     "glm-5.3-flash": {
-      "in": 0.15,
-      "out": 0.5,
-      "cache": 0.03
+      "in": 0.8,
+      "out": 2.8,
+      "cache": 0.23
     },
     "glm-4.6": {
       "in": 0.6,
@@ -44,9 +44,9 @@
       "cache": 0
     },
     "glm-5.3-flashx": {
-      "in": 0.37,
-      "out": 1.25,
-      "cache": 0.075
+      "in": 2,
+      "out": 7,
+      "cache": 0.57
     },
     "glm-4.7-flash": {
       "in": 0,
@@ -89,9 +89,9 @@
       "cache": 0.03
     },
     "glm-5.3": {
-      "in": 1.4,
-      "out": 4.4,
-      "cache": 0.26
+      "in": 8,
+      "out": 28,
+      "cache": 2
     }
   }
 }

@@ -66,7 +66,7 @@ cmd_dashboard() {
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
         'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
-              ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
+              ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
                    'models', COALESCE(CASE WHEN json_type(pj,'$.models')='object'
                      THEN (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj,'$.models') je
                            WHERE lower(je.key) IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
@@ -156,14 +156,13 @@ UD_HEAD
   </div>
   <span id="ud-sess-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除会话筛选"></span>
   <span id="ud-day-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除日期筛选"></span>
-  <label class="form-check form-switch" id="ud-cost-wrap" hidden><input type="checkbox" class="form-check-input" id="ud-f-cost"><span class="form-check-label text-small">成本估算</span></label>
+  <label class="form-check form-switch" id="ud-cost-wrap" hidden><input type="checkbox" class="form-check-input" id="ud-f-cost"><span class="form-check-label text-small">折算成本（API 牌价）</span></label>
   <button type="button" class="btn" id="ud-price-sync" style="margin:0;padding:2px 10px;font-size:12px">同步价格</button>
   <span class="text-small text-muted" id="ud-meta"></span>
 </div>
 <div class="nav nav-pills" role="tablist" aria-label="用量视图">
   <button class="nav-link active" id="ud-tab-overview" role="tab" aria-controls="ud-overview" aria-selected="true" type="button">总览</button>
   <button class="nav-link" id="ud-tab-trend" role="tab" aria-controls="ud-trend" aria-selected="false" type="button">每日趋势</button>
-  <button class="nav-link" id="ud-tab-blocks" role="tab" aria-controls="ud-blocks" aria-selected="false" type="button">5 小时窗口</button>
   <button class="nav-link" id="ud-tab-sessions" role="tab" aria-controls="ud-sessions" aria-selected="false" type="button">会话排行</button>
   <button class="nav-link" id="ud-tab-detail" role="tab" aria-controls="ud-detail" aria-selected="false" type="button">请求明细</button>
   <button class="nav-link" id="ud-tab-errors" role="tab" aria-controls="ud-errors" aria-selected="false" type="button">失败请求</button>
@@ -222,14 +221,6 @@ UD_HEAD
   <div class="ud-legend" id="ud-pv-legend"></div>
   <div id="ud-trend-chart"></div>
   <div id="ud-daily-wrap"></div>
-</div>
-<div id="ud-blocks" role="tabpanel" aria-labelledby="ud-tab-blocks" hidden>
-  <div class="card" id="ud-block-now" style="margin:8px 0"></div>
-  <p class="text-small text-muted" style="margin:2px 0 10px">相邻请求间隔满 5 小时即开启新窗口（同 ccusage 口径）。此为本地记录的近似口径，服务端套餐配额以 Usage Stats → Coding Plan 为准。</p>
-  <div class="table-responsive"><table class="table table-sm">
-    <thead><tr><th>开始</th><th>最近活动</th><th class="text-end">时长</th><th class="text-end">请求数</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th></tr></thead>
-    <tbody id="ud-blocks-body"></tbody>
-  </table></div>
 </div>
 <div id="ud-sessions" role="tabpanel" aria-labelledby="ud-tab-sessions" hidden>
   <p class="text-small text-muted">点击表头排序，筛选条件在上方全局生效；点击行可展开会话详情。</p>
@@ -513,7 +504,7 @@ function __usageBoot(D) {
     if (D.disk && D.disk.logs) items.push(['数据体量', '日志 ' + fmtMB(D.disk.logs) + ' · 导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db)]);
     var totalCost = 0, anyCost = false;
     rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } });
-    if (anyCost) items.push(['估算成本', fmtCost(totalCost)]);
+    if (anyCost) items.push(['折算成本（API 牌价）', fmtCost(totalCost)]);
     $('ud-insights').innerHTML = items.map(function (it) {
       return '<span class="ud-ins"><div class="ud-ins-v tabular-nums">' + it[1] + '</div><div class="ud-ins-l">' + it[0] + '</div></span>';
     }).join('');
@@ -720,53 +711,6 @@ function __usageBoot(D) {
     heatLastW = w;
   }
 
-  function renderBlocks(rows) {
-    if (!rows.length) { $('ud-block-now').innerHTML = '<p class="text-muted">当前筛选下暂无数据</p>'; $('ud-blocks-body').innerHTML = ''; return; }
-    var srt = rows.slice().sort(function (a, b) { return a[1] - b[1]; });
-    var blocks = [], cur = null;
-    srt.forEach(function (r) {
-      if (!cur || r[1] - cur.start >= 18e6) { cur = { start: r[1], end: r[1], req: 0, inn: 0, out: 0, ca: 0 }; blocks.push(cur); }
-      cur.end = r[1]; cur.req++; cur.inn += N(r[4]); cur.out += N(r[5]); cur.ca += N(r[6]);
-    });
-    var now = Date.now();
-    var last = blocks[blocks.length - 1];
-    var active = last && (now - last.start) < 18e6 ? last : null;
-    if (active) {
-      var elapsedMs = now - active.start;
-      var elPct = Math.min(100, Math.round(elapsedMs / 18e6 * 100));
-      var remainPct = 100 - elPct;
-      var minsLeft = Math.max(0, Math.round((active.start + 18e6 - now) / 60000));
-      var tok = active.inn + active.out;
-      var rate = tok / Math.max(0.05, elapsedMs / 36e5);
-      var complete = blocks.filter(function (b) { return b !== active; });
-      var recent = complete.slice(-3);
-      var avg = recent.length ? recent.reduce(function (a, b) { return a + b.inn + b.out; }, 0) / recent.length : 0;
-      var projected = rate * 5;
-      var avgReq = recent.length ? Math.round(recent.reduce(function (a, b) { return a + b.req; }, 0) / recent.length) : 0;
-      var remainReq = avgReq > 0 ? Math.max(0, avgReq - active.req) : -1;
-      var cmp = '';
-      if (avg > 0) {
-        var diff = Math.round((projected - avg) / avg * 100);
-        cmp = '<div class="text-small text-muted" style="margin-top:6px">近 ' + recent.length + ' 个完整窗口均值 ' + fmt(avg) + ' token · 按当前速率本窗口预计 ' + fmt(projected) + ' token（' + (diff >= 0 ? '高于' : '低于') + '均值 ' + Math.abs(diff) + '%）</div>';
-      }
-      if (remainReq >= 0) {
-        cmp += '<div class="text-small text-muted" style="margin-top:4px">按近 ' + recent.length + ' 个完整窗口平均请求数（' + fmtI(avgReq) + ' 次），本窗口预计还可发起约 <b class="tabular-nums">' + fmtI(remainReq) + '</b> 次请求</div>';
-      }
-      var resetClock = fullTs(active.start + 18e6).slice(11, 16);
-      $('ud-block-now').innerHTML =
-        '<div style="display:flex;justify-content:space-between;align-items:baseline"><span class="text-small text-muted">本窗口剩余</span><span class="text-small text-muted">约 ' + resetClock + ' 重置 · 开始 ' + fullTs(active.start).slice(11) + '</span></div>' +
-        '<div class="viz-stat-value tabular-nums">' + remainPct + '%</div>' +
-        '<div class="progress" role="progressbar" aria-label="窗口剩余时间" aria-valuenow="' + remainPct + '" aria-valuemin="0" aria-valuemax="100" style="margin-top:6px"><div class="progress-bar" style="width:' + remainPct + '%"></div></div>' +
-        '<div class="text-small text-muted" style="margin-top:6px">' + fmtI(active.req) + ' 次请求 · ' + fmt(tok) + ' token · 燃烧率 ' + fmt(rate) + ' token/h · 约 ' + minsLeft + ' 分钟后满 5 小时</div>' + cmp;
-    } else {
-      $('ud-block-now').innerHTML = '<div class="text-small text-muted">当前没有进行中的 5 小时窗口（最近一次活动 ' + (last ? fullTs(last.end) : '–') + '）。需要盯着燃烧率时，可在终端运行 <code>usage.sh live</code> 实时监控。</div>';
-    }
-    $('ud-blocks-body').innerHTML = blocks.slice(-12).reverse().map(function (b) {
-      var hrs = ((b.end - b.start) / 36e5).toFixed(1);
-      return '<tr><td class="text-nowrap">' + fullTs(b.start) + '</td><td class="text-nowrap">' + fullTs(b.end) + '</td><td class="text-end tabular-nums">' + hrs + ' h</td><td class="text-end tabular-nums">' + fmtI(b.req) + '</td><td class="text-end tabular-nums">' + fmt(b.inn) + '</td><td class="text-end tabular-nums">' + fmt(b.out) + '</td></tr>';
-    }).join('');
-  }
-
   function sessionDetailHTML(o) {
     var rs = R.filter(function (r) { return r[0] === o.g; }).sort(function (a, b) { return a[1] - b[1]; });
     var dir = SD[o.g] ? esc(SD[o.g]) : '<span class="text-muted">–</span>';
@@ -844,7 +788,7 @@ function __usageBoot(D) {
       })() +
       (subReq ? kv('主会话 / 子代理', fmtI(mainReq) + ' 次 · ' + fmt(mainTok) + ' tok <span class="text-muted">/</span> ' + fmtI(subReq) + ' 次 · ' + fmt(subTok) + ' tok') : '') +
       kv('上下文压缩', cmpHtml) +
-      (costOn && o.hasCost ? kv('估算成本', fmtCost(o.cost)) : '') +
+      (costOn && o.hasCost ? kv('折算成本', fmtCost(o.cost)) : '') +
       '</div>' +
       '<div class="ud-sec"><div class="ud-kv-l">模型占比（按 token）</div>' + mix +
       '<button type="button" class="btn ud-sess-logs" data-sg="' + o.g + '" style="margin:8px 0 0;padding:2px 10px;font-size:12px">查看该会话请求日志 →</button></div>' +
@@ -862,7 +806,7 @@ function __usageBoot(D) {
       { h: '生成 token', k: 3, end: 1 }, { h: 'token 合计', k: 4, end: 1 },
       { h: '缓存率', k: 7, end: 1 },
       hasCmp ? { h: '压缩', k: null, end: 1 } : null,
-      costOn ? { h: '估算成本', k: 6, end: 1 } : null,
+      costOn ? { h: '折算成本', k: 6, end: 1 } : null,
       { h: '最后活动', k: 5, end: 1 }
     ].filter(Boolean);
     var span = cols.length;
@@ -917,7 +861,7 @@ function __usageBoot(D) {
       kv('输出速率', tpsHtml(tpsOf(r)) + ' tok/s（生成 ' + fmtI(r[5]) + ' tok / 生成耗时 ' + fmtI(Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11])))) + ' ms）') +
       kv('模型 / 来源 / 类型', esc(MD[r[2]]) + ' · ' + pvLabel(r[3]) + ' · ' + QT[r[9]]) +
       kv('会话', TL[r[0]] ? esc(TL[r[0]]) : '–') +
-      (costOn ? kv('估算成本', c == null ? '–' : fmtCost(c)) : '') +
+      (costOn ? kv('折算成本', c == null ? '–' : fmtCost(c)) : '') +
       '</div>' +
       (window.__USAGE_SERVE__ ? '<div class="ud-sec" id="ud-reqraw"><div class="ud-kv-l">正在拉取 provider 上报的原始用量…</div></div>' : '');
   }
@@ -1190,7 +1134,6 @@ function __usageBoot(D) {
     renderHours(rows);
     if (!wireHoursToggle.done) { wireHoursToggle.done = true; wireHoursToggle(); }
     renderHeatmap(rows);
-    renderBlocks(rows);
     renderSessions(rows);
     renderDetail(rows);
     renderErrors(rows);
@@ -1227,7 +1170,7 @@ function __usageBoot(D) {
   $('ud-f-pv').addEventListener('change', function () { st.p = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-model').addEventListener('change', function () { st.m = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-stat').addEventListener('change', function () { detailStat = +this.value; page = 1; renderDetail(frows(false)); });
-  $('ud-f-cost').addEventListener('change', function () { costOn = this.checked; renderProviders(frows(true)); renderSessions(frows(false)); renderInsights(frows(false)); });
+  $('ud-f-cost').addEventListener('change', function () { costOn = this.checked; renderProviders(frows(true)); renderSessions(frows(false)); renderInsights(frows(false)); renderDetail(frows(false)); });
   Array.prototype.forEach.call(document.querySelectorAll('#ud-f-range .ud-toggle'), function (b) {
     b.addEventListener('click', function () {
       st.rng = b.getAttribute('data-r');
@@ -1305,7 +1248,7 @@ function __usageBoot(D) {
       tip.style.display = 'none';
     }
   });
-  // 支持 #tab hash 定位（本地面板跳转：#trend/#blocks/#sessions/#detail/#errors）
+  // 支持 #tab hash 定位（本地面板跳转：#trend/#sessions/#detail/#errors）
   var h = (location.hash || '').replace('#', '');
   if (h) {
     var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-' + h + '"]');

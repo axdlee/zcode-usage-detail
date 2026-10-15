@@ -60,7 +60,7 @@ function metaSQL(limit, disk) {
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'prices',(SELECT CASE
           WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
-          ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'USD'),
+          ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
                'models', COALESCE(CASE WHEN json_type(pj,'$.models')='object'
                  THEN (SELECT json_group_object(lower(je.key), json(je.value)) FROM json_each(pj,'$.models') je
                        WHERE lower(je.key) IN (SELECT lower(v) FROM M) AND json_type(je.value)='object')
