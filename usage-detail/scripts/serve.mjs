@@ -130,6 +130,39 @@ function readBody(req) {
   });
 }
 
+// 通知配置聚合：turnstats 文件（off/notify/inject）+ alerts 文件（预算告警/权限提醒）
+const TURNSTATS_FILE = path.join(os.homedir(), '.zcode', 'usage-turnstats.json');
+const ALERTS_CFG = path.join(os.homedir(), '.zcode', 'usage-alerts.json');
+function readSwitches() {
+  let ts = { enabled: false, mode: 'inject' };
+  try { ts = Object.assign(ts, JSON.parse(fs.readFileSync(TURNSTATS_FILE, 'utf8'))); } catch (e) {}
+  let al = {};
+  try { al = JSON.parse(fs.readFileSync(ALERTS_CFG, 'utf8')); } catch (e) {}
+  return {
+    turnstats: ts.enabled === true ? (ts.mode === 'notify' ? 'notify' : 'inject') : 'off',
+    budgetAlerts: al.budget !== false,
+    permissionAlerts: al.permission === true,
+  };
+}
+function writeSwitches(b) {
+  if (b.turnstats === 'off' || b.turnstats === 'notify' || b.turnstats === 'inject') {
+    const v = b.turnstats === 'off' ? { enabled: false } : { enabled: true, mode: b.turnstats };
+    const tmp = TURNSTATS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(v) + '\n');
+    fs.renameSync(tmp, TURNSTATS_FILE);
+  }
+  const al = readSwitches();
+  if (typeof b.budgetAlerts === 'boolean' || typeof b.permissionAlerts === 'boolean') {
+    const next = {};
+    if (typeof b.budgetAlerts === 'boolean') next.budget = b.budgetAlerts;
+    if (typeof b.permissionAlerts === 'boolean') next.permission = b.permissionAlerts;
+    const tmp = ALERTS_CFG + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(next) + '\n');
+    fs.renameSync(tmp, ALERTS_CFG);
+  }
+  return readSwitches();
+}
+
 // limit 归一：未指定/非正数 = 全部（LIMIT -1），正数钳到 1-20000
 function clampLimit(v) {
   const n = Number(v);
@@ -389,6 +422,13 @@ const server = http.createServer(async function (req, res) {
       writeBudget(b);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true }));
+    } else if (req.method === 'GET' && u.pathname === '/api/switches') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(readSwitches()));
+    } else if (req.method === 'POST' && u.pathname === '/api/switches') {
+      const b = await readBody(req);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(writeSwitches(b)));
     } else if (req.method === 'GET' && (u.pathname === '/report.html' || u.pathname === '/report')) {
       // 自包含报表：内嵌全部数据的一次性快照（供存档/分享/打印）
       const html = renderFragment(-1).replace('window.__USAGE_SERVE__ = true;', 'window.__USAGE_SERVE__ = false;');

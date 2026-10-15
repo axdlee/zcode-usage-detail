@@ -125,7 +125,13 @@ cmd_dashboard() {
 #usage-dashboard .ud-leg-row .n{flex:0 0 auto;color:var(--muted-foreground);font-variant-numeric:tabular-nums;}
 #usage-dashboard #ud-mgr-mask{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:60;display:flex;align-items:center;justify-content:center;}
 #usage-dashboard #ud-mgr-mask[hidden]{display:none;}
-#usage-dashboard .ud-mgr-t input{width:86px;padding:1px 6px;font-size:12px;}
+#usage-dashboard .ud-mgr-t input{width:86px;padding:3px 8px;font-size:12px;border-radius:6px;}
+#usage-dashboard .ud-mgr-h{font-size:12.5px;font-weight:600;margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border);}
+#usage-dashboard .ud-mgr-h:first-child{border-top:none;padding-top:0;margin-top:0;}
+#usage-dashboard .ud-mgr-sub{font-size:11.5px;color:var(--muted-foreground);margin:2px 0 8px;}
+#usage-dashboard .ud-sw-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dashed var(--border);}
+#usage-dashboard .ud-sw-row:last-child{border-bottom:none;}
+#usage-dashboard .ud-sw-row .form-check{margin:0;flex:none;}
 #usage-dashboard .ud-budget-bar{height:6px;border-radius:3px;background:var(--muted);overflow:hidden;margin-top:4px;}
 #usage-dashboard .ud-budget-bar>i{display:block;height:100%;background:var(--viz-series-1);}
 #usage-dashboard .ud-budget-bar.ud-over>i{background:var(--red,var(--viz-series-1));}
@@ -176,14 +182,14 @@ UD_HEAD
   <span id="ud-day-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除日期筛选"></span>
   <label class="form-check form-switch" id="ud-cost-wrap" hidden><input type="checkbox" class="form-check-input" id="ud-f-cost"><span class="form-check-label text-small">折算成本（API 牌价）</span></label>
   <button type="button" class="btn" id="ud-price-sync" style="margin:0;padding:2px 10px;font-size:12px">同步价格</button>
-  <button type="button" class="btn" id="ud-price-mgr" style="margin:0;padding:2px 10px;font-size:12px">价格 / 预算</button>
+  <button type="button" class="btn" id="ud-price-mgr" style="margin:0;padding:2px 10px;font-size:12px">设置</button>
   <button type="button" class="btn" id="ud-export-report" hidden style="margin:0;padding:2px 10px;font-size:12px">导出报表</button>
   <span class="text-small text-muted" id="ud-meta"></span>
 </div>
 <div id="ud-mgr-mask" hidden>
   <div class="card" style="width:min(760px,94vw);max-height:86vh;overflow:auto;padding:16px 18px" role="dialog" aria-label="价格与预算设置">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <h3 style="margin:0">价格与预算（每百万 token，CNY）</h3>
+      <h3 style="margin:0;font-size:16px">设置</h3>
       <button type="button" class="btn" id="ud-mgr-close" style="margin:0;padding:2px 10px;font-size:12px">关闭</button>
     </div>
     <div id="ud-mgr-body"></div>
@@ -432,6 +438,23 @@ function __usageBoot(D) {
   }
   function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : N(mb) + ' MB'; }
   function fmtCost(c) { return c == null ? '–' : CURSYM + (c >= 100 ? Math.round(c).toLocaleString('zh-CN') : c.toFixed(2)); }
+  // 列表用短格式：小数字原样、大数 k/M，悬停（data-tip 即时层）看完整值；fmt() 的万/亿保留给卡片与图表
+  function fmtK(n) {
+    n = N(n);
+    if (n < 1000) return String(Math.round(n));
+    if (n < 1e6) return (n / 1000).toFixed(n < 10000 ? 2 : 1) + 'k';
+    return (n / 1e6).toFixed(2) + 'M';
+  }
+  function tokCell(n) { n = N(n); return '<span data-tip="' + fmtI(n) + ' token" style="cursor:default">' + fmtK(n) + '</span>'; }
+  function fmtDur(ms) {
+    ms = N(ms);
+    if (ms <= 0) return '0 ms';
+    if (ms < 1000) return String(Math.round(ms)) + ' ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
+    var m = Math.floor(ms / 60000), s = Math.round((ms % 60000) / 1000);
+    return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+  }
+  function durCell(ms) { ms = N(ms); return '<span data-tip="' + fmtI(ms) + ' ms" style="cursor:default">' + fmtDur(ms) + '</span>'; }
 
   var maxTs = 0;
   R.forEach(function (r) { if (r[1] > maxTs) maxTs = r[1]; });
@@ -684,7 +707,7 @@ function __usageBoot(D) {
     var list = sessAgg(rows).sort(function (a, b) { return b.tot - a.tot; }).slice(0, 5);
     $('ud-top-sessions').innerHTML = list.length ? '<table class="table table-sm"><thead><tr><th>会话</th><th class="text-end">请求数</th><th class="text-end">token 合计</th><th class="text-end">最后活动</th></tr></thead><tbody>' +
       list.map(function (o) {
-        return '<tr class="ud-click" data-sg="' + o.g + '" title="点击查看会话详情"><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmt(o.tot) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+        return '<tr class="ud-click" data-sg="' + o.g + '" title="点击查看会话详情"><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       }).join('') + '</tbody></table>' : '<p class="text-muted">当前筛选下暂无数据</p>';
     var donutEl = $('ud-tools-donut');
     if (donutEl) {
@@ -984,14 +1007,14 @@ function __usageBoot(D) {
       o.per1k = o.hasCost && o.tot > 0 ? o.cost / (o.tot / 1000) : null;
       return o;
     }).sort(function (a, b) { return b.tot - a.tot; });
-    headEl.innerHTML = '<tr><th>模型</th><th class="text-end">请求数</th><th class="text-end">平均 tok/s</th><th class="text-end">平均首字 ms</th><th class="text-end">失败率</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th><th class="text-end">合计</th><th class="text-end">缓存率</th>' + (costOn ? '<th class="text-end">折算成本</th><th class="text-end">成本 / 1k tok</th>' : '') + '</tr>';
+    headEl.innerHTML = '<tr><th>模型</th><th class="text-end">请求数</th><th class="text-end">平均 tok/s</th><th class="text-end">平均首字</th><th class="text-end">失败率</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th><th class="text-end">合计</th><th class="text-end">缓存率</th>' + (costOn ? '<th class="text-end">折算成本</th><th class="text-end">成本 / 1k tok</th>' : '') + '</tr>';
     bodyEl.innerHTML = list.length ? list.map(function (o) {
       return '<tr><td class="ud-flink" data-k="m" data-v="' + o.m + '" title="点击只看该模型">' + esc(MD[o.m]) + '</td>' +
         '<td class="text-end tabular-nums">' + fmtI(o.req) + '</td>' +
         '<td class="text-end">' + (o.tps == null ? '–' : tpsHtml(o.tps)) + '</td>' +
-        '<td class="text-end tabular-nums">' + (o.avgTtft == null ? '–' : fmtI(o.avgTtft)) + '</td>' +
+        '<td class="text-end tabular-nums">' + (o.avgTtft == null ? '–' : durCell(o.avgTtft)) + '</td>' +
         '<td class="text-end tabular-nums" style="color:' + (o.errRate >= 10 ? 'var(--red)' : o.errRate > 0 ? 'var(--yellow)' : 'inherit') + '">' + o.errRate + '%</td>' +
-        '<td class="text-end tabular-nums">' + fmt(o.inn) + '</td><td class="text-end tabular-nums">' + fmt(o.out) + '</td><td class="text-end tabular-nums">' + fmt(o.tot) + '</td>' +
+        '<td class="text-end tabular-nums">' + tokCell(o.inn) + '</td><td class="text-end tabular-nums">' + tokCell(o.out) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td>' +
         '<td class="text-end tabular-nums">' + o.rate + '%</td>' +
         (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td><td class="text-end tabular-nums">' + (o.per1k == null ? '–' : fmtCost(o.per1k)) + '</td>' : '') +
         '</tr>';
@@ -1032,7 +1055,7 @@ function __usageBoot(D) {
     var shown = list.slice(0, 30);
     var body = '';
     shown.forEach(function (o) {
-      body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmtI(o.inn) + '</td><td class="text-end tabular-nums">' + fmtI(o.out) + '</td><td class="text-end tabular-nums">' + fmtI(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td><td class="text-end">' + healthBadge(o.health) + '</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + ' 次' : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+      body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.inn) + '</td><td class="text-end tabular-nums">' + tokCell(o.out) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td><td class="text-end">' + healthBadge(o.health) + '</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + ' 次' : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       if (o.g === sessExp) body += '<tr class="ud-exp"><td colspan="' + span + '">' + sessionDetailHTML(o) + '</td></tr>';
     });
     $('ud-sessions-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
@@ -1106,7 +1129,7 @@ function __usageBoot(D) {
     var cols = [
       { h: '时间', k: 0 }, { h: '会话', k: null }, { h: '模型', k: null }, { h: '来源', k: null }, { h: '类型', k: null },
       { h: '输入', k: 4, end: 1 }, { h: '缓存读', k: 6, end: 1 }, { h: '缓存写', k: 10, end: 1 },
-      { h: '生成', k: 5, end: 1 }, { h: '合计', k: 12, end: 1 }, { h: '耗时 ms', k: 7, end: 1 }, { h: '首字 ms', k: 11, end: 1 },
+      { h: '生成', k: 5, end: 1 }, { h: '合计', k: 12, end: 1 }, { h: '耗时', k: 7, end: 1 }, { h: '首字', k: 11, end: 1 },
       { h: 'tok/s', k: 14, end: 1 },
       { h: '状态', k: null },
       costOn ? { h: '成本', k: 13, end: 1 } : null
@@ -1127,13 +1150,13 @@ function __usageBoot(D) {
       view.forEach(function (r) {
         body += '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
           '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[6]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[10]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[5]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
-          '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[4]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[6]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[10]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[5]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(N(r[4]) + N(r[5])) + '</td>' +
+          '<td class="text-end tabular-nums">' + durCell(r[7]) + '</td>' +
+          '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : durCell(r[11])) + '</td>' +
           '<td class="text-end">' + tpsHtml(tpsOf(r)) + '</td>' +
           '<td>' + stHtml(r[8]) + '</td></tr>';
       });
@@ -1142,13 +1165,13 @@ function __usageBoot(D) {
         body += '<tr class="ud-click" data-di="' + i + '"><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
           '<td class="ud-flink" data-k="s" data-v="' + r[0] + '" title="点击只看该会话">' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
           '<td class="ud-flink" data-k="m" data-v="' + r[2] + '" title="点击只看该模型">' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[6]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[10]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[5]) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
-          '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
-          '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[4]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[6]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[10]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(r[5]) + '</td>' +
+          '<td class="text-end tabular-nums">' + tokCell(N(r[4]) + N(r[5])) + '</td>' +
+          '<td class="text-end tabular-nums">' + durCell(r[7]) + '</td>' +
+          '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : durCell(r[11])) + '</td>' +
           '<td class="text-end">' + tpsHtml(tpsOf(r)) + '</td>' +
           '<td>' + stHtml(r[8]) + '</td>' +
           (costOn ? '<td class="text-end tabular-nums">' + (rowCost(r) == null ? '–' : fmtCost(rowCost(r))) + '</td>' : '') +
@@ -1441,7 +1464,7 @@ function __usageBoot(D) {
     }
   });
   // ---- 价格 / 预算管理（serve 模式可编辑并即时重算；其他环境只读引导） ----
-  var mgrState = { q: '', prices: null, budget: null };
+  var mgrState = { q: '', prices: null, budget: null, switches: null };
   function mgrRow(m, e, used) {
     return '<tr data-m="' + esc(m) + '"><td class="text-nowrap">' + esc(m) + (used ? ' <span class="ud-tag">当前用量</span>' : '') + '</td>' +
       '<td class="ud-mgr-t"><input data-k="in" value="' + e.in + '" inputmode="decimal"></td>' +
@@ -1449,28 +1472,43 @@ function __usageBoot(D) {
       '<td class="ud-mgr-t"><input data-k="cache" value="' + e.cache + '" inputmode="decimal"></td>' +
       '<td class="text-nowrap"><button type="button" class="btn ud-mgr-save" style="margin:0;padding:1px 8px;font-size:12px">保存</button> <button type="button" class="btn ud-mgr-del" style="margin:0;padding:1px 8px;font-size:12px">删除</button></td></tr>';
   }
+  function swRow(id, name, desc, on) {
+    return '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + name + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + desc + '</div></div>' +
+      '<input type="checkbox" class="form-check-input" id="' + id + '"' + (on ? ' checked' : '') + '></div>';
+  }
   function renderMgr() {
     var body = $('ud-mgr-body');
-    var p = mgrState.prices, b = mgrState.budget || {};
+    var p = mgrState.prices, b = mgrState.budget || {}, sw = mgrState.switches || {};
     var models = Object.keys(p.models || {});
     var used = {};
     frows(false).forEach(function (r) { used[String(MD[r[2]] || '').toLowerCase()] = 1; });
     var hit = models.filter(function (m) { return mgrState.q ? m.indexOf(mgrState.q) >= 0 : (used[m.toLowerCase()] || mgrState.builtins.indexOf(m) >= 0); });
     var list = (mgrState.q ? models.filter(function (m) { return m.indexOf(mgrState.q) >= 0; }) : hit).slice(0, 60);
+    var tsMode = sw.turnstats || 'off';
     body.innerHTML =
-      '<div class="text-small text-muted" style="margin-bottom:8px">单位：元 / 每百万 token。GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。修改保存后整页按新价重算。</div>' +
+      '<div class="ud-mgr-h">成本单价（元 / 每百万 token）</div>' +
+      '<div class="ud-mgr-sub">GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。修改保存后整页按新价重算。</div>' +
       '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="搜索模型…" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + ' 个模型' + (list.length >= 60 ? '（仅显示前 60）' : '') + '</span></div>' +
-      '<div class="table-responsive" style="max-height:320px;overflow:auto"><table class="table table-sm"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
+      '<div class="table-responsive" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px"><table class="table table-sm" style="margin:0"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
       list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
       '</tbody></table></div>' +
-      '<div style="display:flex;gap:8px;align-items:center;margin:10px 0 4px;flex-wrap:wrap"><b class="text-small">新增模型价</b><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致，不区分大小写）" style="width:260px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:80px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:80px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:80px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
-      '<hr style="border-color:var(--border);opacity:.4">' +
-      '<b class="text-small">本地折算预算（超 80% 黄色进度、100% 红色，总览洞察行显示）</b>' +
-      '<div style="display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap">' +
-      '<label class="text-small text-muted">日预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bd" value="' + (N(b.daily) || '') + '" style="width:100px" inputmode="decimal"></label>' +
-      '<label class="text-small text-muted">月预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bm" value="' + (N(b.monthly) || '') + '" style="width:100px" inputmode="decimal"></label>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin:10px 0 2px;flex-wrap:wrap"><span class="text-small text-muted">新增模型价：</span><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致）" style="width:230px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:76px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
+      '<div class="ud-mgr-h">预算（折算金额，超 80% 黄色进度、100% 红色）</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<label class="text-small text-muted">日预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bd" value="' + (N(b.daily) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
+      '<label class="text-small text-muted">月预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bm" value="' + (N(b.monthly) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
       '<button type="button" class="btn" id="ud-mgr-bsave" style="margin:0;padding:2px 10px;font-size:12px">保存预算</button>' +
-      '</div>';
+      '</div>' +
+      '<div class="ud-mgr-h">通知（macOS 系统通知，全部本地计算、零模型开销）</div>' +
+      swRow('ud-sw-permission', '权限等待提醒', 'Agent 弹出批准请求时通知你——挂机跑长任务不漏确认', sw.permissionAlerts === true) +
+      swRow('ud-sw-budget', '预算 / 燃烧告警', '日折算成本达预算 80% / 100% 时提醒；今日用量超近 7 天日均 50% 也会提示', sw.budgetAlerts !== false) +
+      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">每轮用量统计</div><div class="ud-mgr-sub" style="margin:1px 0 0">每轮回合结束弹通知显示本轮速率 / 缓存率 / 耗时（不进入对话上下文）。选「关」时统计仍显示在侧栏面板顶部横幅</div></div>' +
+      '<select class="form-select form-select-sm" id="ud-sw-turnstats" style="width:auto;flex:none">' +
+      '<option value="off"' + (tsMode === 'off' ? ' selected' : '') + '>关</option>' +
+      '<option value="notify"' + (tsMode === 'notify' ? ' selected' : '') + '>系统通知（推荐）</option>' +
+      '<option value="inject"' + (tsMode === 'inject' ? ' selected' : '') + '>对话内统计行（约 0.3k token/轮）</option>' +
+      '</select></div>' +
+      '<div class="ud-mgr-sub" style="margin-top:8px">权限提醒与每轮统计依赖会话钩子，修改后重开会话生效；预算告警立即生效。</div>';
     var qi = $('ud-mgr-q');
     qi.addEventListener('input', function () { mgrState.q = this.value.trim().toLowerCase(); renderMgr(); var q2 = $('ud-mgr-q'); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); });
     Array.prototype.forEach.call(body.querySelectorAll('tr[data-m]'), function (tr) {
@@ -1490,8 +1528,14 @@ function __usageBoot(D) {
     });
     $('ud-mgr-bsave').addEventListener('click', function () {
       var nb = { daily: $('ud-mgr-bd').value, monthly: $('ud-mgr-bm').value };
-      postJSON('/api/budget', nb).then(function () { st.budget = { daily: N(nb.daily), monthly: N(nb.monthly) }; $('ud-mgr-mask').hidden = true; apply(); });
+      postJSON('/api/budget', nb).then(function () { st.budget = { daily: N(nb.daily), monthly: N(nb.monthly) }; apply(); });
     });
+    function postSwitch(patch) {
+      return postJSON('/api/switches', patch).then(function (j) { mgrState.switches = j; });
+    }
+    $('ud-sw-permission').addEventListener('change', function () { postSwitch({ permissionAlerts: this.checked }); });
+    $('ud-sw-budget').addEventListener('change', function () { postSwitch({ budgetAlerts: this.checked }); });
+    $('ud-sw-turnstats').addEventListener('change', function () { postSwitch({ turnstats: this.value }); });
   }
   function postJSON(url, data) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function (r) { return r.json(); });
@@ -1507,10 +1551,12 @@ function __usageBoot(D) {
     body.innerHTML = '<p class="text-muted text-small">加载中…</p>';
     Promise.all([
       fetch('/api/prices').then(function (r) { return r.json(); }),
-      fetch('/api/budget').then(function (r) { return r.json(); })
+      fetch('/api/budget').then(function (r) { return r.json(); }),
+      fetch('/api/switches').then(function (r) { return r.json(); }).catch(function () { return {}; })
     ]).then(function (rs) {
       mgrState.prices = rs[0];
       mgrState.budget = rs[1];
+      mgrState.switches = rs[2] || {};
       if (!st.budget) st.budget = rs[1];
       renderMgr();
     });
