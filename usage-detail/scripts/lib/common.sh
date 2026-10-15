@@ -17,9 +17,16 @@ if [[ ! -f "$DB" ]]; then
   exit 1
 fi
 
-q() { sqlite3 -readonly -header -column "$DB" "$1"; }
-# 输出原始单值（供 JSON 组装），不带表格格式化
-qr() { sqlite3 -readonly "$DB" "$1"; }
+# 数据库访问：优先本机 sqlite3 CLI；没有时（Windows Git Bash 常见）回退 node:sqlite 替身。
+# ZCODE_USAGE_SQLITE=node 可强制走替身（测试跨实现一致性）。
+if [[ "${ZCODE_USAGE_SQLITE:-}" == "node" ]] || ! command -v sqlite3 >/dev/null 2>&1; then
+  q() { node "$SCRIPT_DIR/sqlite.mjs" -header "$DB" "$1"; }
+  qr() { node "$SCRIPT_DIR/sqlite.mjs" "$DB" "$1"; }
+else
+  q() { sqlite3 -readonly -header -column "$DB" "$1"; }
+  # 输出原始单值（供 JSON 组装），不带表格格式化
+  qr() { sqlite3 -readonly "$DB" "$1"; }
+fi
 
 is_num() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
 

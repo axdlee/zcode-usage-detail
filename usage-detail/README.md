@@ -8,6 +8,8 @@ Per-request usage analytics for ZCode, entirely local: every model request is on
 
 ## Features
 
+> **Platform support**: full on macOS; Windows and Linux cover all core capabilities (side panel / MCP / hooks / dashboard / CLI). The CLI needs bash (Git Bash on Windows) and Node >= 22.13 (bundled with ZCode); when the `sqlite3` CLI is absent it automatically falls back to a node:sqlite shim. System notifications use each platform's native channel and are silently skipped when unavailable.
+
 - **Interactive dashboard** (`/usage-ui`): six tabs — overview / daily trend / sessions / model efficiency / requests / failures. Global filters (provider, model, session, time range) apply everywhere; sortable tables, pagination, drill-downs, GitHub-style activity heatmap (day/week/month-calendar), dark & light themes.
 - **Session side panel** (ZCode Desktop 3.15+): the same full dashboard as an MCP App tab, following the host theme. Per-turn stats banner refreshed in real time via MCP resource subscription (`resources/subscribe` → `notifications/resources/updated`) — computed locally, zero model overhead, never enters the conversation.
 - **Session health score & waste forensics**: 0-100 per-session health score (error/cancel/retry weighted); insight card + `usage.sh waste [days]` showing tokens burned by failed/cancelled/retried requests, top failing sessions and most-retried models.
@@ -41,7 +43,7 @@ Then open `/usage` for the CLI summary or `/usage-ui` for the dashboard. After i
 - **Writes** only its own config/state files: `~/.zcode/usage-prices.json`, `usage-budget.json`, `usage-alerts.json`, `usage-alerts-state.json`, `usage-turnstats.json`, `usage-turn-done.json`, `usage-serve.json`.
 - **Local network**: the panel service listens on `127.0.0.1` only.
 - **Outbound network**: daily price sync from [models.dev](https://models.dev) (disable with `ZCODE_USAGE_NO_AUTOSYNC=1`); optional official quota lookup at `open.bigmodel.cn` only if you configure an API key. No telemetry, no other endpoints.
-- **Notifications**: macOS only via `osascript display notification`; other platforms are silent.
+- **Notifications**: cross-platform system toasts — macOS `osascript`, Windows WinRT toast via PowerShell, Linux `notify-send` — silently skipped where unavailable.
 - Third-party material: pricing data from models.dev (converted, cached locally); everything else is original code, MIT licensed.
 
 ## License

@@ -6,21 +6,23 @@
 
 纯本地只读查询，**不发起任何网络请求，不上传任何数据**。
 
-![仪表盘总览](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-overview-dark.png)
+![仪表盘总览](screenshots/dashboard-overview-dark.png)
 
 会话排行支持点击展开：上下文压缩、模型占比、使用工具、上下文水位曲线一目了然：
 
-![会话排行与钻取](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-sessions-dark.png)
+![会话排行与钻取](screenshots/dashboard-sessions-dark.png)
 
 每日趋势按来源堆叠，图表下方附每日明细表（请求 / token / 缓存命中 / 生成速率），点击某天直接切换为该日的请求日志：
 
-![每日趋势](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-trend-light.png)
+![每日趋势](screenshots/dashboard-trend-light.png)
 
 ## 功能
 
+> **平台支持**：macOS 完整支持；Windows 与 Linux 支持全部核心能力（侧栏面板 / MCP / 钩子 / 仪表盘 / CLI）——CLI 依赖 bash（Windows 用 Git Bash，无 sqlite3 时自动走 node 替身）与 Node ≥ 22.13（ZCode 自带）；系统通知按平台原生通道（osascript / WinRT toast / notify-send），不可用时静默。
+
 - **逐条明细**：每次模型请求一行——时间、会话、模型、来源、主会话/子代理、输入/缓存读/缓存写/生成/合计 token、耗时、首字延迟、**输出速率 tok/s**（六档变色）、状态、每行折算成本（API 牌价，可开关）；分页浏览、点表头排序
 - **会话侧栏面板**（ZCode Desktop 3.15+）：**与 `/usage-ui` 完整版同一份界面**（不是简化版）——六个标签页、热力图、趋势、每日明细、会话钻取、模型效率、请求分页/排序/钻取全部可用，明暗主题跟随宿主，由插件内置零依赖 MCP 服务按需生成（默认**内嵌全部历史**，插件设置里可自定义数据库路径与聚合条数）。图表悬停即时显示明细（含 token 与缓存率）；时段分布支持「请求 / token」指标切换；明细分页支持页码直跳
-- **每轮用量实时卡**：每轮回合结束由本地脚本统计（零模型开销、不进上下文），经 MCP 资源订阅实时推送到侧栏面板顶部「⏱ 本轮」横幅；可选 macOS 系统通知或对话内统计行（`usage.sh turnstats`，默认仅侧栏卡）
+- **每轮用量实时卡**：每轮回合结束由本地脚本统计（零模型开销、不进上下文），经 MCP 资源订阅实时推送到侧栏面板顶部「⏱ 本轮」横幅；可选系统通知（macOS / Windows / Linux）或对话内统计行（`usage.sh turnstats`，默认仅侧栏卡）
 - **预算 / 燃烧告警**（零模型开销）：本地面板常驻时每分钟本地检查——日折算成本达日预算 80%/100% 时弹 macOS 通知（各档每日最多一次），今日 token 超近 7 天日均 50% 也会提醒；`usage.sh alerts budget off` 可关
 - **权限等待提醒**（默认关）：Agent 弹出权限批准请求时发 macOS 通知，挂机跑长任务不漏确认；`usage.sh alerts permission on` 开启
 - **浪费取证**：失败 / 取消请求白耗的 token 一眼看穿——洞察卡带汇总，`usage.sh waste [N天]` 出近 N 天详单（失败/取消/重试口径 + 反复失败会话 Top5 + 重试最多模型）
@@ -154,7 +156,7 @@ bash usage-detail/scripts/usage.sh dashboard-this /tmp/usage-this.html --directo
 
 `usage.sh turnstats <模式>` 控制面板之外的附加出口：
 
-- **notify（推荐，零开销）**：面板没开着时也能看到——每轮回复结束弹一条 macOS 系统通知显示本轮统计。同样是本地计算；非 macOS 静默跳过。
+- **notify（推荐，零开销）**：面板没开着时也能看到——每轮回复结束弹一条系统通知显示本轮统计（macOS osascript / Windows WinRT toast / Linux notify-send，均本地计算，不可用时静默）。
 - **inject（对话内统计行）**：每条调用了工具的回复末尾附一行 `> 本轮用量：⚡ 82 tok/s · …`。统计脚本本身零模型推理，但**文本进入对话必须经由模型**（ZCode 的 hook 无法向回复追加文本，也没有提交前裁剪历史的通道；实测宿主 Stop 钩子注入上下文会强制"继续回合"，反而每轮多一次全量模型调用，更贵）。开销：注入指令约 0.15k token/轮（持续留在上下文）+ 一次工具调用约 0.1k + 统计行输出约 0.05k——相对百万级上下文 <0.1%，短会话约 1%。
 - **off（默认）**：仅保留侧栏面板实时卡与浏览器面板轮询（本地面板每 15s 拉一次 `/api/turn`），不通知、不进对话。
 
@@ -191,11 +193,11 @@ notify/inject 需重开会话生效（hook 配置按会话快照）；侧栏实�
 
 每日趋势按来源堆叠，图表下方附每日明细表（请求 / token / 缓存命中 / 生成速率），点击某天直接切换为该日的请求日志：
 
-![每日趋势](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-trend-light.png)
+![每日趋势](screenshots/dashboard-trend-light.png)
 
 请求明细支持状态筛选与表头排序：
 
-![请求明细](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-detail-light.png)
+![请求明细](screenshots/dashboard-detail-light.png)
 
 ## 数据说明与隐私
 

@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -27,11 +27,11 @@ try {
   // 标记始终写（仅一次本地文件写）：面板实时卡不依赖 turnstats 开关
   fs.writeFileSync(DONE_FILE, JSON.stringify({ ts: Date.now() }) + '\n');
   if (readSwitch() !== 'notify') process.exit(0);
-  if (process.platform !== 'darwin') process.exit(0); // osascript 通知仅 macOS；其他平台静默
   const line = execFileSync(process.execPath, [STATS_SCRIPT, '--turn', '--current'], { encoding: 'utf8', timeout: 15000 }).trim();
   const msg = line.split('\n').filter((l) => l.includes('本轮用量'))[0] || line.split('\n')[0] || '';
   if (!msg) process.exit(0);
-  const esc = (t) => t.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  execFileSync('osascript', ['-e', `display notification "${esc(msg)}" with title "ZCode 用量" subtitle "本轮统计（零上下文开销）"`], { timeout: 8000, stdio: 'ignore' });
+  // 统一经 notify.mjs 分发：macOS=osascript / Windows=WinRT toast / Linux=notify-send，失败静默
+  spawn(process.execPath, [path.join(HERE, '..', 'scripts', 'notify.mjs'), 'ZCode 用量', '本轮统计（零上下文开销）', msg],
+    { detached: true, stdio: 'ignore' }).unref();
 } catch (e) {}
 process.exit(0);

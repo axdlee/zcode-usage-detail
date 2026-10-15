@@ -7,18 +7,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const HERE_NOTIFY = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
 
 try {
   const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-alerts.json'), 'utf8'));
   if (v.permission !== true) process.exit(0);
-  if (process.platform !== 'darwin') process.exit(0);
   let tool = '';
   try {
     const input = JSON.parse(fs.readFileSync(0, 'utf8'));
     tool = String(input.tool_name || input.tool || '').replace(/"/g, '');
   } catch (e) {}
   const msg = tool ? `正在等待你批准：${tool}` : 'Agent 正在等待你的批准';
-  const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  spawn('osascript', ['-e', `display notification "${esc(msg)}" with title "ZCode 用量" subtitle "需要你的确认"`], { detached: true, stdio: 'ignore' }).unref();
+  // 统一经 notify.mjs 分发：macOS / Windows / Linux，失败静默
+  spawn(process.execPath, [path.join(HERE_NOTIFY, 'notify.mjs'), 'ZCode 用量', '需要你的确认', msg],
+    { detached: true, stdio: 'ignore' }).unref();
 } catch (e) {}
 process.exit(0);

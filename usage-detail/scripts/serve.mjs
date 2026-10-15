@@ -317,10 +317,9 @@ function alertsEnabled() {
   try { return JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8')).budget !== false; } catch (e) { return true; }
 }
 function notifyMac(sub, msg) {
-  if (process.platform !== 'darwin') return;
+  // 统一经 notify.mjs 分发（macOS / Windows / Linux），失败静默
   try {
-    const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    spawn('osascript', ['-e', `display notification "${esc(msg)}" with title "ZCode 用量" subtitle "${esc(sub)}"`], { detached: true, stdio: 'ignore' }).unref();
+    spawn(process.execPath, [path.join(HERE, 'notify.mjs'), 'ZCode 用量', sub, msg], { detached: true, stdio: 'ignore' }).unref();
   } catch (e) {}
 }
 function alertOnce(key, sub, msg) {
@@ -455,5 +454,6 @@ server.listen(port, '127.0.0.1', function () {
   try { fs.writeFileSync(path.join(os.homedir(), '.zcode', 'usage-serve.json'), JSON.stringify({ pid: process.pid, version: PLUGIN_VERSION, port })); } catch (e) {}
   setInterval(budgetWatchTick, 60000).unref(); // 预算/燃烧告警：每分钟检查，当日每档最多提醒一次
   if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+  else if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
   else if (process.platform === 'linux') spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
 });
