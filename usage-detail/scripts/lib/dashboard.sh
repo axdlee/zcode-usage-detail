@@ -40,10 +40,10 @@ cmd_dashboard() {
     else
       PJ_SQL="(SELECT NULL AS pj)"
     fi
-    logs_mb=$(du -sm "$HOME/.zcode/v2/logs" 2>/dev/null | cut -f1); logs_mb=${logs_mb:-0}
-    rollout_mb=$(du -sm "$HOME/.zcode/cli/rollout" 2>/dev/null | cut -f1); rollout_mb=${rollout_mb:-0}
-    artifacts_mb=$(du -sm "$HOME/.zcode/cli/artifacts" 2>/dev/null | cut -f1); artifacts_mb=${artifacts_mb:-0}
-    db_mb=$(du -m "$DB" 2>/dev/null | cut -f1); db_mb=${db_mb:-0}
+    logs_mb=$(du -sm "$HOME/.zcode/v2/logs" 2>/dev/null | cut -f1 || true); logs_mb=${logs_mb:-0}
+    rollout_mb=$(du -sm "$HOME/.zcode/cli/rollout" 2>/dev/null | cut -f1 || true); rollout_mb=${rollout_mb:-0}
+    artifacts_mb=$(du -sm "$HOME/.zcode/cli/artifacts" 2>/dev/null | cut -f1 || true); artifacts_mb=${artifacts_mb:-0}
+    db_mb=$(du -m "$DB" 2>/dev/null | cut -f1 || true); db_mb=${db_mb:-0}
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
            P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM U)),

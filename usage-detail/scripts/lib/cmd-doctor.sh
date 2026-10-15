@@ -28,7 +28,7 @@ cmd_doctor() {
   # 3. 配额数据源
   if command -v node >/dev/null 2>&1; then
     local qout
-    qout=$(node "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/quota.mjs" 2>&1 | head -1)
+    qout=$(node "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/quota.mjs" 2>&1 | head -1 || true)
     if [[ "$qout" == "{"*'"ok":true'* ]]; then
       local src; src=$(printf '%s' "$qout" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p')
       say ok "3. 配额：可用（来源 ${src:-未知}）"
