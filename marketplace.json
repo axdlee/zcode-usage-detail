@@ -4,14 +4,14 @@
     {
       "name": "usage-detail",
       "source": "./usage-detail",
-      "version": "0.6.1",
-      "description": "ZCode 本地用量明细：逐条请求分页浏览、来源/项目/模型区分、5 小时窗口燃烧率、热力图、洞察、models.dev 官方价成本估算、本地常驻面板与导出（只读）。",
+      "version": "0.7.0",
+      "description": "ZCode 本地用量明细：逐条请求分页浏览、来源/项目/模型区分、5 小时窗口燃烧率、热力图与图表悬停明细、缓存率全链路、洞察、models.dev 官方价成本估算、本地常驻面板与导出（只读）。",
       "displayName": "Usage Detail",
       "displayName_i18n": {
         "zh-CN": "用量明细"
       },
       "description_i18n": {
-        "zh-CN": "逐条用量明细：分页浏览、来源/项目区分、5小时窗口燃烧率、热力图、洞察、官方价估算、本地常驻面板"
+        "zh-CN": "逐条用量明细：分页、来源/项目区分、5小时窗口燃烧率、热力图悬停明细、缓存率全链路、官方价估算、本地常驻面板"
       },
       "category": "developer-tools"
     }

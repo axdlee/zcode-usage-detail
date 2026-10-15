@@ -59,7 +59,8 @@ const META_SQL = (pf, limit) => `
               R.input_tokens, R.output_tokens+R.reasoning_tokens, R.cache_read_input_tokens,
               R.duration_ms,
               CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
-              CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END))
+              CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
+              R.cache_creation_input_tokens, R.time_to_first_token_ms))
             FROM R
             LEFT JOIN S SI ON SI.v = R.session_id
             LEFT JOIN M MI ON MI.v = R.model_id
@@ -120,6 +121,25 @@ function renderFragment(limit) {
     }
     tick();
     setInterval(tick, 5000);
+    // 图表悬停提示：热力图/趋势图等 SVG 图形，鼠标即入即显完整明细（原生 title 有 1~2s 延迟）
+    var tip = document.createElement('div');
+    tip.style.cssText = 'position:fixed;display:none;z-index:999;pointer-events:none;background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.22);white-space:pre;max-width:360px;';
+    document.body.appendChild(tip);
+    document.addEventListener('mousemove', function (e) {
+      var t = e.target;
+      var rect = t && t.closest ? t.closest('svg rect') : null;
+      var title = rect && rect.querySelector('title');
+      if (title && title.textContent) {
+        tip.textContent = title.textContent;
+        tip.style.display = 'block';
+        var x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 10);
+        var y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 10);
+        tip.style.left = Math.max(6, x) + 'px';
+        tip.style.top = Math.max(6, y) + 'px';
+      } else {
+        tip.style.display = 'none';
+      }
+    });
   }, 200);
 })();
 </script>`;

@@ -67,6 +67,7 @@ case "$cmd" in
               sum(input_tokens) AS 输入token,
               sum(output_tokens+reasoning_tokens) AS 生成token,
               sum(cache_read_input_tokens) AS 缓存读token,
+              round(sum(cache_read_input_tokens)*100.0/max(sum(input_tokens),1),1) AS 缓存率,
               datetime(min(started_at)/1000,'unixepoch','localtime') AS 首次,
               datetime(max(started_at)/1000,'unixepoch','localtime') AS 最近
        FROM model_usage GROUP BY provider_id ORDER BY sum(computed_total_tokens) DESC;"
@@ -278,7 +279,8 @@ NODE
                       R.input_tokens, R.output_tokens+R.reasoning_tokens, R.cache_read_input_tokens,
                       R.duration_ms,
                       CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
-                      CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END))
+                      CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms))
                     FROM R
                     LEFT JOIN S SI ON SI.v = R.session_id
                     LEFT JOIN M MI ON MI.v = R.model_id
@@ -301,6 +303,7 @@ NODE
               m.input_tokens AS 输入,
               m.output_tokens+m.reasoning_tokens AS 生成,
               m.cache_read_input_tokens AS 缓存读,
+              m.cache_creation_input_tokens AS 缓存写,
               m.duration_ms AS 耗时ms,
               m.status AS 状态
        FROM model_usage m LEFT JOIN session s ON s.id = m.session_id
@@ -317,6 +320,7 @@ NODE
               m.input_tokens AS 输入,
               m.output_tokens+m.reasoning_tokens AS 生成,
               m.cache_read_input_tokens AS 缓存读,
+              m.cache_creation_input_tokens AS 缓存写,
               m.duration_ms AS 耗时ms,
               m.status AS 状态
        FROM model_usage m LEFT JOIN session s ON s.id = m.session_id
@@ -341,6 +345,7 @@ NODE
               sum(m.input_tokens) AS 输入token,
               sum(m.output_tokens+m.reasoning_tokens) AS 生成token,
               sum(CASE WHEN m.query_source='subagent' THEN 1 ELSE 0 END) AS 子代理请求,
+              round(sum(m.cache_read_input_tokens)*100.0/max(sum(m.input_tokens),1),1) AS 缓存率,
               datetime(max(m.started_at)/1000,'unixepoch','localtime') AS 最后活动
        FROM model_usage m JOIN session s ON s.id = m.session_id
        GROUP BY m.session_id
@@ -351,7 +356,8 @@ NODE
               count(*) AS 请求数,
               sum(input_tokens) AS 输入token,
               sum(output_tokens+reasoning_tokens) AS 生成token,
-              sum(cache_read_input_tokens) AS 缓存读token
+              sum(cache_read_input_tokens) AS 缓存读token,
+              round(sum(cache_read_input_tokens)*100.0/max(sum(input_tokens),1),1) AS 缓存率
        FROM model_usage WHERE status='completed'
        GROUP BY lower(model_id) ORDER BY sum(computed_total_tokens) DESC;"
     ;;
@@ -418,7 +424,8 @@ NODE
                   R.input_tokens, R.output_tokens+R.reasoning_tokens, R.cache_read_input_tokens,
                   R.duration_ms,
                   CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
-                  CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END))
+                  CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms))
                 FROM R
                 LEFT JOIN S SI ON SI.v = R.session_id
                 LEFT JOIN M MI ON MI.v = R.model_id
@@ -614,9 +621,9 @@ function __usageBoot(D) {
     });
   }
   function agg(rows) {
-    var a = { req: rows.length, inn: 0, out: 0, ca: 0, dur: 0, sub: 0, sids: {} };
+    var a = { req: rows.length, inn: 0, out: 0, ca: 0, ccw: 0, dur: 0, sub: 0, sids: {} };
     rows.forEach(function (r) {
-      a.inn += N(r[4]); a.out += N(r[5]); a.ca += N(r[6]); a.dur += N(r[7]);
+      a.inn += N(r[4]); a.out += N(r[5]); a.ca += N(r[6]); a.ccw += N(r[10]); a.dur += N(r[7]);
       if (r[9] === 1) a.sub++;
       a.sids[r[0]] = 1;
     });
@@ -636,7 +643,7 @@ function __usageBoot(D) {
     $('ud-k1').textContent = fmtI(a.req);
     $('ud-k1c').textContent = '日均 ' + fmt(a.req / dcount) + ' · 覆盖 ' + dcount + ' 天';
     $('ud-k2').textContent = fmt(a.inn);
-    $('ud-k2c').textContent = '其中缓存读 ' + fmt(a.ca);
+    $('ud-k2c').textContent = '缓存读 ' + fmt(a.ca) + ' · 缓存写 ' + fmt(a.ccw);
     $('ud-k3').textContent = fmt(a.out);
     $('ud-k3c').textContent = '输出 + 思考 token';
     $('ud-k4').textContent = fmtI(a.sess);
@@ -667,6 +674,7 @@ function __usageBoot(D) {
       ['连续活跃', '当前 ' + cur + ' 天 · 最长 ' + longest + ' 天'],
       ['峰值日', peak ? peak.slice(5) + '（' + fmt(peakV) + ' token）' : '–'],
       ['缓存命中率', hit + '%'],
+      ['缓存量（读+写）', fmt(a.ca + a.ccw) + ' token'],
       ['平均耗时', a.req ? (a.dur / a.req / 1000).toFixed(1) + ' s' : '–'],
       ['主会话 / 子代理', fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub)]
     ];
@@ -682,8 +690,8 @@ function __usageBoot(D) {
   }
 
   function renderProviders(rows) {
-    var per = PV.map(function (p, i) { return { i: i, req: 0, tok: 0, cost: 0, hasCost: false }; });
-    rows.forEach(function (r) { var o = per[r[3]]; o.req++; o.tok += N(r[4]) + N(r[5]); var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; } });
+    var per = PV.map(function (p, i) { return { i: i, req: 0, tok: 0, inn: 0, ca: 0, cost: 0, hasCost: false }; });
+    rows.forEach(function (r) { var o = per[r[3]]; o.req++; o.tok += N(r[4]) + N(r[5]); o.inn += N(r[4]); o.ca += N(r[6]); var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; } });
     var tot = per.reduce(function (a, x) { return a + x.tok; }, 0);
     var act = per.filter(function (x) { return x.req > 0; }).sort(function (a, b) { return b.tok - a.tok; });
     if (!act.length) { $('ud-pv-stack').innerHTML = '<p class="text-muted">当前筛选下暂无数据</p>'; $('ud-pv-rows').innerHTML = ''; return; }
@@ -693,35 +701,36 @@ function __usageBoot(D) {
     $('ud-pv-rows').innerHTML = act.map(function (x) {
       return '<div class="text-small" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">' +
         '<span><span class="ud-dot" style="background:' + pvColor(x.i) + '"></span>' + pvLabel(x.i) + '<span class="ud-tag">' + pvTag(x.i) + '</span></span>' +
-        '<span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + (tot ? (x.tok / tot * 100).toFixed(1) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') + '</span></div>';
+        '<span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + (tot ? (x.tok / tot * 100).toFixed(1) : 0) + '% · 缓存 ' + (x.inn ? Math.round(x.ca / x.inn * 100) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') + '</span></div>';
     }).join('');
   }
 
   function renderModels(rows) {
     var per = {};
     rows.forEach(function (r) {
-      var o = per[r[2]] || (per[r[2]] = { req: 0, tok: 0 });
-      o.req++; o.tok += N(r[4]) + N(r[5]);
+      var o = per[r[2]] || (per[r[2]] = { req: 0, tok: 0, inn: 0, ca: 0 });
+      o.req++; o.tok += N(r[4]) + N(r[5]); o.inn += N(r[4]); o.ca += N(r[6]);
     });
-    var list = Object.keys(per).map(function (m) { return { m: m, req: per[m].req, tok: per[m].tok }; })
+    var list = Object.keys(per).map(function (m) { return { m: m, req: per[m].req, tok: per[m].tok, hit: per[m].inn ? Math.round(per[m].ca / per[m].inn * 100) : 0 }; })
       .sort(function (a, b) { return b.tok - a.tok; }).slice(0, 8);
     var tot = list.reduce(function (a, x) { return a + x.tok; }, 0);
     $('ud-model-bars').innerHTML = list.length ? list.map(function (x) {
       var p = tot ? Math.round(x.tok / tot * 100) : 0;
-      return '<div style="margin:8px 0"><div class="text-small" style="display:flex;justify-content:space-between;gap:8px"><span>' + esc(MD[x.m]) + '</span><span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + p + '%</span></div><div class="progress" role="progressbar" aria-label="' + esc(MD[x.m]) + ' 占比" aria-valuenow="' + p + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:' + p + '%"></div></div></div>';
+      return '<div style="margin:8px 0"><div class="text-small" style="display:flex;justify-content:space-between;gap:8px"><span>' + esc(MD[x.m]) + '</span><span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + p + '% · 缓存 ' + x.hit + '%</span></div><div class="progress" role="progressbar" aria-label="' + esc(MD[x.m]) + ' 占比" aria-valuenow="' + p + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:' + p + '%"></div></div></div>';
     }).join('') : '<p class="text-muted">当前筛选下暂无数据</p>';
   }
 
   function sessAgg(rows) {
     var per = {};
     rows.forEach(function (r) {
-      var o = per[r[0]] || (per[r[0]] = { tl: TL[r[0]] || '', req: 0, inn: 0, out: 0, sub: 0, last: 0, cost: 0, hasCost: false });
-      o.req++; o.inn += N(r[4]); o.out += N(r[5]); if (r[1] > o.last) o.last = r[1];
+      var o = per[r[0]] || (per[r[0]] = { tl: TL[r[0]] || '', req: 0, inn: 0, out: 0, ca: 0, sub: 0, last: 0, cost: 0, hasCost: false });
+      o.req++; o.inn += N(r[4]); o.out += N(r[5]); o.ca += N(r[6]); if (r[1] > o.last) o.last = r[1];
       if (r[9] === 1) o.sub++;
       var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; }
     });
     return Object.keys(per).map(function (g) {
       var o = per[g]; o.g = g; o.tot = o.inn + o.out;
+      o.rate = o.inn ? Math.round(o.ca / o.inn * 100) : 0;
       return o;
     });
   }
@@ -860,11 +869,12 @@ function __usageBoot(D) {
   }
 
   function renderSessions(rows) {
-    var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost' };
+    var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost', 7: 'rate' };
     var list = sessAgg(rows).sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
     var cols = [
       { h: '会话', k: null }, { h: '请求数', k: 1, end: 1 }, { h: '输入 token', k: 2, end: 1 },
       { h: '生成 token', k: 3, end: 1 }, { h: 'token 合计', k: 4, end: 1 },
+      { h: '缓存率', k: 7, end: 1 },
       costOn ? { h: '估算成本', k: 6, end: 1 } : null,
       { h: '最后活动', k: 5, end: 1 }
     ].filter(Boolean);
@@ -873,8 +883,8 @@ function __usageBoot(D) {
       return c.k == null ? '<th>' + c.h + '</th>' : '<th class="ud-sortable' + (c.end ? ' text-end' : '') + '" data-k="' + c.k + '"' + (sortS.k === c.k ? ' aria-sort="' + (sortS.d < 0 ? 'descending' : 'ascending') + '"' : '') + '>' + c.h + arrow + '</th>';
     }).join('') + '</tr>';
     $('ud-sessions-body').innerHTML = list.length ? list.slice(0, 30).map(function (o) {
-      return '<tr><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmtI(o.inn) + '</td><td class="text-end tabular-nums">' + fmtI(o.out) + '</td><td class="text-end tabular-nums">' + fmtI(o.tot) + '</td>' + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="text-muted">当前筛选下暂无数据</td></tr>';
+      return '<tr><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmtI(o.inn) + '</td><td class="text-end tabular-nums">' + fmtI(o.out) + '</td><td class="text-end tabular-nums">' + fmtI(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td>' + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="text-muted">当前筛选下暂无数据</td></tr>';
     Array.prototype.forEach.call($('ud-sessions-head').querySelectorAll('.ud-sortable'), function (th) {
       th.addEventListener('click', function () {
         var k = +th.getAttribute('data-k');
@@ -885,23 +895,50 @@ function __usageBoot(D) {
   }
 
   function renderDetail(rows) {
-    var keys = { 0: 1, 4: 4, 5: 5, 6: 6, 7: 7 };
-    var list = rows.filter(function (r) { return detailStat < 0 || r[8] === detailStat; }).sort(function (a, b) { return (a[keys[sortD.k]] - b[keys[sortD.k]]) * sortD.d; });
+    var ACC = {
+      0: function (r) { return r[1]; },
+      4: function (r) { return N(r[4]); },
+      5: function (r) { return N(r[5]); },
+      6: function (r) { return N(r[6]); },
+      7: function (r) { return N(r[7]); },
+      10: function (r) { return N(r[10]); },
+      11: function (r) { return N(r[11]); },
+      12: function (r) { return N(r[4]) + N(r[5]); },
+      13: function (r) { return rowCost(r) || 0; }
+    };
+    var list = rows.filter(function (r) { return detailStat < 0 || r[8] === detailStat; })
+      .sort(function (a, b) { return (ACC[sortD.k](a) - ACC[sortD.k](b)) * sortD.d; });
     var cols = [
       { h: '时间', k: 0 }, { h: '会话', k: null }, { h: '模型', k: null }, { h: '来源', k: null }, { h: '类型', k: null },
-      { h: '输入', k: 4, end: 1 }, { h: '生成', k: 5, end: 1 }, { h: '缓存读', k: 6, end: 1 }, { h: '耗时 ms', k: 7, end: 1 }, { h: '状态', k: null }
-    ];
+      { h: '输入', k: 4, end: 1 }, { h: '缓存读', k: 6, end: 1 }, { h: '缓存写', k: 10, end: 1 },
+      { h: '生成', k: 5, end: 1 }, { h: '合计', k: 12, end: 1 }, { h: '耗时 ms', k: 7, end: 1 }, { h: '首字 ms', k: 11, end: 1 },
+      { h: '状态', k: null },
+      costOn ? { h: '成本', k: 13, end: 1 } : null
+    ].filter(Boolean);
     $('ud-detail-head').innerHTML = '<tr>' + cols.map(function (c) {
       var arrow = sortD.k === c.k ? (sortD.d < 0 ? ' ↓' : ' ↑') : '';
-      return c.k == null ? '<th>' + c.h + '</th>' : '<th class="ud-sortable' + (c.end ? ' text-end' : '') + '" data-k="' + c.k + '">' + c.h + arrow + '</th>';
+      return c.k == null ? '<th>' + c.h + '</th>' : '<th class="ud-sortable' + (c.end ? ' text-end' : '') + '" data-k="' + c.k + '"' + (sortD.k === c.k ? ' aria-sort="' + (sortD.d < 0 ? 'descending' : 'ascending') + '"' : '') + '>' + c.h + arrow + '</th>';
     }).join('') + '</tr>';
     var totalPages = Math.max(1, Math.ceil(list.length / pageSize));
     if (page > totalPages) page = totalPages;
     if (page < 1) page = 1;
     var view = list.slice((page - 1) * pageSize, page * pageSize);
     $('ud-detail-body').innerHTML = view.length ? view.map(function (r) {
-      return '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td><td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td><td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td><td class="text-end tabular-nums">' + fmtI(r[4]) + '</td><td class="text-end tabular-nums">' + fmtI(r[5]) + '</td><td class="text-end tabular-nums">' + fmtI(r[6]) + '</td><td class="text-end tabular-nums">' + fmtI(r[7]) + '</td><td>' + stHtml(r[8]) + '</td></tr>';
-    }).join('') : '<tr><td colspan="10" class="text-muted">当前筛选下暂无数据</td></tr>';
+      var c = costOn ? rowCost(r) : null;
+      return '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
+        '<td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
+        '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(r[6]) + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(r[10]) + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(r[5]) + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(N(r[4]) + N(r[5])) + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(r[7]) + '</td>' +
+        '<td class="text-end tabular-nums">' + (r[11] == null ? '–' : fmtI(r[11])) + '</td>' +
+        '<td>' + stHtml(r[8]) + '</td>' +
+        (costOn ? '<td class="text-end tabular-nums">' + (c == null ? '–' : fmtCost(c)) + '</td>' : '') +
+        '</tr>';
+    }).join('') : '<tr><td colspan="14" class="text-muted">当前筛选下暂无数据</td></tr>';
     $('ud-pager').innerHTML = '<button type="button" class="btn" id="ud-prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
       '<span class="text-small text-muted tabular-nums">第 ' + page + ' / ' + totalPages + ' 页 · 共 ' + fmtI(list.length) + ' 条</span>' +
       '<button type="button" class="btn" id="ud-next"' + (page >= totalPages ? ' disabled' : '') + '>下一页</button>';
