@@ -55,6 +55,7 @@ cmd_dashboard() {
         'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
         'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
         'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
+        'sessionDirs',(SELECT json_group_array(coalesce(se.directory,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
         'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage $scope GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
         'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
         'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM U),
@@ -112,6 +113,16 @@ cmd_dashboard() {
 #usage-dashboard .ud-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0;}
 #usage-dashboard .ud-legend .form-check{display:inline-flex;align-items:center;gap:4px;margin:0;}
 #usage-dashboard .ud-click{cursor:pointer;}
+#usage-dashboard .ud-flink{cursor:pointer;text-decoration:underline dotted var(--muted-foreground);text-underline-offset:3px;}
+#usage-dashboard .ud-timeline{position:relative;margin:6px 0 0 4px;padding-left:14px;border-left:2px solid var(--border);}
+#usage-dashboard .ud-tl-item{position:relative;display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;}
+#usage-dashboard .ud-tl-dot{position:absolute;left:-20px;top:50%;transform:translateY(-50%);width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 3px var(--card);}
+#usage-dashboard .ud-tl-dot.ud-tl-c{background:var(--yellow);}
+#usage-dashboard .ud-tl-dot.ud-tl-m{background:var(--viz-series-1);}
+#usage-dashboard .ud-tl-dot.ud-tl-more{background:var(--muted-foreground);}
+#usage-dashboard .ud-tl-t{font-variant-numeric:tabular-nums;color:var(--muted-foreground);flex:0 0 auto;}
+#usage-dashboard .ud-tl-x{color:var(--foreground);}
+#usage-dashboard .ud-flink:hover{color:var(--foreground);}
 #usage-dashboard .ud-click:hover td{background:var(--muted);}
 #usage-dashboard .ud-exp td{background:var(--muted);padding:12px 14px;}
 #usage-dashboard .ud-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:4px 0;}
@@ -131,10 +142,12 @@ UD_HEAD
   <label class="form-label text-small text-muted" for="ud-f-model">模型</label>
   <select class="form-select" id="ud-f-model"></select>
   <div class="viz-row" role="group" aria-label="时间范围" id="ud-f-range">
+    <button type="button" class="ud-toggle" data-r="today" aria-pressed="false">今天</button>
     <button type="button" class="ud-toggle" data-r="7" aria-pressed="false">近 7 天</button>
     <button type="button" class="ud-toggle" data-r="30" aria-pressed="false">近 30 天</button>
     <button type="button" class="ud-toggle" data-r="all" aria-pressed="true">全部</button>
   </div>
+  <span id="ud-sess-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除会话筛选"></span>
   <label class="form-check form-switch" id="ud-cost-wrap" hidden><input type="checkbox" class="form-check-input" id="ud-f-cost"><span class="form-check-label text-small">成本估算</span></label>
   <button type="button" class="btn" id="ud-price-sync" style="margin:0;padding:2px 10px;font-size:12px">同步价格</button>
   <span class="text-small text-muted" id="ud-meta"></span>
@@ -160,6 +173,8 @@ UD_HEAD
   <div id="ud-pv-rows"></div>
   <h3>模型分布</h3>
   <div id="ud-model-bars"></div>
+  <h3>常用工具</h3>
+  <div class="card" style="padding:12px 14px"><div id="ud-tools-donut"></div></div>
   <h3>最活跃会话（Top 5）</h3>
   <div id="ud-top-sessions"></div>
   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -279,6 +294,39 @@ function __usageBoot(D) {
     var c = t >= 320 ? 'var(--viz-series-5)' : t >= 240 ? 'var(--red)' : t >= 160 ? 'var(--yellow)' : t >= 80 ? 'var(--green)' : 'var(--viz-series-1)';
     return '<span class="tabular-nums" style="color:' + c + '">' + fmtI(t) + '</span>';
   }
+  // 甜甜圈图：items=[{name, value, extra}]，悬停显示名称/值/占比（点击不响应，纯展示）
+  var PALETTE = ['var(--viz-series-1)', 'var(--viz-series-2)', 'var(--viz-series-3)', 'var(--viz-series-4)', 'var(--viz-series-5)', 'var(--viz-series-6)'];
+  function donut(items, centerLabel) {
+    if (!items || !items.length) return '<p class="text-muted text-small">暂无数据</p>';
+    var total = 0;
+    items.forEach(function (it) { total += it.value; });
+    if (!total) return '<p class="text-muted text-small">暂无数据</p>';
+    var R1 = 52, R0 = 30, CX = 60, CY = 60;
+    var a0 = -Math.PI / 2, paths = '', legend = '';
+    items.slice(0, 6).forEach(function (it, i) {
+      var frac = it.value / total;
+      var a1 = a0 + frac * Math.PI * 2;
+      var large = frac > 0.5 ? 1 : 0;
+      var color = it.color || PALETTE[i % 6];
+      var x0 = CX + R1 * Math.cos(a0), y0 = CY + R1 * Math.sin(a0);
+      var x1 = CX + R1 * Math.cos(a1), y1 = CY + R1 * Math.sin(a1);
+      var xi = CX + R0 * Math.cos(a1), yi = CY + R0 * Math.sin(a1);
+      var xj = CX + R0 * Math.cos(a0), yj = CY + R0 * Math.sin(a0);
+      var tipTxt = it.tip || (it.name + ' · ' + fmtI(it.value) + '（' + Math.round(frac * 100) + '%）');
+      if (frac >= 0.999) {
+        paths += '<circle cx="' + CX + '" cy="' + CY + '" r="' + ((R1 + R0) / 2) + '" fill="none" stroke="' + color + '" stroke-width="' + (R1 - R0) + '"><title>' + esc(tipTxt) + '</title></circle>';
+      } else {
+        paths += '<path d="M' + x0.toFixed(1) + ' ' + y0.toFixed(1) + ' A' + R1 + ' ' + R1 + ' 0 ' + large + ' 1 ' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' L' + xi.toFixed(1) + ' ' + yi.toFixed(1) + ' A' + R0 + ' ' + R0 + ' 0 ' + large + ' 0 ' + xj.toFixed(1) + ' ' + yj.toFixed(1) + ' Z" fill="' + color + '" fill-opacity="0.88"><title>' + esc(tipTxt) + '</title></path>';
+      }
+      legend += '<div class="row"><span class="nm" title="' + esc(it.name) + '"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + color + ';margin-right:5px"></i>' + esc(it.name) + '</span><span class="n">' + Math.round(frac * 100) + '%</span></div>';
+      a0 = a1;
+    });
+    return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">' +
+      '<svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="甜甜圈图" style="flex:0 0 auto">' + paths +
+      '<text x="60" y="57" text-anchor="middle" font-size="11" fill="var(--muted-foreground)" pointer-events="none">' + esc(centerLabel || '') + '</text>' +
+      '<text x="60" y="72" text-anchor="middle" font-size="13" font-weight="600" fill="var(--foreground)" pointer-events="none">' + esc(fmt(total)) + '</text></svg>' +
+      '<div style="flex:1;min-width:150px">' + legend + '</div></div>';
+  }
   function stHtml(s) { return '<span style="white-space:nowrap"><span style="color:' + SCOLOR[s] + '">●</span> ' + STAT[s] + '</span>'; }
 
   // 供应商：官方账号(account:*) / 自定义接入，按总 token 降序分配固定系列色
@@ -326,17 +374,22 @@ function __usageBoot(D) {
   (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [] }; });
   (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
-  var st = { p: -1, m: -1, rng: 'all', hidePv: {} };
+  var st = { p: -1, m: -1, s: -1, rng: 'all', hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
   var heatMode = 'day', heatLastW = -1, sessExp = -1, detExp = -1;
 
-  function cutOf() { if (st.rng === 'all') return 0; return maxTs - (st.rng === '7' ? 7 : 30) * 864e5; }
+  function cutOf() {
+    if (st.rng === 'all') return 0;
+    if (st.rng === 'today') { var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+    return maxTs - (st.rng === '7' ? 7 : 30) * 864e5;
+  }
   function frows(ignorePv) {
     var cut = cutOf();
     return R.filter(function (r) {
       if (!ignorePv && st.p >= 0 && r[3] !== st.p) return false;
       if (st.m >= 0 && r[2] !== st.m) return false;
+      if (st.s >= 0 && r[0] !== st.s) return false;
       if (cut && r[1] < cut) return false;
       return true;
     });
@@ -457,9 +510,9 @@ function __usageBoot(D) {
     var tot = per.reduce(function (a, x) { return a + x.tok; }, 0);
     var act = per.filter(function (x) { return x.req > 0; }).sort(function (a, b) { return b.tok - a.tok; });
     if (!act.length) { $('ud-pv-stack').innerHTML = '<p class="text-muted">当前筛选下暂无数据</p>'; $('ud-pv-rows').innerHTML = ''; return; }
-    $('ud-pv-stack').innerHTML = '<div class="ud-stack" role="img" aria-label="来源构成">' + act.map(function (x) {
-      return '<span style="width:' + (tot ? (x.tok / tot * 100).toFixed(2) : 0) + '%;background:' + pvColor(x.i) + '"></span>';
-    }).join('') + '</div>';
+    $('ud-pv-stack').innerHTML = donut(act.slice(0, 6).map(function (x) {
+      return { name: pvLabel(x.i), value: x.tok, color: pvColor(x.i), tip: pvLabel(x.i) + ' · ' + fmtI(x.req) + ' 次请求 · ' + fmt(x.tok) + ' tok · 缓存 ' + (x.inn ? Math.round(x.ca / x.inn * 100) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') };
+    }), 'token');
     $('ud-pv-rows').innerHTML = act.map(function (x) {
       return '<div class="text-small" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">' +
         '<span><span class="ud-dot" style="background:' + pvColor(x.i) + '"></span>' + pvLabel(x.i) + '<span class="ud-tag">' + pvTag(x.i) + '</span></span>' +
@@ -476,9 +529,11 @@ function __usageBoot(D) {
     var list = Object.keys(per).map(function (m) { return { m: m, req: per[m].req, tok: per[m].tok, hit: per[m].inn ? Math.round(per[m].ca / per[m].inn * 100) : 0 }; })
       .sort(function (a, b) { return b.tok - a.tok; }).slice(0, 8);
     var tot = list.reduce(function (a, x) { return a + x.tok; }, 0);
-    $('ud-model-bars').innerHTML = list.length ? list.map(function (x) {
+    $('ud-model-bars').innerHTML = list.length ? donut(list.slice(0, 6).map(function (x) {
+      return { name: String(MD[x.m]), value: x.tok, tip: MD[x.m] + ' · ' + fmtI(x.req) + ' 次请求 · ' + fmt(x.tok) + ' tok · 缓存 ' + x.hit + '%' };
+    }), 'token') + list.map(function (x) {
       var p = tot ? Math.round(x.tok / tot * 100) : 0;
-      return '<div style="margin:8px 0"><div class="text-small" style="display:flex;justify-content:space-between;gap:8px"><span>' + esc(MD[x.m]) + '</span><span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + p + '% · 缓存 ' + x.hit + '%</span></div><div class="progress" role="progressbar" aria-label="' + esc(MD[x.m]) + ' 占比" aria-valuenow="' + p + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:' + p + '%"></div></div></div>';
+      return '<div class="text-small" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>' + esc(MD[x.m]) + '</span><span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + p + '% · 缓存 ' + x.hit + '%</span></div>';
     }).join('') : '<p class="text-muted">当前筛选下暂无数据</p>';
   }
 
@@ -502,8 +557,24 @@ function __usageBoot(D) {
     var list = sessAgg(rows).sort(function (a, b) { return b.tot - a.tot; }).slice(0, 5);
     $('ud-top-sessions').innerHTML = list.length ? '<table class="table table-sm"><thead><tr><th>会话</th><th class="text-end">请求数</th><th class="text-end">token 合计</th><th class="text-end">最后活动</th></tr></thead><tbody>' +
       list.map(function (o) {
-        return '<tr><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmt(o.tot) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+        return '<tr class="ud-click" data-sg="' + o.g + '" title="点击查看会话详情"><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmt(o.tot) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       }).join('') + '</tbody></table>' : '<p class="text-muted">当前筛选下暂无数据</p>';
+    var donutEl = $('ud-tools-donut');
+    if (donutEl) {
+      donutEl.innerHTML = donut((D.tools || []).slice(0, 6).map(function (t) {
+        return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + ' 次调用' + (t[3] ? ' · 均 ' + fmtI(t[3]) + ' ms' : '') + (t[2] ? ' · 失败 ' + t[2] : '') };
+      }), '调用');
+    }
+    Array.prototype.forEach.call($('ud-top-sessions').querySelectorAll('tr.ud-click'), function (tr) {
+      tr.addEventListener('click', function () {
+        sessExp = +tr.getAttribute('data-sg');
+        var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-sessions"]');
+        if (btn) btn.click();
+        renderSessions(frows(false));
+        var host = $('ud-sessions');
+        if (host) host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
   }
 
   var hourMetric = 'req';
@@ -690,8 +761,10 @@ function __usageBoot(D) {
       mm[nm] = (mm[nm] || 0) + N(r[4]) + N(r[5]);
       pv2[r[3]] = (pv2[r[3]] || 0) + 1;
     });
-    var mtot = 0; for (var k in mm) mtot += mm[k];
-    var mix = Object.keys(mm).sort(function (a, b) { return mm[b] - mm[a]; }).map(function (k) { return '<span class="text-small text-muted">' + esc(k) + ' ' + Math.round(mm[k] / mtot * 100) + '%</span>'; }).join(' · ');
+    var mix = donut(Object.keys(mm).sort(function (a, b) { return mm[b] - mm[a]; }).map(function (k) {
+      return { name: k, value: mm[k], tip: k + ' · ' + fmt(mm[k]) + ' tok（' + Math.round(mm[k] / (mtot() || 1) * 100) + '%）' };
+    }), 'token');
+    function mtot() { var t = 0; for (var k2 in mm) t += mm[k2]; return t; }
     var pvm = Object.keys(pv2).map(function (k) { return '<span class="text-small text-muted">' + pvLabel(k) + ' ×' + pv2[k] + '</span>'; }).join(' · ');
     var tl = (toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6)
       .map(function (t) { return '<span class="text-small text-muted">' + esc(String(t[0]).replace(/^mcp__/, '')) + ' ×' + fmtI(t[1]) + '</span>'; }).join(' · ');
@@ -710,34 +783,60 @@ function __usageBoot(D) {
     });
     events.sort(function (a, b) { return a.t < b.t ? -1 : a.t > b.t ? 1 : 0; });
     var tl8 = events.length
-      ? '<div class="ud-sec"><div class="ud-kv-l">事件时间线</div>' + events.slice(-12).map(function (e) { return '<div class="text-small text-muted">' + esc(e.t) + ' · ' + esc(e.label) + '</div>'; }).join('') + (events.length > 12 ? '<div class="text-small text-muted">… 共 ' + events.length + ' 个事件</div>' : '') + '</div>'
+      ? '<div class="ud-sec"><div class="ud-kv-l">事件时间线</div><div class="ud-timeline">' +
+        events.slice(-12).map(function (e) {
+          var cls = e.label.indexOf('压缩') >= 0 ? 'ud-tl-c' : 'ud-tl-m';
+          return '<div class="ud-tl-item"><span class="ud-tl-dot ' + cls + '"></span><span class="ud-tl-t">' + esc(e.t) + '</span><span class="ud-tl-x">' + esc(e.label) + '</span></div>';
+        }).join('') +
+        (events.length > 12 ? '<div class="ud-tl-item"><span class="ud-tl-dot ud-tl-more"></span><span class="ud-tl-t">…</span><span class="ud-tl-x text-muted">共 ' + events.length + ' 个事件</span></div>' : '') +
+        '</div></div>'
       : '';
-    var W = 600, H = 90, maxIn = 1;
+    // 主会话 / 子代理拆分（rows r[9]：0 主会话 1 子代理 2 系统）
+    var subTok = 0, subReq = 0, mainTok = 0, mainReq = 0;
+    rs.forEach(function (r) {
+      var t = N(r[4]) + N(r[5]);
+      if (r[9] === 1) { subTok += t; subReq++; } else { mainTok += t; mainReq++; }
+    });
+    var W = 600, H = 96, maxIn = 1;
     rs.forEach(function (r) { if (N(r[4]) > maxIn) maxIn = N(r[4]); });
-    var pts = rs.map(function (r, i) {
+    var pts = [], dots = [];
+    rs.forEach(function (r, i) {
       var x = rs.length > 1 ? i / (rs.length - 1) * (W - 8) + 4 : W / 2;
       var y = H - 8 - (H - 16) * N(r[4]) / maxIn;
-      return x.toFixed(1) + ',' + y.toFixed(1);
-    }).join(' ');
-    var curve = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="上下文水位曲线"><polyline points="' + pts + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/></svg>';
+      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+      var d = new Date(r[1]);
+      var tt = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      var st = r[8] === 0 ? '完成' : r[8] === 1 ? '失败' : r[8] === 2 ? '已取消' : '进行中';
+      dots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.4 : 3.4) + '" fill="var(--viz-series-1)" fill-opacity="0.85"><title>' + esc(tt) + ' · 输入 ' + fmt(N(r[4])) + ' tok · 生成 ' + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + (r[9] === 1 ? ' · 子代理' : '') + '</title></circle>');
+    });
+    var startT = fullTs(rs.length ? rs[0][1] : 0), endT = fullTs(o.last);
+    var curve = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="上下文水位曲线">' +
+      '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/>' + dots.join('') + '</svg>';
+    var curveHead = '<div class="ud-kv-l">' + esc(startT) + ' <span style="color:var(--muted-foreground)">→</span> ' + esc(endT) + ' · 按请求输入 token 近似 · 峰值 ' + fmt(maxIn) + ' · 悬停看点明细</div>';
+    var toolDonut = (toolsMap[o.g] || []).length
+      ? '<div class="ud-sec"><div class="ud-kv-l">使用工具（调用次数占比）</div>' + donut((toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6).map(function (t) {
+          return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + ' 次调用' + (t[3] ? ' · 累计 ' + fmtI(t[3]) + ' ms' : '') };
+        }), '调用') + '</div>'
+      : '';
     function kv(l, v) { return '<div><div class="ud-kv-l">' + l + '</div><div class="ud-kv-v">' + v + '</div></div>'; }
     return '<div class="ud-kv">' +
       kv('项目目录', dir) +
-      kv('起止', fullTs(rs.length ? rs[0][1] : 0) + ' ~ ' + fullTs(o.last)) +
       kv('请求 / 缓存率', fmtI(o.req) + ' 次 · ' + o.rate + '%') +
       (function () {
         var gen = 0, ms = 0;
         rs.forEach(function (r) { gen += N(r[5]); ms += Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11]))); });
         return ms > 0 ? kv('平均输出速率', tpsHtml(Math.round(gen / ms * 1000)) + ' tok/s（加权）') : '';
       })() +
+      (subReq ? kv('主会话 / 子代理', fmtI(mainReq) + ' 次 · ' + fmt(mainTok) + ' tok <span class="text-muted">/</span> ' + fmtI(subReq) + ' 次 · ' + fmt(subTok) + ' tok') : '') +
       kv('上下文压缩', cmpHtml) +
       (costOn && o.hasCost ? kv('估算成本', fmtCost(o.cost)) : '') +
       '</div>' +
-      '<div class="ud-sec"><div class="ud-kv-l">模型占比（按 token）</div>' + mix + '</div>' +
+      '<div class="ud-sec"><div class="ud-kv-l">模型占比（按 token）</div>' + mix +
+      '<button type="button" class="btn ud-sess-logs" data-sg="' + o.g + '" style="margin:8px 0 0;padding:2px 10px;font-size:12px">查看该会话请求日志 →</button></div>' +
       '<div class="ud-sec"><div class="ud-kv-l">来源</div>' + pvm + '</div>' +
-      (tl ? '<div class="ud-sec"><div class="ud-kv-l">使用工具 Top 6</div>' + tl + '</div>' : '') +
+      toolDonut +
       tl8 +
-      '<div class="ud-sec"><div class="ud-kv-l">上下文水位（按请求输入 token 近似，峰值 ' + fmt(maxIn) + '）</div>' + curve + '</div>';
+      '<div class="ud-sec">' + curveHead + curve + '</div>';
   }
   function renderSessions(rows) {
     var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost', 7: 'rate' };
@@ -770,6 +869,19 @@ function __usageBoot(D) {
         renderSessions(frows(false));
       });
     });
+    var bodyEl = $('ud-sessions-body');
+    if (!bodyEl.dataset.logsBtnBound) {
+      bodyEl.dataset.logsBtnBound = '1';
+      bodyEl.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.ud-sess-logs') : null;
+        if (!btn) return;
+        st.s = +btn.getAttribute('data-sg');
+        page = 1; sessExp = -1; detExp = -1;
+        var dbtn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-detail"]');
+        if (dbtn) dbtn.click();
+        apply();
+      });
+    }
     Array.prototype.forEach.call($('ud-sessions-head').querySelectorAll('.ud-sortable'), function (th) {
       th.addEventListener('click', function () {
         var k = +th.getAttribute('data-k');
@@ -860,8 +972,8 @@ function __usageBoot(D) {
     } else {
       view.forEach(function (r, i) {
         body += '<tr class="ud-click" data-di="' + i + '"><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
-          '<td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
-          '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
+          '<td class="ud-flink" data-k="s" data-v="' + r[0] + '" title="点击只看该会话">' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
+          '<td class="ud-flink" data-k="m" data-v="' + r[2] + '" title="点击只看该模型">' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
           '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td>' +
           '<td class="text-end tabular-nums">' + fmtI(r[6]) + '</td>' +
           '<td class="text-end tabular-nums">' + fmtI(r[10]) + '</td>' +
@@ -899,6 +1011,22 @@ function __usageBoot(D) {
       if (nextBtn) nextBtn.addEventListener('click', function () { page++; detExp = -1; renderDetail(frows(false)); });
       var pageSelEl = $('ud-page-sel');
       if (pageSelEl) pageSelEl.addEventListener('change', function () { page = +this.value; detExp = -1; renderDetail(frows(false)); });
+      var tbodyEl = $('ud-detail-body');
+      if (!tbodyEl.dataset.flinkBound) {
+        tbodyEl.dataset.flinkBound = '1';
+        tbodyEl.addEventListener('click', function (e) {
+          var fl = e.target.closest ? e.target.closest('.ud-flink') : null;
+          if (!fl) return;
+          e.stopPropagation();
+          var k = fl.dataset.k, v = +fl.dataset.v;
+          if (k === 's') st.s = (st.s === v ? -1 : v);
+          if (k === 'm') st.m = (st.m === v ? -1 : v);
+          page = 1; sessExp = -1; detExp = -1;
+          var ms = $('ud-f-model');
+          if (k === 'm' && ms) ms.value = String(st.m);
+          apply();
+        });
+      }
       Array.prototype.forEach.call($('ud-detail-body').querySelectorAll('tr.ud-click'), function (tr) {
         tr.addEventListener('click', function () {
           var i = +tr.getAttribute('data-di');
@@ -1002,6 +1130,11 @@ function __usageBoot(D) {
   }
 
   function apply() {
+    var sf = $('ud-sess-filter');
+    if (sf) {
+      sf.hidden = st.s < 0;
+      if (st.s >= 0) sf.textContent = '会话：' + (TL[st.s] ? TL[st.s].slice(0, 24) : '#' + st.s) + ' ✕';
+    }
     var rows = frows(false);
     if (D.session) { renderSession(rows); renderDetail(rows); return; }
     renderKpis(rows);
@@ -1038,6 +1171,10 @@ function __usageBoot(D) {
   fillSelect($('ud-f-pv'), '全部来源', PV.map(function (p, i) { return { v: i, label: pvLabel(i) + '（' + pvTag(i) + '）' }; }));
   fillSelect($('ud-f-model'), '全部模型', MD.map(function (m, i) { return { v: i, label: String(m) }; }));
   if (PRICE && Object.keys(PRICE).length) { $('ud-cost-wrap').hidden = false; }
+  (function () {
+    var sf = $('ud-sess-filter');
+    if (sf) sf.addEventListener('click', function () { st.s = -1; page = 1; sessExp = -1; detExp = -1; apply(); });
+  })();
   $('ud-f-pv').addEventListener('change', function () { st.p = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-model').addEventListener('change', function () { st.m = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-stat').addEventListener('change', function () { detailStat = +this.value; page = 1; renderDetail(frows(false)); });
@@ -1106,7 +1243,7 @@ function __usageBoot(D) {
   document.body.appendChild(tip);
   document.addEventListener('mousemove', function (e) {
     var t = e.target;
-    var rect = t && t.closest ? t.closest('svg rect') : null;
+    var rect = t && t.closest ? t.closest('svg rect, svg circle, svg path') : null;
     var title = rect && rect.querySelector('title');
     if (title && title.textContent) {
       tip.textContent = title.textContent;
