@@ -520,10 +520,11 @@ NODE
 #usage-dashboard .ud-insights{display:flex;flex-wrap:wrap;gap:4px 18px;padding:6px 0;}
 #usage-dashboard .ud-insights .text-muted{margin-right:4px;}
 </style>
-<div id="ud-session" hidden>
-  <h3 id="ud-session-title"></h3>
-  <p class="text-small text-muted" id="ud-session-info" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
-</div>
+UD_HEAD
+      if [[ "$cmd" == dashboard-this ]]; then
+        cat "$(dirname "${BASH_SOURCE[0]}")/../assets/session-dashboard.html"
+      else
+        cat <<'UD_ALL_HEAD'
 <div class="viz-controls" role="group" aria-label="用量筛选">
   <label class="form-label text-small text-muted" for="ud-f-pv">来源</label>
   <select class="form-select" id="ud-f-pv"></select>
@@ -611,9 +612,12 @@ NODE
     <tbody id="ud-errors-body"></tbody>
   </table></div>
 </div>
+UD_ALL_HEAD
+      fi
+      cat <<'UD_DATA_HEAD'
 <script>
 const DATA =
-UD_HEAD
+UD_DATA_HEAD
       # JSON 位于 script 中：转义 < 防止会话标题中的 </script> 提前闭合标签。
       printf '%s\n' "${META//</\\u003c}"
       cat <<'UD_TAIL'
@@ -638,12 +642,12 @@ UD_HEAD
   function fullTs(ts) { var d = new Date(ts); return dayKey(ts) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 
   if (D.session) {
-    $('ud-session').hidden = false;
     $('ud-session-title').textContent = '会话用量 · ' + D.session.title;
+    $('ud-session-last').textContent = '最近请求：' + (D.session.latest == null ? '暂无请求' : fullTs(D.session.latest)) + ' · 会话信息';
+    $('ud-session-selection').textContent = '定位：' + D.session.selection;
     $('ud-session-info').textContent = '会话 ID：' + D.session.id + '\n项目目录：' + (D.session.directory || '–')
       + '\n创建：' + (D.session.created == null ? '–' : fullTs(D.session.created))
-      + ' · 最近请求：' + (D.session.latest == null ? '暂无请求' : fullTs(D.session.latest))
-      + '\n定位方式：' + D.session.selection + '；仅统计该 session_id 的记录。';
+      + '\n仅统计该 session_id 的记录。';
   }
 
   var STAT = ['完成', '失败', '已取消', '进行中'];
@@ -705,6 +709,39 @@ UD_HEAD
     var s = {};
     rows.forEach(function (r) { s[dayKey(r[1])] = 1; });
     return Object.keys(s).sort();
+  }
+
+  function renderSession(rows) {
+    var a = agg(rows), states = [0, 0, 0, 0];
+    rows.forEach(function (r) { states[r[8]]++; });
+    $('ud-k1').textContent = fmtI(a.req);
+    $('ud-k1c').textContent = '完成 ' + fmtI(states[0]) + (states[3] ? ' · 进行中 ' + fmtI(states[3]) : '');
+    $('ud-k2').textContent = fmt(a.inn);
+    $('ud-k3').textContent = fmt(a.out);
+    $('ud-k4').textContent = fmt(a.ca);
+    $('ud-k4c').textContent = '缓存命中率 ' + (a.inn ? Math.round(a.ca / a.inn * 100) + '%' : '–');
+    $('ud-meta').textContent = '本地快照 ' + (D.gen || '') + ' · 已加载 ' + fmtI(D.covered) + ' / ' + fmtI(D.total) + ' 条'
+      + (D.covered < D.total ? '，统计仅含已加载记录' : '');
+    var failures = states[1] + states[2];
+    $('ud-failures').hidden = failures === 0;
+    $('ud-failures').textContent = '查看失败 / 取消（' + fmtI(failures) + '）';
+    $('ud-request-count').textContent = fmtI(rows.length) + ' 条';
+
+    var groups = {}, models = {};
+    rows.forEach(function (r) {
+      var key = r[2] + ':' + r[3];
+      var g = groups[key] || (groups[key] = { m: r[2], p: r[3], req: 0, inn: 0, out: 0, ca: 0 });
+      g.req++; g.inn += N(r[4]); g.out += N(r[5]); g.ca += N(r[6]);
+      models[r[2]] = true;
+    });
+    $('ud-model-count').textContent = Object.keys(models).length + ' 个模型';
+    var list = Object.keys(groups).map(function (key) { return groups[key]; })
+      .sort(function (a, b) { return (b.inn + b.out) - (a.inn + a.out); });
+    $('ud-session-models').innerHTML = list.length ? list.map(function (g) {
+      return '<tr><td>' + esc(MD[g.m]) + '</td><td>' + pvLabel(g.p) + '</td><td class="text-end tabular-nums">' + fmtI(g.req)
+        + '</td><td class="text-end tabular-nums">' + fmtI(g.inn) + '</td><td class="text-end tabular-nums">' + fmtI(g.out)
+        + '</td><td class="text-end tabular-nums">' + fmtI(g.ca) + '</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="text-muted">该会话暂无模型请求</td></tr>';
   }
 
   function renderKpis(rows) {
@@ -937,19 +974,24 @@ UD_HEAD
 
   function renderDetail(rows) {
     var keys = { 0: 1, 4: 4, 5: 5, 6: 6, 7: 7 };
-    var list = rows.filter(function (r) { return detailStat < 0 || r[8] === detailStat; }).sort(function (a, b) { return (a[keys[sortD.k]] - b[keys[sortD.k]]) * sortD.d; });
+    var list = rows.filter(function (r) { return detailStat === -2 ? r[8] === 1 || r[8] === 2 : detailStat < 0 || r[8] === detailStat; }).sort(function (a, b) { return (a[keys[sortD.k]] - b[keys[sortD.k]]) * sortD.d; });
     var cols = [
       { h: '时间', k: 0 }, { h: '会话', k: null }, { h: '模型', k: null }, { h: '来源', k: null }, { h: '类型', k: null },
       { h: '输入', k: 4, end: 1 }, { h: '生成', k: 5, end: 1 }, { h: '缓存读', k: 6, end: 1 }, { h: '耗时 ms', k: 7, end: 1 }, { h: '状态', k: null }
     ];
+    if (D.session) { cols = cols.filter(function (c) { return c.h !== '会话' && c.h !== '类型'; }); }
     $('ud-detail-head').innerHTML = '<tr>' + cols.map(function (c) {
       var arrow = sortD.k === c.k ? (sortD.d < 0 ? ' ↓' : ' ↑') : '';
       return c.k == null ? '<th>' + c.h + '</th>' : '<th class="ud-sortable' + (c.end ? ' text-end' : '') + '" data-k="' + c.k + '">' + c.h + arrow + '</th>';
     }).join('') + '</tr>';
     var view = list.slice(0, shown);
     $('ud-detail-body').innerHTML = view.length ? view.map(function (r) {
-      return '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td><td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td><td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td><td class="text-end tabular-nums">' + fmtI(r[4]) + '</td><td class="text-end tabular-nums">' + fmtI(r[5]) + '</td><td class="text-end tabular-nums">' + fmtI(r[6]) + '</td><td class="text-end tabular-nums">' + fmtI(r[7]) + '</td><td>' + stHtml(r[8]) + '</td></tr>';
-    }).join('') : '<tr><td colspan="10" class="text-muted">当前筛选下暂无数据</td></tr>';
+      return '<tr><td class="text-nowrap">' + fullTs(r[1]) + '</td>'
+        + (D.session ? '' : '<td>' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>')
+        + '<td>' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td>'
+        + (D.session ? '' : '<td>' + QT[r[9]] + '</td>')
+        + '<td class="text-end tabular-nums">' + fmtI(r[4]) + '</td><td class="text-end tabular-nums">' + fmtI(r[5]) + '</td><td class="text-end tabular-nums">' + fmtI(r[6]) + '</td><td class="text-end tabular-nums">' + fmtI(r[7]) + '</td><td>' + stHtml(r[8]) + '</td></tr>';
+    }).join('') : '<tr><td colspan="' + cols.length + '" class="text-muted">当前筛选下暂无数据</td></tr>';
     var more = $('ud-more');
     if (shown >= list.length) { more.hidden = true; }
     else { more.hidden = false; more.textContent = '加载更多（已显示 ' + shown + ' / ' + list.length + '）'; }
@@ -1031,6 +1073,7 @@ UD_HEAD
 
   function apply() {
     var rows = frows(false);
+    if (D.session) { renderSession(rows); renderDetail(rows); return; }
     renderKpis(rows);
     renderInsights(rows);
     renderProviders(frows(true));
@@ -1044,7 +1087,22 @@ UD_HEAD
     drawTrend();
   }
 
-  // 筛选控件
+  // 会话视图只初始化明细交互；全量分析与筛选控件留给 dashboard。
+  if (D.session) {
+    $('ud-f-stat').addEventListener('change', function () { detailStat = +this.value; shown = 50; renderDetail(R); });
+    $('ud-more').addEventListener('click', function () { shown += 50; renderDetail(R); });
+    $('ud-failures').addEventListener('click', function () {
+      detailStat = -2; shown = 50;
+      $('ud-request-section').open = true;
+      $('ud-f-stat').value = '-2';
+      renderDetail(R);
+      $('ud-f-stat').focus();
+    });
+    apply();
+    return;
+  }
+
+  // 全量仪表盘筛选控件
   fillSelect($('ud-f-pv'), '全部来源', PV.map(function (p, i) { return { v: i, label: pvLabel(i) + '（' + pvTag(i) + '）' }; }));
   fillSelect($('ud-f-model'), '全部模型', MD.map(function (m, i) { return { v: i, label: String(m) }; }));
   if (PRICE && Object.keys(PRICE).length) { $('ud-cost-wrap').hidden = false; }
