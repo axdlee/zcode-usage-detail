@@ -10,10 +10,14 @@
 
 ## 功能
 
-- **逐条明细**：每次模型请求一行——时间、会话、模型、来源、输入/生成/缓存读 token、耗时、状态
+- **逐条明细**：每次模型请求一行——时间、会话、模型、来源、主会话/子代理、输入/生成/缓存读 token、耗时、状态
 - **来源区分**：自动区分 `account:*` 官方套餐（如 GLM Coding Plan）与自定义/BYOK 接入，仪表盘按来源堆叠展示每日趋势
-- **交互式仪表盘**（`/usage-ui`）：总览 / 每日趋势 / 会话排行 / 请求明细 / 失败请求五个标签页；来源、模型、时间范围（近 7 天 / 30 天 / 全部）全局筛选即时生效；表格点击表头排序；界面自动适配 ZCode 明暗主题
-- **文本查询**（`/usage`）：总览、某天明细、按天汇总、会话排行、模型分布、失败请求
+- **交互式仪表盘**（`/usage-ui`）：总览 / 每日趋势 / 5 小时窗口 / 会话排行 / 请求明细 / 失败请求六个标签页；来源、模型、时间范围（近 7 天 / 30 天 / 全部）全局筛选即时生效；表格点击表头排序；界面自动适配 ZCode 明暗主题
+- **5 小时窗口**：按相邻请求间隔 ≥5h 切分用量窗口（同 ccusage 口径），当前窗口显示进行中进度与剩余时间
+- **洞察指标**：活跃天数、当前/最长连续活跃、峰值日、缓存命中率、平均耗时、主会话/子代理拆分、最常用工具
+- **活跃热力图**：GitHub 提交风格，按天 token 四分位着色，悬停看当日明细
+- **成本估算**（可选）：在 `~/.zcode/usage-prices.json` 配置价格表后，`cost` 命令与仪表盘"成本估算"开关即可按官方牌价估算花费
+- **导出**：`export csv` / `export json` 全量记录（CSV 遵循 RFC 4180）
 - **零依赖**：只用 macOS / Linux 自带的 `bash` + `sqlite3`，不需要 Node / Python
 
 数据来自 ZCode 客户端本地数据库 `~/.zcode/cli/db/db.sqlite`（只读）。
@@ -60,12 +64,28 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 |---|---|
 | `/usage-ui` | 生成交互式仪表盘，内嵌渲染在会话中 |
 | `/usage` | 文本总览（累计 + 今日） |
+| `/usage blocks` | 5 小时窗口用量（含进行中的窗口） |
 | `/usage recent 50` | 最近 50 条逐条明细 |
 | `/usage providers` | 按来源（官方套餐 / 自定义接入）汇总 |
+| `/usage months` | 按月汇总 |
+| `/usage projects 10` | 按项目目录汇总 Top 10 |
+| `/usage tools` | 工具调用统计 |
+| `/usage cost` | 成本估算（需先配置价格表，见下） |
+| `/usage export csv` | 导出全部记录为 CSV |
 | `/usage day 2026-10-14` | 某天的逐条明细 |
 | `/usage sessions 10` | 会话用量排行 Top 10 |
 | `/usage errors` | 最近的失败/取消请求 |
 | “看看我哪个会话最烧 token” | 自然语言同样可以，会自动路由到对应查询 |
+
+### 成本估算（可选）
+
+创建 `~/.zcode/usage-prices.json`（单位：元/百万 token，键为模型名，大小写不敏感，可只写常用模型）：
+
+```json
+{ "GLM-5.3": {"in": 8, "out": 32, "cache": 2}, "GLM-5.3-Flash": {"in": 0.5, "out": 2, "cache": 0.1} }
+```
+
+配置后 `/usage cost` 给出按模型拆分的估算；仪表盘顶部出现"成本估算"开关，打开后会话排行与来源构成会追加成本列。注意：订阅套餐（如 GLM Coding Plan）内的请求实际不按 token 计费，估算仅供 BYOK 按量计费或心理参考。
 
 ### 仪表盘预览
 
@@ -90,6 +110,11 @@ git clone https://github.com/axdlee/zcode-usage-detail.git
 - 只统计**本机、本账号**在 ZCode 内的请求
 - 本地库结构可能随 ZCode 版本演进变化（当前在 0.16.x 验证通过）
 - 界面基于 ZCode Desktop 的 Gen UI 内嵌渲染，需在桌面端使用
+- 5 小时窗口与成本均为**本地近似口径**，服务端套餐配额以 ZCode 的 Usage Stats → Coding Plan 为准
+
+## 致谢
+
+设计参考了这些优秀的同类项目：[ccusage](https://github.com/ccusage/ccusage)（5 小时窗口 / 成本报告）、[Claude-Code-Usage-Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor)（燃烧率与耗尽预测）以及 DeepSeek Harness 社区的用量插件家族（活跃热力图、缓存命中率、连续活跃、导出等思路）。
 
 ## License
 
