@@ -6,15 +6,15 @@
 
 纯本地只读查询，**不发起任何网络请求，不上传任何数据**。
 
-![仪表盘总览](screenshots/dashboard-overview-dark.png)
+![仪表盘总览](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-overview-dark.png)
 
 会话排行支持点击展开：上下文压缩、模型占比、使用工具、上下文水位曲线一目了然：
 
-![会话排行与钻取](screenshots/dashboard-sessions-dark.png)
+![会话排行与钻取](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-sessions-dark.png)
 
 每日趋势按来源堆叠，图表下方附每日明细表（请求 / token / 缓存命中 / 生成速率），点击某天直接切换为该日的请求日志：
 
-![每日趋势](screenshots/dashboard-trend-light.png)
+![每日趋势](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-trend-light.png)
 
 ## 功能
 
@@ -191,11 +191,11 @@ notify/inject 需重开会话生效（hook 配置按会话快照）；侧栏实�
 
 每日趋势按来源堆叠，图表下方附每日明细表（请求 / token / 缓存命中 / 生成速率），点击某天直接切换为该日的请求日志：
 
-![每日趋势](screenshots/dashboard-trend-light.png)
+![每日趋势](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-trend-light.png)
 
 请求明细支持状态筛选与表头排序：
 
-![请求明细](screenshots/dashboard-detail-light.png)
+![请求明细](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-detail-light.png)
 
 ## 数据说明与隐私
 
