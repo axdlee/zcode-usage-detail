@@ -13,7 +13,8 @@
       "description_i18n": {
         "zh-CN": "逐条用量明细：会话侧栏面板、两级钻取、tok/s 速率、每日明细钻取、零密钥配额条、分时计价、缓存率全链路、官方牌价折算、本地常驻面板"
       },
-      "category": "developer-tools"
+      "category": "developer-tools",
+      "icon": "assets/usage-detail/icon.png"
     }
   ]
 }
