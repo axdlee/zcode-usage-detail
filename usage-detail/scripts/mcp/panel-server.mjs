@@ -315,7 +315,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.14.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.15.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -381,6 +381,63 @@ function startTurnWatch() {
   setInterval(watchTurnDone, 2000).unref();
 }
 
+// ---------- 本地配置读写（与 serve.mjs 同文件格式；供侧栏面板直接编辑，App-only 工具不经模型） ----------
+const PRICES_FILE = process.env.ZCODE_USAGE_PRICES || path.join(os.homedir(), '.zcode', 'usage-prices.json');
+const BUDGET_FILE = path.join(os.homedir(), '.zcode', 'usage-budget.json');
+const TURNSTATS_FILE = path.join(os.homedir(), '.zcode', 'usage-turnstats.json');
+const ALERTS_CFG = path.join(os.homedir(), '.zcode', 'usage-alerts.json');
+
+function atomicWrite(file, data) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, data);
+  fs.renameSync(tmp, file);
+}
+function readJsonCfg(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; }
+}
+function readPricesCfg() {
+  const v = readJsonCfg(PRICES_FILE, null);
+  if (!v) return { currency: 'CNY', usdCny: null, autoSync: true, models: {} };
+  if (!v.models || typeof v.models !== 'object') return { currency: v.currency || 'CNY', usdCny: v.usdCny ?? null, autoSync: v.autoSync !== false, models: v.models || v };
+  return { currency: v.currency || 'CNY', usdCny: v.usdCny ?? null, autoSync: v.autoSync !== false, models: v.models };
+}
+function writePricesCfg(next) {
+  // 保留通用设置字段（usdCny/autoSync），models 为模型价
+  const prev = readPricesCfg();
+  atomicWrite(PRICES_FILE, JSON.stringify({
+    currency: next.currency || prev.currency || 'CNY',
+    usdCny: next.usdCny != null ? Number(next.usdCny) || null : prev.usdCny,
+    autoSync: next.autoSync != null ? next.autoSync !== false : prev.autoSync !== false,
+    models: next.models || prev.models || {},
+  }) + '\n');
+  dashCache.html = null; // 改价后面板按新价重算
+  metaCache = { at: 0, v: null };
+}
+function readBudgetCfg() { return readJsonCfg(BUDGET_FILE, { daily: 0, monthly: 0 }); }
+function writeBudgetCfg(b) {
+  atomicWrite(BUDGET_FILE, JSON.stringify({ daily: Number(b.daily) || 0, monthly: Number(b.monthly) || 0 }) + '\n');
+}
+function readSwitchesCfg() {
+  const ts = readJsonCfg(TURNSTATS_FILE, { enabled: false, mode: 'inject' });
+  const al = readJsonCfg(ALERTS_CFG, {});
+  return {
+    turnstats: ts.enabled === true ? (ts.mode === 'notify' ? 'notify' : 'inject') : 'off',
+    budgetAlerts: al.budget !== false,
+    permissionAlerts: al.permission === true,
+  };
+}
+function writeSwitchesCfg(b) {
+  if (b.turnstats === 'off' || b.turnstats === 'notify' || b.turnstats === 'inject') {
+    const v = b.turnstats === 'off' ? { enabled: false } : { enabled: true, mode: b.turnstats };
+    atomicWrite(TURNSTATS_FILE, JSON.stringify(v) + '\n');
+  }
+  const patch = {};
+  if (typeof b.budgetAlerts === 'boolean') patch.budget = b.budgetAlerts;
+  if (typeof b.permissionAlerts === 'boolean') patch.permission = b.permissionAlerts;
+  if (Object.keys(patch).length) atomicWrite(ALERTS_CFG, JSON.stringify(patch) + '\n');
+  return readSwitchesCfg();
+}
+
 const TOOLS = [
   {
     name: 'usage_summary',
@@ -422,6 +479,28 @@ const TOOLS = [
     name: 'usage_quota',
     description: '官方套餐配额查询（可选功能）：需在插件设置里配置智谱开放平台 API Key（quotaToken），未配置时返回配置指引。返回 5 小时池/周池/MCP 桠的官方用量百分比与重置时间。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'usage_settings_get',
+    description: '读取本地配置：价格表（含币种/汇率/自动同步）、预算、通知开关。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  {
+    name: 'usage_settings_set',
+    description: '写入本地配置（App-only，不经模型）：price 更新单模型价、priceGeneral 币种/汇率/自动同步、budget 日月预算、switches 通知开关、priceRemove 删除模型价。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        price: { type: 'object', description: '{model,in,out,cache}' },
+        priceGeneral: { type: 'object', description: '{currency,usdCny,autoSync}' },
+        priceRemove: { type: 'string', description: '要删除的模型名' },
+        budget: { type: 'object', description: '{daily,monthly}' },
+        switches: { type: 'object', description: '{turnstats:off|notify|inject, budgetAlerts:bool, permissionAlerts:bool}' },
+      },
+      additionalProperties: false,
+    },
+    _meta: { ui: { visibility: ['app'] } },
   },
   {
     name: 'open_full_panel',
@@ -514,6 +593,43 @@ function handleToolCall(name, args) {
   if (name === 'usage_session') {
     return { structuredContent: buildSessionDetail(args && args.id), content: [{ type: 'text', text: '会话详情' }] };
   }
+  if (name === 'usage_settings_get') {
+    return {
+      structuredContent: { prices: readPricesCfg(), budget: readBudgetCfg(), switches: readSwitchesCfg() },
+      content: [{ type: 'text', text: '配置已读取' }],
+    };
+  }
+  if (name === 'usage_settings_set') {
+    let saved = { ok: true };
+    if (args && args.price && args.price.model) {
+      const m = String(args.price.model).trim();
+      if (m) {
+        const next = readPricesCfg();
+        const num = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? x : 0; };
+        next.models[m] = { in: num(args.price.in), out: num(args.price.out), cache: num(args.price.cache) };
+        writePricesCfg(next);
+      }
+    }
+    if (args && args.priceRemove) {
+      const next = readPricesCfg();
+      delete next.models[String(args.priceRemove).trim()];
+      writePricesCfg(next);
+    }
+    if (args && args.priceGeneral) {
+      const g = args.priceGeneral;
+      const next = readPricesCfg();
+      if (g.currency) next.currency = String(g.currency);
+      if ('usdCny' in g) next.usdCny = Number(g.usdCny) || null;
+      if (g.autoSync != null) next.autoSync = g.autoSync !== false;
+      writePricesCfg(next);
+    }
+    if (args && args.budget) writeBudgetCfg(args.budget);
+    if (args && args.switches) saved.switches = writeSwitchesCfg(args.switches);
+    return {
+      structuredContent: saved,
+      content: [{ type: 'text', text: '配置已保存' }],
+    };
+  }
   if (name === 'usage_quota') {
     if (!process.env.ZCODE_USAGE_QUOTA_TOKEN) {
       return {
@@ -605,4 +721,7 @@ process.stdin.on('data', (chunk) => {
     try { dispatch(JSON.parse(line)); } catch (e) { /* 坏行忽略 */ }
   }
 });
-process.stdin.on('end', () => process.exit(0));
+process.stdin.on('end', () => {
+  // 延迟退出：等大响应（如全量价格 settings_get）从 stdout 管道缓冲刷完，避免 exit 截断
+  setTimeout(() => process.exit(0), 150);
+});

@@ -91,20 +91,30 @@ const META_SQL = (pfText, limit, disk) => `
 let pricesCache = { at: 0, v: null };
 function readPrices() {
   const pp = pricePath();
-  if (!pp || !fs.existsSync(pp)) return { currency: 'CNY', models: {} };
+  if (!pp || !fs.existsSync(pp)) return { currency: 'CNY', usdCny: null, autoSync: true, models: {} };
   if (pricesCache.v && Date.now() - pricesCache.at < 5000) return pricesCache.v;
   let v;
   try { v = JSON.parse(fs.readFileSync(pp, 'utf8')); } catch (e) { v = { currency: 'CNY', models: {} }; }
   if (!v.models || typeof v.models !== 'object') v = { currency: v.currency || 'CNY', models: v };
+  v.usdCny = v.usdCny != null ? v.usdCny : null;
+  v.autoSync = v.autoSync !== false;
   pricesCache = { at: Date.now(), v };
   return v;
 }
 function writePrices(next) {
   const pp = pricePath();
   if (!pp) throw new Error('价格文件路径不可用');
+  // 保留通用设置字段（usdCny/autoSync），前端提交只带 models/currency
+  const prev = readPrices();
+  const merged = {
+    currency: next.currency || prev.currency || 'CNY',
+    usdCny: next.usdCny != null ? (Number(next.usdCny) || null) : (prev.usdCny != null ? prev.usdCny : null),
+    autoSync: next.autoSync != null ? next.autoSync !== false : (prev.autoSync !== false),
+    models: next.models || prev.models || {},
+  };
   const tmp = pp + '.tmp';
   fs.mkdirSync(path.dirname(pp), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+  fs.writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
   fs.renameSync(tmp, pp);
   pricesCache = { at: 0, v: null };
   frag.html = null; // 改价后立即重算
@@ -406,6 +416,15 @@ const server = http.createServer(async function (req, res) {
       writePrices(next);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, model: model }));
+    } else if (req.method === 'POST' && u.pathname === '/api/prices/general') {
+      const b = await readBody(req);
+      const next = readPrices();
+      if (b.currency) next.currency = String(b.currency);
+      if ('usdCny' in b) next.usdCny = Number(b.usdCny) || null; // 空值=还原默认 7.2
+      if (b.autoSync != null) next.autoSync = b.autoSync !== false;
+      writePrices(next);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true }));
     } else if (req.method === 'POST' && u.pathname === '/api/prices/remove') {
       const b = await readBody(req);
       const next = readPrices();

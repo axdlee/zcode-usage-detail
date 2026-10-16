@@ -81,7 +81,8 @@ class IsoHome:
         (root / ".zcode").mkdir(parents=True, exist_ok=True)
 
     def env(self, **extra):
-        return {**os.environ, "HOME": str(self.root), "TZ": "UTC", **extra}
+        # NO_AUTOSYNC：测试内禁用真实网络价格同步，保持离线确定
+        return {**os.environ, "HOME": str(self.root), "TZ": "UTC", "ZCODE_USAGE_NO_AUTOSYNC": "1", **extra}
 
     def zcode_path(self, name):
         return self.root / ".zcode" / name

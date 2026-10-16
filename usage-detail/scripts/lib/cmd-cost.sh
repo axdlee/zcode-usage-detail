@@ -69,7 +69,7 @@ try {
 } catch (e) {}
 out.currency = out.currency || 'CNY';
 // models.dev 全部是 USD 价；表是 CNY 口径时按汇率换算入库（ZCODE_USAGE_USD_CNY 覆盖）
-const RATE = out.currency === 'CNY' ? (Number(process.env.ZCODE_USAGE_USD_CNY) || 7.2) : 1;
+const RATE = out.currency === 'CNY' ? (Number(process.env.ZCODE_USAGE_USD_CNY) || Number(out.usdCny) || 7.2) : 1;
 // 智谱官方 CNY 权威价（与 bigmodel 官网定价页核对），models.dev 的全球口径与之有偏差，不同步覆盖
 const PINNED = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'];
 // BYOK：全量同步所有供应商的所有带价模型；同名模型先到先得，自定义条目不会被覆盖

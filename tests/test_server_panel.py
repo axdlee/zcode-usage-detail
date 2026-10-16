@@ -142,6 +142,9 @@ class ServerPanelTest(unittest.TestCase):
         finally:
             if proc.poll() is None:
                 proc.kill()
+        if 'settings' in str(self._testMethodName):
+            import sys as _s
+            print('RAW:', repr(out[:400]), file=_s.stderr)
         msgs = []
         for line in out.splitlines():
             if line.strip():
@@ -163,7 +166,7 @@ class ServerPanelTest(unittest.TestCase):
         by_id = {m.get("id"): m for m in msgs if m.get("id")}
         caps = by_id[1]["result"]["capabilities"]
         self.assertTrue(caps["resources"]["subscribe"])
-        self.assertEqual(len(by_id[2]["result"]["tools"]), 7)
+        self.assertEqual(len(by_id[2]["result"]["tools"]), 9)  # 7 数据工具 + settings_get/set
         uris = [r["uri"] for r in by_id[3]["result"]["resources"]]
         self.assertIn("ui://usage-detail/panel.html", uris)
         self.assertIn("ui://usage-detail/turn.txt", uris)
@@ -190,7 +193,31 @@ class ServerPanelTest(unittest.TestCase):
         self.assertEqual(by_id[2]["result"], {})
         self.assertEqual(by_id[3]["result"], {})
 
-    def test_13_mcp_turn_resource_read(self):
+    def test_13_mcp_settings_roundtrip(self):
+        msgs = self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                        "params": {"name": "usage_settings_get", "arguments": {}}}),
+            json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                        "params": {"name": "usage_settings_set", "arguments": {
+                            "switches": {"turnstats": "notify"},
+                            "budget": {"daily": 3, "monthly": 50},
+                            "priceGeneral": {"usdCny": "7.35", "autoSync": False}}}}),
+            json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                        "params": {"name": "usage_settings_get", "arguments": {}}}),
+        ])
+        by_id = {m.get("id"): m for m in msgs if m.get("id")}
+        got = by_id[2]["result"]["structuredContent"]
+        self.assertIn("models", got["prices"])
+        self.assertIn("turnstats", got["switches"])
+        got2 = by_id[4]["result"]["structuredContent"]
+        self.assertEqual(got2["switches"]["turnstats"], "notify")
+        self.assertEqual(got2["budget"]["daily"], 3)
+        self.assertEqual(got2["prices"]["usdCny"], 7.35)
+        self.assertIs(got2["prices"]["autoSync"], False)
+
+    def test_14_mcp_turn_resource_read(self):
         self.home.write_json("usage-detail-turn.json", {
             "source": "prompt-submit", "promptTs": int(time.time() * 1000) - 120000, "sessionId": ""})
         self.home.zcode_path("usage-detail-turn-done.json").write_text(json.dumps({"ts": int(time.time() * 1000)}))

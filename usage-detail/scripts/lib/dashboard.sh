@@ -30,7 +30,8 @@ cmd_dashboard() {
       if [[ -f "$upf" ]]; then
         upf_mtime=$(stat -f %m "$upf" 2>/dev/null || stat -c %Y "$upf" 2>/dev/null || echo 0)
       fi
-      if [[ $(( $(date +%s) - upf_mtime )) -ge 86400 ]]; then
+      # autoSync=false（设置弹窗可关）时跳过每日自动同步
+      if [[ $(( $(date +%s) - upf_mtime )) -ge 86400 ]] && ! grep -q '"autoSync"[: ]*false' "$upf" 2>/dev/null; then
         bash "$SCRIPT_DIR/usage.sh" prices sync >/dev/null 2>&1 || true
       fi
     fi
@@ -242,6 +243,7 @@ UD_HEAD
   <div style="display:flex;justify-content:space-between;align-items:center">
     <h3 style="margin-bottom:0">活跃热力图</h3>
     <div class="viz-row" role="group" aria-label="热力图粒度" id="ud-heat-toggle">
+      <button type="button" class="ud-toggle" data-hm="hour" aria-pressed="false">小时</button>
       <button type="button" class="ud-toggle" data-hm="day" aria-pressed="true">每日</button>
       <button type="button" class="ud-toggle" data-hm="week" aria-pressed="false">每周</button>
       <button type="button" class="ud-toggle" data-hm="month" aria-pressed="false">月历</button>
@@ -800,6 +802,47 @@ function __usageBoot(D) {
     }
     function rect(x, y, cw, ch, st2, tip) {
       return '<rect x="' + x + '" y="' + y + '" width="' + cw + '" height="' + ch + '" rx="3" fill="' + st2.fill + '"' + st2.op + '><title>' + esc(tip) + '</title></rect>';
+    }
+    if (heatMode === 'hour') {
+      // 近 7 天 × 24 小时矩阵：行=天、列=小时，悬停看该小时请求/token
+      var d7 = {};
+      rows.forEach(function (r) {
+        var k = dayKey(r[1]);
+        d7[k] = 1;
+      });
+      var dayKeys7 = Object.keys(d7).sort().slice(-7);
+      var daySet = {};
+      dayKeys7.forEach(function (k) { daySet[k] = 1; });
+      var cells7 = dayKeys7.map(function (k) { var arr = []; for (var i = 0; i < 24; i++) arr.push({ tok: 0, req: 0 }); return { k: k, h: arr }; });
+      var idx7 = {};
+      dayKeys7.forEach(function (k, i) { idx7[k] = i; });
+      rows.forEach(function (r) {
+        var k = dayKey(r[1]);
+        if (!daySet[k]) return;
+        var c = cells7[idx7[k]].h[new Date(r[1]).getHours()];
+        c.tok += N(r[4]) + N(r[5]); c.req++;
+      });
+      var hv = [];
+      cells7.forEach(function (c) { c.h.forEach(function (x) { if (x.tok > 0) hv.push(x.tok); }); });
+      hv.sort(function (a, b) { return a - b; });
+      var hq = [0.25, 0.5, 0.75].map(function (pp) { return hv.length ? hv[Math.min(hv.length - 1, Math.floor(hv.length * pp))] : 1; });
+      var CW = 16, CG = 2, LX = 46, TY = 20;
+      var W4 = LX + 24 * (CW + CG) + 4, H4 = TY + 7 * (CW + CG) + 6;
+      var out4 = '';
+      [0, 6, 12, 18].forEach(function (hh) { out4 += '<text x="' + (LX + hh * (CW + CG)) + '" y="13" font-size="10" fill="var(--muted-foreground)">' + hh + '时</text>'; });
+      cells7.forEach(function (c, di) {
+        var lbl = c.k.slice(5) + ' ' + '日一二三四五六'[new Date(c.k + 'T00:00:00').getDay()];
+        out4 += '<text x="2" y="' + (TY + di * (CW + CG) + 12.5) + '" font-size="10" fill="var(--muted-foreground)">' + lbl + '</text>';
+        for (var hh = 0; hh < 24; hh++) {
+          var x = c.h[hh];
+          out4 += rect(LX + hh * (CW + CG), TY + di * (CW + CG), CW, CW, shade(x.tok, hq),
+            c.k + ' ' + (hh < 10 ? '0' : '') + hh + ':00 · ' + fmtI(x.req) + ' 次请求 · ' + fmt(x.tok) + ' token');
+        }
+      });
+      host.innerHTML = '<svg width="' + W4 + '" height="' + H4 + '" role="img" aria-label="近 7 天小时热力图"><desc>行=日期，列=0-23 时</desc>' + out4 + '</svg>' +
+        '<div class="text-muted text-small" style="margin-top:6px">近 7 天，每天按 0–23 时切分；着色深浅按该小时 token 用量，悬停查看明细。</div>';
+      heatLastW = w;
+      return;
     }
     if (heatMode === 'month') {
       // 最近 3 个月月历：每格一天，着色同日热力（按 token 分位），悬停明细
@@ -1493,6 +1536,12 @@ function __usageBoot(D) {
       list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
       '</tbody></table></div>' +
       '<div style="display:flex;gap:8px;align-items:center;margin:10px 0 2px;flex-wrap:wrap"><span class="text-small text-muted">新增模型价：</span><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致）" style="width:230px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:76px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
+      '<div class="ud-mgr-h">通用</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<label class="text-small text-muted">USD→CNY 汇率<input class="form-control form-control-sm" id="ud-mgr-rate" value="' + (p.usdCny == null ? '' : p.usdCny) + '" placeholder="默认 7.2" style="width:90px;margin-left:4px" inputmode="decimal"></label>' +
+      '<label class="form-check form-switch text-small" style="margin:0">每日自动同步模型价<input type="checkbox" class="form-check-input" id="ud-sw-autosync"' + (p.autoSync !== false ? ' checked' : '') + ' style="margin-left:6px"></label>' +
+      '<button type="button" class="btn" id="ud-mgr-gsave" style="margin:0;padding:2px 10px;font-size:12px">保存通用</button>' +
+      '</div>' +
       '<div class="ud-mgr-h">预算（折算金额，超 80% 黄色进度、100% 红色）</div>' +
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<label class="text-small text-muted">日预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bd" value="' + (N(b.daily) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
@@ -1515,23 +1564,30 @@ function __usageBoot(D) {
       var m = tr.getAttribute('data-m');
       tr.querySelector('.ud-mgr-save').addEventListener('click', function () {
         var get = function (k) { return tr.querySelector('input[data-k="' + k + '"]').value; };
-        postJSON('/api/prices/set', { model: m, in: get('in'), out: get('out'), cache: get('cache') }).then(function () { location.reload(); });
+        priceSave({ url: '/api/prices/set', data: { model: m, in: get('in'), out: get('out'), cache: get('cache') }, tool: { price: { model: m, in: get('in'), out: get('out'), cache: get('cache') } } }).then(function () { location.reload(); });
       });
       tr.querySelector('.ud-mgr-del').addEventListener('click', function () {
-        postJSON('/api/prices/remove', { model: m }).then(function () { location.reload(); });
+        priceSave({ url: '/api/prices/remove', data: { model: m }, tool: { priceRemove: m } }).then(function () { location.reload(); });
       });
     });
     $('ud-mgr-add').addEventListener('click', function () {
       var nm = $('ud-mgr-newname').value.trim();
       if (!nm) return;
-      postJSON('/api/prices/set', { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value }).then(function () { location.reload(); });
+      priceSave({ url: '/api/prices/set', data: { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value }, tool: { price: { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value } } }).then(function () { location.reload(); });
     });
     $('ud-mgr-bsave').addEventListener('click', function () {
       var nb = { daily: $('ud-mgr-bd').value, monthly: $('ud-mgr-bm').value };
-      postJSON('/api/budget', nb).then(function () { st.budget = { daily: N(nb.daily), monthly: N(nb.monthly) }; apply(); });
+      var applyB = function () { st.budget = { daily: N(nb.daily), monthly: N(nb.monthly) }; apply(); };
+      if (window.__USAGE_SERVE__) postJSON('/api/budget', nb).then(applyB);
+      else settingsCall({ budget: { daily: N(nb.daily), monthly: N(nb.monthly) } }).then(applyB);
+    });
+    // 通用设置（币种口径下的汇率与自动同步）
+    $('ud-mgr-gsave').addEventListener('click', function () {
+      var g = { currency: mgrState.prices.currency || 'CNY', usdCny: $('ud-mgr-rate').value, autoSync: !$('ud-sw-autosync').checked ? false : true };
+      priceSave({ url: '/api/prices/general', data: g, tool: { priceGeneral: g } }).then(function () { location.reload(); });
     });
     function postSwitch(patch) {
-      return postJSON('/api/switches', patch).then(function (j) { mgrState.switches = j; });
+      return settingsSave(patch).then(function (j) { if (j && j.switches) mgrState.switches = j.switches; });
     }
     $('ud-sw-permission').addEventListener('change', function () { postSwitch({ permissionAlerts: this.checked }); });
     $('ud-sw-budget').addEventListener('change', function () { postSwitch({ budgetAlerts: this.checked }); });
@@ -1540,27 +1596,78 @@ function __usageBoot(D) {
   function postJSON(url, data) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function (r) { return r.json(); });
   }
+  // 侧栏（MCP App）无 HTTP 服务：经 callTool 直调 App-only 设置工具，不经模型
+  function settingsCall(setArgs) {
+    var zc = window.zcode || null;
+    return zc && typeof zc.callTool === 'function'
+      ? Promise.resolve(zc.callTool('usage_settings_set', setArgs)).then(function (r) { return (r && r.structuredContent) || { ok: true }; })
+      : Promise.reject(new Error('no-calltool'));
+  }
+  function settingsSave(patch) {
+    if (window.__USAGE_SERVE__) return postJSON('/api/switches', patch);
+    return settingsCall({ switches: patch });
+  }
+  function priceSave(payload) {
+    if (window.__USAGE_SERVE__) return postJSON(payload.url, payload.data);
+    return settingsCall(payload.tool);
+  }
   mgrState.builtins = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'];
   $('ud-price-mgr').addEventListener('click', function () {
     $('ud-mgr-mask').hidden = false;
     var body = $('ud-mgr-body');
-    if (!window.__USAGE_SERVE__) {
-      body.innerHTML = '<p class="text-small text-muted">面板内编辑仅在本地面板（<code>usage.sh serve</code>）可用。当前环境可直接编辑 <code>~/.zcode/usage-prices.json</code>（字段 in / out / cache，每百万 token），或运行 <code>/usage prices sync</code> 同步官方价。</p>';
+    var zc = window.zcode || null;
+    function renderFrom(sc) {
+      mgrState.prices = sc.prices || { currency: 'CNY', models: {} };
+      mgrState.budget = sc.budget || {};
+      mgrState.switches = sc.switches || {};
+      if (!st.budget) st.budget = mgrState.budget;
+      renderMgr();
+    }
+    function loadServe() {
+      body.innerHTML = '<p class="text-muted text-small">加载中…</p>';
+      Promise.all([
+        fetch('/api/prices').then(function (r) { return r.json(); }),
+        fetch('/api/budget').then(function (r) { return r.json(); }),
+        fetch('/api/switches').then(function (r) { return r.json(); }).catch(function () { return {}; })
+      ]).then(function (rs) {
+        renderFrom({ prices: rs[0], budget: rs[1], switches: rs[2] || {} });
+      });
+    }
+    if (window.__USAGE_SERVE__) { loadServe(); return; }
+    // 侧栏（MCP App）：callTool 直调设置工具，不经模型
+    if (zc && typeof zc.callTool === 'function') {
+      body.innerHTML = '<p class="text-muted text-small">加载中…</p>';
+      Promise.resolve(zc.callTool('usage_settings_get', {})).then(function (r) {
+        renderFrom((r && r.structuredContent) || {});
+      }).catch(function () { openPanelFallback(body, zc); });
       return;
     }
-    body.innerHTML = '<p class="text-muted text-small">加载中…</p>';
-    Promise.all([
-      fetch('/api/prices').then(function (r) { return r.json(); }),
-      fetch('/api/budget').then(function (r) { return r.json(); }),
-      fetch('/api/switches').then(function (r) { return r.json(); }).catch(function () { return {}; })
-    ]).then(function (rs) {
-      mgrState.prices = rs[0];
-      mgrState.budget = rs[1];
-      mgrState.switches = rs[2] || {};
-      if (!st.budget) st.budget = rs[1];
-      renderMgr();
-    });
+    openPanelFallback(body, zc);
   });
+  function openPanelFallback(body, zc) {
+    body.innerHTML =
+      '<p class="text-small" style="margin:0 0 10px">当前环境不支持面板内编辑。两种方式：</p>' +
+      '<ol class="text-small text-muted" style="margin:0 0 12px;padding-left:18px;line-height:1.9">' +
+      '<li>打开本地面板编辑（推荐，同样的界面）</li>' +
+      '<li>直接编辑 <code>~/.zcode/usage-prices.json</code>（字段 in / out / cache，每百万 token）</li></ol>' +
+      '<button type="button" class="btn" id="ud-mgr-open-serve" style="margin:0 8px 0 0;padding:3px 14px;font-size:12px">打开本地面板</button>' +
+      '<span class="text-small text-muted">或运行 <code>usage.sh serve</code></span>';
+    var btn = $('ud-mgr-open-serve');
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      btn.textContent = '启动中…';
+      var call = (zc && typeof zc.callTool === 'function')
+        ? Promise.resolve(zc.callTool('open_full_panel', {}))
+        : Promise.reject(new Error('no-calltool'));
+      call.then(function () {
+        btn.textContent = '已启动（浏览器将自动打开）';
+      }).catch(function () {
+        btn.disabled = false;
+        btn.textContent = '打开本地面板';
+        alert('启动失败：请在终端运行 usage.sh serve');
+      });
+    });
+  }
   $('ud-mgr-close').addEventListener('click', function () { $('ud-mgr-mask').hidden = true; });
   $('ud-mgr-mask').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
   if (window.__USAGE_SERVE__) $('ud-export-report').hidden = false;
