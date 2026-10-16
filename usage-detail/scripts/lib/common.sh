@@ -47,6 +47,8 @@ PV_LABEL="CASE WHEN provider_id LIKE 'account:%' THEN '官方·'||substr(provide
 sql_quote() {
   local value="$1"
   # Bash 3.2 的替换表达式置于双引号内会保留多余反斜杠。
+  # 仅限短字符串（会话 ID / 路径 / 价格表路径）；大文本禁止走此函数——
+  # bash 3.2 的 ${var//} 在长串 + replacement 含反斜杠时是平方级（见 dashboard.sh META）。
   value=${value//\'/\'\'}
   printf "'%s'" "$value"
 }

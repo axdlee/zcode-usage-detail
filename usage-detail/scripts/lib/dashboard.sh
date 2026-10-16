@@ -52,7 +52,11 @@ cmd_dashboard() {
            S AS (SELECT session_id AS v, row_number() OVER (ORDER BY session_id)-1 AS i FROM (SELECT DISTINCT session_id FROM U)),
            PJ AS $PJ_SQL,
            R AS (SELECT * FROM U ORDER BY started_at DESC, id DESC LIMIT $limit)
-      SELECT json_object(
+      -- 输出前把 < 转义为 \u003c（防会话标题中的 </script> 提前闭合标签）。
+      -- 必须在 SQL 层做：bash 3.2 的模式替换运算符在长串 + replacement 含反斜杠时
+      -- 是平方级（实测 300KB+单匹配 2.6s、多匹配分钟级），sqlite replace() 是 C 线性实现。
+      -- < 只会出现在 JSON 字符串值内部，替换为 u003c 转义后仍是合法 JSON 且语义不变。
+      SELECT replace(json_object(
         'session',$session_meta,
         'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
         'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
@@ -88,7 +92,7 @@ cmd_dashboard() {
                 FROM R
                 LEFT JOIN S SI ON SI.v = R.session_id
                 LEFT JOIN M MI ON MI.v = R.model_id
-                LEFT JOIN P PI ON PI.v = R.provider_id));")
+                LEFT JOIN P PI ON PI.v = R.provider_id)), '<', '\u003c');")
     mkdir -p "$(dirname "$out")"
     {
       cat <<'UD_HEAD'
@@ -390,8 +394,9 @@ UD_ALL_HEAD
 <script>
 const DATA =
 UD_DATA_HEAD
-      # JSON 位于 script 中：转义 < 防止会话标题中的 </script> 提前闭合标签。
-      printf '%s\n' "${META//</\\u003c}"
+      # < 的转义已在 SQL 层完成（replace → 反斜杠 u003c）；bash 3.2 的模式替换运算符
+      # 对大串是平方级性能陷阱（见 META SQL 处注释），这里必须原样输出。
+      printf '%s\n' "$META"
       cat <<'UD_TAIL'
 ;
 function __usageBoot(D) {

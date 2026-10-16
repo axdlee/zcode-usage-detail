@@ -315,7 +315,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.18.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.18.1' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -325,17 +325,34 @@ let dashCache = { at: 0, html: null };
 function getPanelHtml() {
   return new Promise((resolve, reject) => {
     if (dashCache.html && Date.now() - dashCache.at < 60000) return resolve(dashCache.html);
-    const tmp = path.join(os.tmpdir(), 'usage-detail-panel-' + process.pid + '.html');
-    execFile('bash', [USAGE_SH, 'dashboard', tmp], { timeout: 120000, env: { ...process.env, ZCODE_USAGE_LIMIT: process.env.ZCODE_USAGE_LIMIT || '-1' } }, (err) => {
-      if (err) return reject(new Error('生成仪表盘失败：' + (err.message || err)));
-      try {
-        const frag = fs.readFileSync(tmp, 'utf8');
-        fs.unlinkSync(tmp);
-        const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZCode 用量面板</title><style>' + SHELL_CSS + '</style></head><body style="padding:10px 12px 40px;max-width:none"><script>window.__USAGE_SERVE__=false;</script>' + frag + '<script>' + TAB_JS + '</scr' + 'ipt></body></html>';
+    const gen = (limitEnv) => new Promise((res2, rej2) => {
+      const tmp = path.join(os.tmpdir(), 'usage-detail-panel-' + process.pid + '.html');
+      execFile('bash', [USAGE_SH, 'dashboard', tmp], { timeout: 120000, env: { ...process.env, ZCODE_USAGE_LIMIT: limitEnv } }, (err) => {
+        if (err) return rej2(new Error('生成仪表盘失败：' + (err.message || err)));
+        try {
+          const frag = fs.readFileSync(tmp, 'utf8');
+          fs.unlinkSync(tmp);
+          res2(frag);
+        } catch (e) { rej2(e); }
+      });
+    });
+    const fullLimit = process.env.ZCODE_USAGE_LIMIT || '-1';
+    gen(fullLimit).then((frag) => {
+      const finish = (f, notice) => {
+        const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZCode 用量面板</title><style>' + SHELL_CSS + '</style></head><body style="padding:10px 12px 40px;max-width:none">' + (notice || '') + '<script>window.__USAGE_SERVE__=false;</script>' + f + '<script>' + TAB_JS + '</scr' + 'ipt></body></html>';
         dashCache = { at: Date.now(), html };
         resolve(html);
-      } catch (e) { reject(e); }
-    });
+      };
+      // 防御：宿主对页面资源读取有 8MiB 上限，逼近时自动降额到最近 5000 条重生成
+      if (fullLimit === '-1' && frag.length > 7 * 1024 * 1024) {
+        gen('5000').then((small) => {
+          const notice = '<div style="margin:0 0 10px;padding:8px 12px;border-radius:10px;background:var(--muted);font-size:12px;color:var(--muted-foreground)">历史数据过大（接近面板体积上限），侧栏已仅加载最近 5000 条；完整历史请用本地面板或 <code>usage.sh export</code>。</div>';
+          finish(small, notice);
+        }).catch(() => finish(frag)); // 降级失败就用全量（宁可大也不空白）
+        return;
+      }
+      finish(frag);
+    }).catch(reject);
   });
 }
 
