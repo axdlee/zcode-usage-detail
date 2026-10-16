@@ -4,7 +4,7 @@
 // 与宿主的会话：
 //   initialize → tools/list → tools/call / resources/read（newline-delimited JSON-RPC）
 // 页面（ui/panel.html）通过 window.zcode 兼容层 callTool('usage_summary') 取数渲染。
-// 只读：node:sqlite 只读连接 + 配额日志尾随，不写任何文件、不联网。
+// 只读数据库：node:sqlite 只读连接 + 配额日志尾随；仅按页面操作写 ~/.zcode 下的插件配置文件，不联网。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -315,7 +315,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.15.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.15.1' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -331,7 +331,7 @@ function getPanelHtml() {
       try {
         const frag = fs.readFileSync(tmp, 'utf8');
         fs.unlinkSync(tmp);
-        const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZCode 用量面板</title><style>' + SHELL_CSS + '</style></head><body style="padding:10px 12px 40px;max-width:none">' + frag + '<script>' + TAB_JS + '</scr' + 'ipt></body></html>';
+        const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZCode 用量面板</title><style>' + SHELL_CSS + '</style></head><body style="padding:10px 12px 40px;max-width:none"><script>window.__USAGE_SERVE__=false;</script>' + frag + '<script>' + TAB_JS + '</scr' + 'ipt></body></html>';
         dashCache = { at: Date.now(), html };
         resolve(html);
       } catch (e) { reject(e); }
@@ -414,6 +414,31 @@ function writePricesCfg(next) {
   metaCache = { at: 0, v: null };
 }
 function readBudgetCfg() { return readJsonCfg(BUDGET_FILE, { daily: 0, monthly: 0 }); }
+
+// 瘦身价格表：宿主对 structuredContent 有 64 KiB 上限（超限字段被省略），而同步后的全量
+// 价目有数千模型（数百 KiB），必须裁剪。默认只返回当前用量出现过的模型 + GLM 系内置价；
+// 传 query 时按模型名子串匹配（仍截断到 200 个）。前端弹框搜索走 query 参数按需取。
+const SLIM_MODELS_MAX = 200;
+function usedModelNames() {
+  try {
+    return openDb().prepare('SELECT DISTINCT model_id AS m FROM model_usage ORDER BY m').all().map((r) => String(r.m));
+  } catch (e) { return []; }
+}
+function slimPrices(query) {
+  const p = readPricesCfg();
+  const all = Object.keys(p.models || {});
+  let names;
+  const q = String(query || '').trim().toLowerCase();
+  if (q) {
+    names = all.filter((m) => m.toLowerCase().indexOf(q) >= 0).slice(0, SLIM_MODELS_MAX);
+  } else {
+    const used = new Set(usedModelNames().map((m) => m.toLowerCase()));
+    names = all.filter((m) => used.has(m.toLowerCase()) || m.toLowerCase().indexOf('glm') >= 0).slice(0, SLIM_MODELS_MAX);
+  }
+  const models = {};
+  for (const m of names) models[m] = p.models[m];
+  return { currency: p.currency, usdCny: p.usdCny, autoSync: p.autoSync, models, modelsTotal: all.length, modelsSlim: true };
+}
 function writeBudgetCfg(b) {
   atomicWrite(BUDGET_FILE, JSON.stringify({ daily: Number(b.daily) || 0, monthly: Number(b.monthly) || 0 }) + '\n');
 }
@@ -482,8 +507,12 @@ const TOOLS = [
   },
   {
     name: 'usage_settings_get',
-    description: '读取本地配置：价格表（含币种/汇率/自动同步）、预算、通知开关。',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    description: '读取本地配置：价格表（含币种/汇率/自动同步，默认瘦身为主会话相关模型，query 可搜索全量）、预算、通知开关。',
+    inputSchema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: '按模型名子串搜索价格（缺省只返回当前用量相关 + GLM 内置）' } },
+      additionalProperties: false,
+    },
     _meta: { ui: { visibility: ['app'] } },
   },
   {
@@ -595,7 +624,7 @@ function handleToolCall(name, args) {
   }
   if (name === 'usage_settings_get') {
     return {
-      structuredContent: { prices: readPricesCfg(), budget: readBudgetCfg(), switches: readSwitchesCfg() },
+      structuredContent: { prices: slimPrices(args && args.query), budget: readBudgetCfg(), switches: readSwitchesCfg() },
       content: [{ type: 'text', text: '配置已读取' }],
     };
   }
@@ -625,6 +654,8 @@ function handleToolCall(name, args) {
     }
     if (args && args.budget) writeBudgetCfg(args.budget);
     if (args && args.switches) saved.switches = writeSwitchesCfg(args.switches);
+    // 附带保存后的瘦身价格表：面板保存成功直接软刷新（MCP App 沙箱内禁止 location.reload）
+    if (args && (args.price || args.priceRemove || args.priceGeneral)) saved.prices = slimPrices('');
     return {
       structuredContent: saved,
       content: [{ type: 'text', text: '配置已保存' }],
@@ -671,6 +702,12 @@ function dispatch(msg) {
       case 'tools/list': reply({ tools: TOOLS }); return;
       case 'tools/call': {
         const r = handleToolCall(params && params.name, params && params.arguments);
+        if (r && typeof r.then === 'function') {
+          // 异步工具（open_full_panel）：挂起计数，等完成再回复；否则 Promise 会被序列化成 {}
+          inflight++;
+          r.then((v) => reply(v), (e) => replyErr(-32603, (e && e.message) || String(e))).finally(() => { inflight--; tryExit(); });
+          return;
+        }
         reply(r);
         return;
       }
@@ -695,9 +732,10 @@ function dispatch(msg) {
           return;
         }
         if (uri !== 'ui://usage-detail/panel.html') { replyErr(-32602, '未知资源：' + uri); return; }
+        inflight++;
         getPanelHtml().then((html) => {
           reply({ contents: [{ uri, mimeType: 'text/html;profile=mcp-app', text: html }] });
-        }).catch((e) => replyErr(-32603, (e && e.message) || String(e)));
+        }).catch((e) => replyErr(-32603, (e && e.message) || String(e))).finally(() => { inflight--; tryExit(); });
         return;
       }
       default:
@@ -710,6 +748,13 @@ function dispatch(msg) {
 }
 
 let buf = '';
+// stdin 关闭后的退出协调：等所有挂起异步操作完成，再留缓冲刷管道
+let inflight = 0;
+let exiting = false;
+function tryExit() {
+  if (!exiting || inflight > 0) return;
+  setTimeout(() => process.exit(0), 150);
+}
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
   buf += chunk;
@@ -722,6 +767,9 @@ process.stdin.on('data', (chunk) => {
   }
 });
 process.stdin.on('end', () => {
-  // 延迟退出：等大响应（如全量价格 settings_get）从 stdout 管道缓冲刷完，避免 exit 截断
-  setTimeout(() => process.exit(0), 150);
+  // 延迟退出：先等挂起的异步操作（面板 HTML 生成、open_full_panel）完成——固定 150ms
+  // 只够刷管道缓冲，等不了耗时数秒的 dashboard 生成；再缓冲 150ms 让大响应
+  // （如全量价格 settings_get）从 stdout 管道刷完，避免 exit 截断。
+  exiting = true;
+  tryExit();
 });

@@ -142,9 +142,6 @@ class ServerPanelTest(unittest.TestCase):
         finally:
             if proc.poll() is None:
                 proc.kill()
-        if 'settings' in str(self._testMethodName):
-            import sys as _s
-            print('RAW:', repr(out[:400]), file=_s.stderr)
         msgs = []
         for line in out.splitlines():
             if line.strip():
@@ -216,6 +213,58 @@ class ServerPanelTest(unittest.TestCase):
         self.assertEqual(got2["budget"]["daily"], 3)
         self.assertEqual(got2["prices"]["usdCny"], 7.35)
         self.assertIs(got2["prices"]["autoSync"], False)
+
+    def test_15_settings_get_slim_and_query(self):
+        # 全量价格表（模拟 sync 后数千条）：宿主 structuredContent 有 64KiB 上限，
+        # settings_get 缺省只返回当前用量相关 + GLM 内置；query 按名搜索全量。
+        models = {f"other-{i:02d}": {"in": 1, "out": 2, "cache": 0.1} for i in range(30)}
+        models["Model-A"] = {"in": 3, "out": 4, "cache": 0.2}  # SynthDb 里在用的模型
+        models["glm-5.3"] = {"in": 8, "out": 32, "cache": 4}
+        self.home.write_json("usage-prices.json", {"currency": "CNY", "usdCny": None, "autoSync": True, "models": models})
+        msgs = self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                        "params": {"name": "usage_settings_get", "arguments": {}}}),
+            json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                        "params": {"name": "usage_settings_get", "arguments": {"query": "other-1"}}}),
+        ])
+        by_id = {m.get("id"): m for m in msgs if m.get("id")}
+        slim = by_id[2]["result"]["structuredContent"]["prices"]
+        self.assertTrue(slim["modelsSlim"])
+        self.assertEqual(slim["modelsTotal"], 32)
+        self.assertIn("Model-A", slim["models"])
+        self.assertIn("glm-5.3", slim["models"])
+        self.assertNotIn("other-01", slim["models"])
+        q = by_id[3]["result"]["structuredContent"]["prices"]
+        self.assertEqual(set(q["models"]), {f"other-1{i}" for i in range(10)})  # other-10..19
+        self.assertNotIn("Model-A", q["models"])
+
+    def test_16_settings_set_returns_slim_prices(self):
+        msgs = self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                        "params": {"name": "usage_settings_set", "arguments": {
+                            "price": {"model": "Model-A", "in": 3, "out": 4, "cache": 0.2}}}}),
+        ])
+        sc = {m.get("id"): m for m in msgs if m.get("id")}[2]["result"]["structuredContent"]
+        self.assertTrue(sc["ok"])
+        self.assertIn("Model-A", sc["prices"]["models"])  # 保存响应带瘦身表，面板据此软刷新
+        self.assertTrue(sc["prices"]["modelsSlim"])
+
+    def test_17_panel_shell_serve_flag(self):
+        # 侧栏壳必须显式声明非 serve 环境：dashboard 片段里的保存/导出分支据此避免页面级导航
+        msgs = self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "resources/read",
+                        "params": {"uri": "ui://usage-detail/panel.html"}}),
+        ])
+        by_id = {m.get("id"): m for m in msgs if m.get("id")}
+        html = by_id[2]["result"]["contents"][0]["text"]
+        self.assertIn("window.__USAGE_SERVE__=false", html)
+        self.assertIn("usage-dashboard", html)
 
     def test_14_mcp_turn_resource_read(self):
         self.home.write_json("usage-detail-turn.json", {

@@ -1530,8 +1530,8 @@ function __usageBoot(D) {
     var tsMode = sw.turnstats || 'off';
     body.innerHTML =
       '<div class="ud-mgr-h">成本单价（元 / 每百万 token）</div>' +
-      '<div class="ud-mgr-sub">GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。修改保存后整页按新价重算。</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="搜索模型…" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + ' 个模型' + (list.length >= 60 ? '（仅显示前 60）' : '') + '</span></div>' +
+      '<div class="ud-mgr-sub">GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。默认列出当前用量相关模型，搜索可查全量；修改保存后按新价重算。</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="搜索模型…" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + ' 个模型' + (p.modelsSlim && p.modelsTotal != null ? '（全量 ' + p.modelsTotal + '）' : '') + (list.length >= 60 ? '（仅显示前 60）' : '') + '</span></div>' +
       '<div class="table-responsive" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px"><table class="table table-sm" style="margin:0"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
       list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
       '</tbody></table></div>' +
@@ -1559,21 +1559,36 @@ function __usageBoot(D) {
       '</select></div>' +
       '<div class="ud-mgr-sub" style="margin-top:8px">权限提醒与每轮统计依赖会话钩子，修改后重开会话生效；预算告警立即生效。</div>';
     var qi = $('ud-mgr-q');
-    qi.addEventListener('input', function () { mgrState.q = this.value.trim().toLowerCase(); renderMgr(); var q2 = $('ud-mgr-q'); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); });
+    var qTimer = null, qSeq = 0;
+    qi.addEventListener('input', function () {
+      mgrState.q = this.value.trim().toLowerCase();
+      renderMgr(); var q2 = $('ud-mgr-q'); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length);
+      // 侧栏拿到的是瘦身价格表（宿主对工具响应有 64KiB 上限）：搜索时经 callTool 按名拉取匹配项
+      if (window.__USAGE_SERVE__ || !(window.zcode && typeof window.zcode.callTool === 'function')) return;
+      var seq = ++qSeq, kw = this.value.trim();
+      clearTimeout(qTimer);
+      qTimer = setTimeout(function () {
+        window.zcode.callTool('usage_settings_get', { query: kw }).then(function (r) {
+          if (seq !== qSeq) return; // 已有更新的输入，丢弃过期响应
+          var sc = (r && r.structuredContent) || {};
+          if (sc.prices) { mgrState.prices = sc.prices; mgrState.q = ($('ud-mgr-q').value || '').trim().toLowerCase(); renderMgr(); }
+        }).catch(function () {});
+      }, 300);
+    });
     Array.prototype.forEach.call(body.querySelectorAll('tr[data-m]'), function (tr) {
       var m = tr.getAttribute('data-m');
       tr.querySelector('.ud-mgr-save').addEventListener('click', function () {
         var get = function (k) { return tr.querySelector('input[data-k="' + k + '"]').value; };
-        priceSave({ url: '/api/prices/set', data: { model: m, in: get('in'), out: get('out'), cache: get('cache') }, tool: { price: { model: m, in: get('in'), out: get('out'), cache: get('cache') } } }).then(function () { location.reload(); });
+        priceSave({ url: '/api/prices/set', data: { model: m, in: get('in'), out: get('out'), cache: get('cache') }, tool: { price: { model: m, in: get('in'), out: get('out'), cache: get('cache') } } }).then(afterPriceSave);
       });
       tr.querySelector('.ud-mgr-del').addEventListener('click', function () {
-        priceSave({ url: '/api/prices/remove', data: { model: m }, tool: { priceRemove: m } }).then(function () { location.reload(); });
+        priceSave({ url: '/api/prices/remove', data: { model: m }, tool: { priceRemove: m } }).then(afterPriceSave);
       });
     });
     $('ud-mgr-add').addEventListener('click', function () {
       var nm = $('ud-mgr-newname').value.trim();
       if (!nm) return;
-      priceSave({ url: '/api/prices/set', data: { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value }, tool: { price: { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value } } }).then(function () { location.reload(); });
+      priceSave({ url: '/api/prices/set', data: { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value }, tool: { price: { model: nm, in: $('ud-mgr-newin').value, out: $('ud-mgr-newout').value, cache: $('ud-mgr-newcache').value } } }).then(afterPriceSave);
     });
     $('ud-mgr-bsave').addEventListener('click', function () {
       var nb = { daily: $('ud-mgr-bd').value, monthly: $('ud-mgr-bm').value };
@@ -1584,7 +1599,7 @@ function __usageBoot(D) {
     // 通用设置（币种口径下的汇率与自动同步）
     $('ud-mgr-gsave').addEventListener('click', function () {
       var g = { currency: mgrState.prices.currency || 'CNY', usdCny: $('ud-mgr-rate').value, autoSync: !$('ud-sw-autosync').checked ? false : true };
-      priceSave({ url: '/api/prices/general', data: g, tool: { priceGeneral: g } }).then(function () { location.reload(); });
+      priceSave({ url: '/api/prices/general', data: g, tool: { priceGeneral: g } }).then(afterPriceSave);
     });
     function postSwitch(patch) {
       return settingsSave(patch).then(function (j) { if (j && j.switches) mgrState.switches = j.switches; });
@@ -1611,8 +1626,35 @@ function __usageBoot(D) {
     if (window.__USAGE_SERVE__) return postJSON(payload.url, payload.data);
     return settingsCall(payload.tool);
   }
+  // 价格类保存后的统一收尾。MCP App 沙箱内禁止页面级导航/重载（location.reload、location.href
+  // 都会让宿主把面板判为崩溃，报「MCP App page stopped」），侧栏改软刷新：用保存响应里的最新
+  // 瘦身价格表重绑页内价格并整体重渲染；仅本地面板（serve，普通浏览器页面）保留整页 reload。
+  function softReloadPrices(np) {
+    if (np && typeof np === 'object') {
+      PRICE = np;
+      PMODELS = PRICE.models || PRICE;
+      CURSYM = ({ USD: '$', CNY: '¥', EUR: '€', GBP: '£', JPY: '¥' })[PRICE.currency] || (PRICE.currency ? PRICE.currency + ' ' : '$');
+    }
+    apply();
+  }
+  function afterPriceSave(sc) {
+    if (window.__USAGE_SERVE__) { location.reload(); return; }
+    var finish = function (p) {
+      if (p) { mgrState.prices = p; softReloadPrices(p); }
+      else if (typeof apply === 'function') apply();
+      var mask = $('ud-mgr-mask'); if (mask) mask.hidden = true;
+    };
+    if (sc && sc.prices) { finish(sc.prices); return; }
+    var zc = window.zcode || null;
+    if (zc && typeof zc.callTool === 'function') {
+      zc.callTool('usage_settings_get', {}).then(function (r) {
+        finish((r && r.structuredContent && r.structuredContent.prices) || null);
+      }).catch(function () { finish(null); });
+    } else finish(null);
+  }
   mgrState.builtins = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'];
   $('ud-price-mgr').addEventListener('click', function () {
+    mgrState.q = ''; // 重开弹框不残留上次搜索词（瘦身表按旧词过滤会得到空列表）
     $('ud-mgr-mask').hidden = false;
     var body = $('ud-mgr-body');
     var zc = window.zcode || null;
@@ -1671,7 +1713,10 @@ function __usageBoot(D) {
   $('ud-mgr-close').addEventListener('click', function () { $('ud-mgr-mask').hidden = true; });
   $('ud-mgr-mask').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
   if (window.__USAGE_SERVE__) $('ud-export-report').hidden = false;
-  $('ud-export-report').addEventListener('click', function () { location.href = '/report.html'; });
+  $('ud-export-report').addEventListener('click', function () {
+    if (!window.__USAGE_SERVE__) return; // 侧栏禁止页面级导航（宿主会判面板崩溃）
+    location.href = '/report.html';
+  });
   // 官方配额（可选）：配置 API Key 后 serve 模式显示官方口径配额卡
   if (window.__USAGE_SERVE__) {
     fetch('/api/quota').then(function (r) { return r.json(); }).then(function (j) {
