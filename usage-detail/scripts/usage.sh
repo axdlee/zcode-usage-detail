@@ -48,6 +48,7 @@ case "$cmd" in
   turnstats) cmd_turnstats "$@" ;;
   waste) cmd_waste "$@" ;;
   alerts) cmd_alerts "$@" ;;
+  statusline) cmd_statusline "$@" ;;
   help|*)
     cat <<'EOF'
 用法：usage.sh [子命令] [参数]
@@ -59,6 +60,7 @@ case "$cmd" in
   providers                按来源（官方套餐 / 自定义接入）汇总
   blocks                   5 小时窗口用量（末尾窗口若在 5h 内即进行中）
   waste [N]                浪费取证：近 N 天（默认 7）失败/取消/重试白耗的 token 与 Top 会话
+  statusline               一行式用量摘要（今日 token/折算/燃烧率/预算%），供 tmux、SwiftBar 等状态栏挂载
   alerts <budget|permission> [on|off]  通知开关：预算/燃烧告警（默认开）、权限等待提醒（默认关）
   months                   按月汇总
   projects [N]             按项目目录汇总 Top N（默认 15）

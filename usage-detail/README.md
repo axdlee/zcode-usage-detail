@@ -10,6 +10,12 @@ Per-request usage analytics for ZCode, entirely local: every model request is on
 
 > **Platform support**: full on macOS; Windows and Linux cover all core capabilities (side panel / MCP / hooks / dashboard / CLI). The CLI needs bash (Git Bash on Windows) and Node >= 22.13 (bundled with ZCode); when the `sqlite3` CLI is absent it automatically falls back to a node:sqlite shim. System notifications use each platform's native channel and are silently skipped when unavailable.
 
+- **Burn rate & pacing**: last-hour tok/min with converted cost always visible in insights, plus a pacing label (slowing / steady / accelerating) against the 7-day daily average (borrowed from coding-usage-bar).
+- **Projects tab**: usage aggregated by project directory (sessions / requests / tokens / 7-day sparkline / last activity); click a project to filter the session table.
+- **Billing windows (approximate)**: local 5-hour split (same rule as ccusage blocks) with the last 8 windows as bars; the active window shows a full-window token projection.
+- **Statusline one-liner**: `usage.sh statusline` prints "today tokens · cost · burn rate · budget %" for tmux / SwiftBar.
+- **Polished motion**: KPI count-up, tab fade, pulsing live banner, heatmap hover outline - all respecting reduced-motion.
+
 - **Interactive dashboard** (`/usage-ui`): six tabs — overview / daily trend / sessions / model efficiency / requests / failures. Global filters (provider, model, session, time range) apply everywhere; sortable tables, pagination, drill-downs, GitHub-style activity heatmap (day/week/month-calendar), dark & light themes.
 - **Session side panel** (ZCode Desktop 3.15+): the same full dashboard as an MCP App tab, following the host theme. Per-turn stats banner refreshed in real time via MCP resource subscription (`resources/subscribe` → `notifications/resources/updated`) — computed locally, zero model overhead, never enters the conversation.
 - **Session health score & waste forensics**: 0-100 per-session health score (error/cancel/retry weighted); insight card + `usage.sh waste [days]` showing tokens burned by failed/cancelled/retried requests, top failing sessions and most-retried models.

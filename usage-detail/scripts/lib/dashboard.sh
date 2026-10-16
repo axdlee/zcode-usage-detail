@@ -137,7 +137,7 @@ cmd_dashboard() {
 #usage-dashboard .ud-fact{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--ud-soft);font-size:12.5px;min-width:0;}
 #usage-dashboard .ud-fact .fdot{width:7px;height:7px;border-radius:2px;flex:none;}
 #usage-dashboard .ud-fact .fl{flex:1;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#usage-dashboard .ud-fact .fv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}
+#usage-dashboard .ud-fact .fv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;max-width:62%;overflow:hidden;text-overflow:ellipsis;}
 #usage-dashboard .ud-fact .fs{font-size:11px;color:var(--muted-foreground);font-weight:400;margin-left:5px;}
 #usage-dashboard .ud-fact.ud-wide{grid-column:1/-1;flex-wrap:wrap;}
 #usage-dashboard .ud-collapsed .ud-fact:nth-child(n+7){display:none;}
@@ -176,6 +176,24 @@ cmd_dashboard() {
 #usage-dashboard .ud-pager .btn{margin-top:0;}
 /* 热力图：格子悬停描边（十字定位感） */
 #usage-dashboard #ud-heatmap svg rect:hover{stroke:var(--foreground);stroke-width:1;}
+/* ===== 计费窗口（近似）横条列表 ===== */
+#usage-dashboard .ud-win-list{display:flex;flex-direction:column;gap:6px;}
+#usage-dashboard .ud-win{display:grid;grid-template-columns:200px 1fr auto;align-items:center;gap:12px;padding:5px 10px;border:1px solid var(--ud-soft);border-radius:9px;}
+#usage-dashboard .ud-win-active{border-color:color-mix(in srgb,var(--ud-accent) 35%,transparent);background:color-mix(in srgb,var(--ud-accent) 6%,var(--card));}
+#usage-dashboard .ud-win-t{font-size:12px;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#usage-dashboard .ud-win-bar{height:8px;border-radius:4px;background:var(--muted);overflow:hidden;}
+#usage-dashboard .ud-win-bar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--ud-accent) 55%,transparent),var(--ud-accent));}
+#usage-dashboard .ud-win-v{font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+#usage-dashboard .ud-win-v .fs{font-size:11px;color:var(--muted-foreground);font-weight:400;margin-left:3px;}
+@media (max-width:560px){#usage-dashboard .ud-win{grid-template-columns:150px 1fr auto;gap:8px;}}
+/* ===== 页签切换淡入（尊重系统减弱动效偏好） ===== */
+#usage-dashboard [role=tabpanel]:not([hidden]){animation:ud-fade .18s ease-out;}
+@keyframes ud-fade{from{opacity:0;transform:translateY(2px);}to{opacity:1;transform:none;}}
+@media (prefers-reduced-motion:reduce){
+  #usage-dashboard [role=tabpanel]:not([hidden]){animation:none;}
+  #usage-dashboard .ud-turn::before{animation:none;}
+  #usage-dashboard tbody tr{transition:none;}
+}
 /* ===== 横幅（本轮统计）：呼吸脉点的浅色条 ===== */
 #usage-dashboard .ud-turn{display:flex;align-items:baseline;gap:8px;padding:8px 12px;margin:0 0 12px;border-radius:10px;background:color-mix(in srgb,var(--ud-accent) 7%,var(--card));border:1px solid color-mix(in srgb,var(--ud-accent) 16%,transparent);font-size:12.5px;line-height:1.6;}
 #usage-dashboard .ud-turn::before{content:'';align-self:center;width:7px;height:7px;border-radius:50%;background:var(--ud-accent);flex:none;animation:ud-pulse 2.4s ease-in-out infinite;}
@@ -252,6 +270,7 @@ UD_HEAD
   <button class="nav-link" id="ud-tab-trend" role="tab" aria-controls="ud-trend" aria-selected="false" type="button">每日趋势</button>
   <button class="nav-link" id="ud-tab-sessions" role="tab" aria-controls="ud-sessions" aria-selected="false" type="button">会话排行</button>
   <button class="nav-link" id="ud-tab-models" role="tab" aria-controls="ud-models" aria-selected="false" type="button">模型效率</button>
+  <button class="nav-link" id="ud-tab-projects" role="tab" aria-controls="ud-projects" aria-selected="false" type="button">项目用量</button>
   <button class="nav-link" id="ud-tab-detail" role="tab" aria-controls="ud-detail" aria-selected="false" type="button">请求明细</button>
   <button class="nav-link" id="ud-tab-errors" role="tab" aria-controls="ud-errors" aria-selected="false" type="button">失败请求</button>
 </div>
@@ -313,6 +332,11 @@ UD_HEAD
   <div class="ud-legend" id="ud-pv-legend"></div>
   <div id="ud-trend-chart"></div>
   <div id="ud-daily-wrap"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h3 style="margin-bottom:0">计费窗口（近似）</h3>
+    <span class="text-small text-muted">相邻请求间隔 ≥5h 切分</span>
+  </div>
+  <div id="ud-blocks"></div>
 </div>
 <div id="ud-sessions" role="tabpanel" aria-labelledby="ud-tab-sessions" hidden>
   <p class="text-small text-muted">点击表头排序，筛选条件在上方全局生效；点击行可展开会话详情。</p>
@@ -326,6 +350,14 @@ UD_HEAD
   <div class="table-responsive"><table class="table table-sm">
     <thead id="ud-models-head"></thead>
     <tbody id="ud-models-body"></tbody>
+  </table></div>
+</div>
+<div id="ud-projects" role="tabpanel" aria-labelledby="ud-tab-projects" hidden>
+  <p class="text-small text-muted">按项目目录聚合（ccusage project / CCMeter 项目卡片的本地版）：点击项目行可跳到会话排行并只看该项目；点击表头排序。</p>
+  <span id="ud-proj-filter" class="ud-tag" hidden style="cursor:pointer" title="点击清除项目筛选"></span>
+  <div class="table-responsive"><table class="table table-sm">
+    <thead id="ud-projects-head"></thead>
+    <tbody id="ud-projects-body"></tbody>
   </table></div>
 </div>
 <div id="ud-detail" role="tabpanel" aria-labelledby="ud-tab-detail" hidden>
@@ -515,7 +547,7 @@ function __usageBoot(D) {
   (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [] }; });
   (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
-  var st = { p: -1, m: -1, s: -1, rng: 'today', day: null, hidePv: {} };
+  var st = { p: -1, m: -1, s: -1, rng: 'today', day: null, proj: null, hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
   var heatMode = 'hour', heatLastW = -1, sessExp = -1, detExp = -1;
@@ -641,15 +673,25 @@ function __usageBoot(D) {
     var items = [];
     items.push(row('活跃天数', days.length + ' 天', 'blue'));
     items.push(row('连续活跃', cur + ' 天', 'blue', '最长 ' + longest));
-    // 燃烧率常驻前排（现在进行时的指标，ccusage burn rate / claude-monitor 标配）
+    // 燃烧率常驻前排（现在进行时的指标，ccusage burn rate / claude-monitor 标配）；
+    // 节奏标记借鉴 coding-usage-bar：当前速率折算日耗 vs 近 7 天日均 → 放缓/平稳/加速
     (function () {
       var nowMs = Date.now(), r1h = 0, c1h = 0;
       rows.forEach(function (r) { if (r[1] >= nowMs - 3600e3 && r[1] <= nowMs + 60e3) { r1h += N(r[4]) + N(r[5]); var cc = rowCost(r); if (cc != null) c1h += cc; } });
-      if (r1h > 0) {
-        var perMin = Math.round(r1h / 60);
-        items.push(row('近 1h 燃烧率', fmtI(perMin) + ' tok/min', 'red',
-          c1h > 0 ? '折算 ' + fmtCost(c1h) + ' · 按此速率约 ' + fmtCost(c1h * 24) + '/天' : ''));
-      }
+        if (r1h > 0) {
+          var perMin = Math.round(r1h / 60);
+          var sub = c1h > 0 ? '折算 ' + fmtCost(c1h) : '';
+          var pace = '';
+          var perDay7 = {}, earliest = nowMs - 7 * 864e5;
+          rows.forEach(function (r) { if (r[1] >= earliest && r[1] < new Date(new Date().toDateString()).getTime()) { var k = dayKey(r[1]); perDay7[k] = (perDay7[k] || 0) + N(r[4]) + N(r[5]); } });
+          var d7 = Object.keys(perDay7);
+          if (d7.length >= 2) {
+            var avg7 = d7.reduce(function (a, k) { return a + perDay7[k]; }, 0) / d7.length;
+            var ratio = avg7 > 0 ? (r1h * 24) / avg7 : 0;
+            pace = ratio < 0.5 ? '节奏：放缓' : ratio <= 1.5 ? '节奏：平稳' : '节奏：加速';
+          }
+          items.push(row('近 1h 燃烧率', fmtI(perMin) + ' tok/min', 'red', [sub, pace].filter(Boolean).join(' · ')));
+        }
     })();
     if (peak) items.push(row('峰值日', peak.slice(5), 'purple', fmt(peakV) + ' tok'));
     items.push(row('缓存命中率', hit + '%', 'green', '读 ' + fmt(a.ca)));
@@ -1146,13 +1188,15 @@ function __usageBoot(D) {
       o.per1k = o.hasCost && o.tot > 0 ? o.cost / (o.tot / 1000) : null;
       return o;
     }).sort(function (a, b) { return b.tot - a.tot; });
-    headEl.innerHTML = '<tr><th>模型</th><th class="text-end">请求数</th><th class="text-end">平均 tok/s</th><th class="text-end">平均首字</th><th class="text-end">失败率</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th><th class="text-end">合计</th><th class="text-end">缓存率</th>' + (costOn ? '<th class="text-end">折算成本</th><th class="text-end">成本 / 1k tok</th>' : '') + '</tr>';
+    headEl.innerHTML = '<tr><th>模型</th><th class="text-end">请求数</th><th class="text-end">平均 tok/s</th><th class="text-end">平均首字</th><th class="text-end">失败率</th><th class="text-end">平均产出</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th><th class="text-end">合计</th><th class="text-end">缓存率</th>' + (costOn ? '<th class="text-end">折算成本</th><th class="text-end">成本 / 1k tok</th>' : '') + '</tr>';
     bodyEl.innerHTML = list.length ? list.map(function (o) {
+      var avgOut = o.req ? o.out / o.req : null;
       return '<tr><td class="ud-flink" data-k="m" data-v="' + o.m + '" title="点击只看该模型">' + esc(MD[o.m]) + '</td>' +
         '<td class="text-end tabular-nums">' + fmtI(o.req) + '</td>' +
         '<td class="text-end">' + (o.tps == null ? '–' : tpsHtml(o.tps)) + '</td>' +
         '<td class="text-end tabular-nums">' + (o.avgTtft == null ? '–' : durCell(o.avgTtft)) + '</td>' +
         '<td class="text-end tabular-nums" style="color:' + (o.errRate >= 10 ? 'var(--red)' : o.errRate > 0 ? 'var(--yellow)' : 'inherit') + '">' + o.errRate + '%</td>' +
+        '<td class="text-end tabular-nums" title="生成 token / 请求（单轮平均产出）">' + (avgOut == null ? '–' : fmt(avgOut)) + '</td>' +
         '<td class="text-end tabular-nums">' + tokCell(o.inn) + '</td><td class="text-end tabular-nums">' + tokCell(o.out) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td>' +
         '<td class="text-end tabular-nums">' + o.rate + '%</td>' +
         (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td><td class="text-end tabular-nums">' + (o.per1k == null ? '–' : fmtCost(o.per1k)) + '</td>' : '') +
@@ -1174,9 +1218,104 @@ function __usageBoot(D) {
     var c = h >= 90 ? 'var(--green)' : h >= 70 ? 'var(--yellow)' : 'var(--red)';
     return '<span data-tip="健康分 ' + h + '／100：失败率×60 + 取消率×25 + 重试率（封顶 15）加权扣分" style="color:' + c + ';font-weight:600">' + h + '</span>';
   }
+  // 项目用量：按会话目录聚合（ccusage project / CCMeter 项目卡片的本地版）
+  function renderProjects(rows) {
+    var headEl = $('ud-projects-head'), bodyEl = $('ud-projects-body');
+    if (!headEl || !bodyEl) return;
+    var per = {};
+    rows.forEach(function (r) {
+      var dir = SD[r[0]] || '（未知目录）';
+      var o = per[dir] || (per[dir] = { req: 0, inn: 0, out: 0, cost: 0, hasCost: false, last: 0, sess: {}, tok: 0 });
+      o.req++; o.inn += N(r[4]); o.out += N(r[5]); o.tok = o.inn + o.out;
+      if (r[1] > o.last) o.last = r[1];
+      o.sess[r[0]] = 1;
+      var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; }
+    });
+    // 近 7 天 sparkline 序列（按项目）
+    var days7 = [];
+    for (var i7 = 6; i7 >= 0; i7--) days7.push(dayKey(Date.now() - i7 * 864e5));
+    var sp = {};
+    rows.forEach(function (r) {
+      var k = dayKey(r[1]);
+      if (days7.indexOf(k) < 0) return;
+      var dir = SD[r[0]] || '（未知目录）';
+      var o = sp[dir] || (sp[dir] = {});
+      o[k] = (o[k] || 0) + N(r[4]) + N(r[5]);
+    });
+    function spark(dir) {
+      var vals = days7.map(function (k) { return N((sp[dir] || {})[k]); });
+      var mx = Math.max.apply(null, vals);
+      if (!mx) return '<span class="text-muted">–</span>';
+      var W = 72, Hh = 18, step = W / 6;
+      var pts = vals.map(function (v, i) { return (i * step).toFixed(1) + ',' + (Hh - 2 - (Hh - 5) * v / mx).toFixed(1); }).join(' ');
+      var last = vals[6];
+      return '<svg width="' + W + '" height="' + Hh + '" style="display:block" role="img" aria-label="近 7 天趋势"><polyline points="' + pts + '" fill="none" stroke="var(--ud-accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity=".85"/><circle cx="' + W + '" cy="' + (Hh - 2 - (Hh - 5) * last / mx).toFixed(1) + '" r="2.2" fill="var(--ud-accent)"/></svg>';
+    }
+    var list = Object.keys(per).map(function (d) { var o = per[d]; o.dir = d; return o; })
+      .sort(function (a, b) { return b.tok - a.tok; });
+    headEl.innerHTML = '<tr><th>项目</th><th class="text-end">会话数</th><th class="text-end">请求数</th><th class="text-end">token 合计</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '<th>近 7 天</th><th class="text-end">最后活动</th></tr>';
+    bodyEl.innerHTML = list.length ? list.map(function (o) {
+      var base = o.dir.split('/').filter(Boolean).pop() || o.dir;
+      var sel = st.proj === o.dir;
+      return '<tr class="ud-click" data-proj="' + esc(o.dir) + '" title="点击只看该项目的会话"><td class="text-nowrap">' + esc(base) + (sel ? ' <span class="ud-tag">已选</span>' : '') + '<div class="ud-kv-l" style="margin-top:1px">' + esc(o.dir) + '</div></td>' +
+        '<td class="text-end tabular-nums">' + fmtI(Object.keys(o.sess).length) + '</td>' +
+        '<td class="text-end tabular-nums">' + fmtI(o.req) + '</td>' +
+        '<td class="text-end tabular-nums">' + tokCell(o.tok) + '</td>' +
+        (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') +
+        '<td>' + spark(o.dir) + '</td>' +
+        '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="text-muted">当前筛选下暂无数据</td></tr>';
+    Array.prototype.forEach.call(bodyEl.querySelectorAll('tr.ud-click'), function (tr) {
+      tr.addEventListener('click', function () {
+        var d = tr.getAttribute('data-proj');
+        st.proj = st.proj === d ? null : d;
+        var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-sessions"]');
+        if (btn) btn.click();
+        apply();
+      });
+    });
+  }
+
+  // 计费窗口（近似）：按相邻请求间隔 ≥5h 切分（ccusage blocks 同口径的本地近似，
+  // 官方窗口起点在服务端，仅作节奏参考），展示最近 8 个窗口 + 活跃窗口投影
+  function renderBlocks(rows) {
+    var host = $('ud-blocks');
+    if (!host) return;
+    var ts = rows.map(function (r) { return r[1]; }).sort(function (a, b) { return a - b; });
+    if (ts.length < 2) { host.innerHTML = '<p class="text-muted">数据不足，无法切分窗口</p>'; return; }
+    var wins = [], cur = { start: ts[0], end: ts[0], tok: 0, req: 0 };
+    var tokOf = {};
+    rows.forEach(function (r) { tokOf[r[1]] = N(r[4]) + N(r[5]); });
+    var lastT = null;
+    rows.slice().sort(function (a, b) { return a[1] - b[1]; }).forEach(function (r) {
+      if (lastT != null && r[1] - lastT >= 5 * 3600e3) { wins.push(cur); cur = { start: r[1], end: r[1], tok: 0, req: 0 }; }
+      cur.end = r[1]; cur.tok += N(r[4]) + N(r[5]); cur.req++;
+      lastT = r[1];
+    });
+    wins.push(cur);
+    var recent = wins.slice(-8);
+    var mx = Math.max.apply(null, recent.map(function (w) { return w.tok; })) || 1;
+    var nowMs = Date.now();
+    host.innerHTML = '<div class="ud-win-list">' + recent.map(function (w, i) {
+      var isActive = i === recent.length - 1 && (nowMs - w.end) < 5 * 3600e3;
+      var pct = Math.min(100, Math.round(w.tok / mx * 100));
+      var proj = '';
+      if (isActive && w.end > w.start) {
+        var elapsedMin = Math.max(1, (w.end - w.start) / 60e3);
+        var projected = Math.round(w.tok / elapsedMin * 300);
+        proj = ' · 预计全窗 ' + fmt(projected) + ' tok';
+      }
+      return '<div class="ud-win' + (isActive ? ' ud-win-active' : '') + '">' +
+        '<div class="ud-win-t">' + fullTs(w.start).slice(5, -3) + ' – ' + pad(new Date(w.end).getHours()) + ':' + pad(new Date(w.end).getMinutes()) + (isActive ? ' <span class="ud-tag" style="color:var(--ud-accent)">活跃' + proj + '</span>' : '') + '</div>' +
+        '<div class="ud-win-bar"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="ud-win-v tabular-nums">' + fmt(w.tok) + ' <span class="fs">' + fmtI(w.req) + ' 次</span></div></div>';
+    }).join('') + '</div><p class="ud-kv-l" style="margin-top:6px">近似口径：按相邻请求间隔 ≥5h 开新窗，官方窗口起点在服务端，仅作节奏参考。</p>';
+  }
+
   function renderSessions(rows) {
     var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost', 7: 'rate', 8: 'health' };
-    var list = sessAgg(rows).sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
+    var list = sessAgg(rows).filter(function (o) { return !st.proj || (SD[o.g] || '') === st.proj; })
+      .sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
     var hasCmp = (D.compactions || []).length > 0;
     var cols = [
       { h: '会话', k: null }, { h: '请求数', k: 1, end: 1 }, { h: '输入 token', k: 2, end: 1 },
@@ -1535,6 +1674,14 @@ function __usageBoot(D) {
       df.hidden = !st.day;
       if (st.day) df.textContent = '日期：' + st.day + ' ✕';
     }
+    var pf = $('ud-proj-filter');
+    if (pf) {
+      pf.hidden = !st.proj;
+      if (st.proj) {
+        var base = String(st.proj).split('/').filter(Boolean).pop() || st.proj;
+        pf.textContent = '项目：' + base + ' ✕';
+      }
+    }
     var rows = frows(false);
     if (D.session) { renderSession(rows); renderDetail(rows); return; }
     renderKpis(rows);
@@ -1548,6 +1695,8 @@ function __usageBoot(D) {
     renderHeatmap(rows);
     renderSessions(rows);
     renderModelBoard(rows);
+    renderProjects(rows);
+    renderBlocks(rows);
     renderDetail(rows);
     renderErrors(rows);
     drawTrend();
@@ -1579,6 +1728,10 @@ function __usageBoot(D) {
   (function () {
     var df = $('ud-day-filter');
     if (df) df.addEventListener('click', function () { st.day = null; page = 1; sessExp = -1; detExp = -1; apply(); });
+  })();
+  (function () {
+    var pf = $('ud-proj-filter');
+    if (pf) pf.addEventListener('click', function () { st.proj = null; page = 1; sessExp = -1; detExp = -1; apply(); });
   })();
   $('ud-f-pv').addEventListener('change', function () { st.p = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-model').addEventListener('change', function () { st.m = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });

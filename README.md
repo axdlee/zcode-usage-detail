@@ -1,20 +1,36 @@
-# ZCode 用量明细 (usage-detail)
+<div align="center">
 
-[English](#english) | 简体中文
+# 用量明细 · Usage Detail
+
+**看清每一次模型请求：逐条明细 · 燃烧率 · 项目/会话/模型三维度 · 官方牌价折算**
+
+[![version](https://img.shields.io/badge/version-0.18.0-5865d6?style=flat-square)](https://github.com/axdlee/zcode-usage-detail/releases)
+[![platform](https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-14b8a6?style=flat-square)](#平台支持)
+[![privacy](https://img.shields.io/badge/只读%20·%20本地%20·%20零遥测-f59e0b?style=flat-square)](#隐私)
+[![license](https://img.shields.io/badge/license-MIT-3b82f6?style=flat-square)](LICENSE)
+[![ecosystem](https://img.shields.io/badge/ccusage-zcode%20source-8b5cf6?style=flat-square)](https://github.com/ccusage/ccusage)
+
+*已被 [ccusage](https://github.com/ccusage/ccusage) 收录为 `zcode` 数据源：`ccusage zcode daily` 直接可用。*
+
+![仪表盘总览](screenshots/dashboard-overview-light.png)
+
+</div>
 
 一个 [ZCode](https://zcode.z.ai) 插件：查看**每一次模型请求**的本地用量明细——逐条记录、按来源（GLM 官方套餐 / 自定义 BYOK 接入）区分、多维筛选与交互式仪表盘。
 
 纯本地只读查询，**不发起任何网络请求，不上传任何数据**。
 
-![仪表盘总览](screenshots/dashboard-overview-dark.png)
-
-会话排行支持点击展开：上下文压缩、模型占比、使用工具、上下文水位曲线一目了然：
-
-![会话排行与钻取](screenshots/dashboard-sessions-dark.png)
-
-每日趋势按来源堆叠，图表下方附每日明细表（请求 / token / 缓存命中 / 生成速率），点击某天直接切换为该日的请求日志：
+**每日趋势**：渐变堆叠面积图（按来源分色），点击某天直接切换为该日的请求日志；下方附计费窗口（近似 5h 切分，活跃窗口带全窗投影）与逐日/逐月明细表：
 
 ![每日趋势](screenshots/dashboard-trend-light.png)
+
+**项目用量**：按项目目录聚合（会话数 / 请求 / token / 近 7 天趋势 / 最后活动），点击项目行直接筛选该项目的会话：
+
+![项目用量](screenshots/dashboard-projects-dark.png)
+
+**会话排行**支持点击展开：上下文压缩、模型占比、使用工具、上下文水位曲线一目了然：
+
+![会话排行与钻取](screenshots/dashboard-sessions-dark.png)
 
 ## 功能
 
@@ -30,7 +46,13 @@
 - **两级钻取**：点击会话行（或总览「最活跃会话」行）展开该会话详情——项目目录、主会话/子代理用量拆分、压缩事件、模型占比**甜甜圈**、来源分布、**使用工具甜甜圈**、事件时间线（压缩/模型切换，竖轴彩点）、**上下文水位曲线**（起止融入图头，逐点悬停看输入/生成/模型/状态）、一键跳转该会话请求日志；点击请求行展开该条完整信息——Token 构成、时序、**输出速率**，本地面板模式还能查看 provider 上报的**原始用量 JSON**
 - **当前会话**（感谢 [@Garfielk](https://github.com/Garfielk)）：`/usage-this` 查看当前会话汇总、按模型/来源分组和最近失败/取消请求；`/usage-this-ui` 使用精简面板，首屏展示请求/输入/生成/缓存读，模型分布和请求明细按需展开，支持直接查看失败/取消记录
 - **来源区分**：自动区分 `account:*` 官方套餐（如 GLM Coding Plan）与自定义/BYOK 接入，仪表盘按来源堆叠展示每日趋势
-- **界面**：列表 token 与耗时人性化显示（小数字原样、大数 k/M，悬停看完整值）；「设置」弹窗集成本地价格表 / 日月预算 / 通知开关（权限等待提醒、预算告警、每轮统计通知）——本地面板里点点即可配置，不再需要记命令；洞察/体检/KPI 为彩色内容卡片（值/标签层级 + 按信息类型固定的强调色）；官方套餐来源显示中文名（如「GLM Coding Plan 个人版」，自定义来源保留原名）；默认时间范围为「今天」
+- **界面**：列表 token 与耗时人性化显示（小数字原样、大数 k/M，悬停看完整值）；「设置」弹窗集成本地价格表 / 日月预算 / 通知开关——本地面板里点点即可配置，不再需要记命令；KPI 数字带 + 洞察/体检紧凑事实行（默认折叠 6 项、一键展开），明暗主题与窄栏自适应；官方套餐来源显示中文名（如「GLM Coding Plan 个人版」，自定义来源保留原名）；默认时间范围为「今天」
+- **燃烧率与节奏**：近 1h 燃烧率（tok/min）+ 折算金额常驻洞察前排，并按近 7 天日均给出「放缓 / 平稳 / 加速」节奏标记（借鉴 coding-usage-bar 的 pacing）
+- **项目用量页签**：按项目目录聚合会话数 / 请求数 / token / 近 7 天 sparkline / 最后活动，点击项目行跳转会话排行并自动筛选（一键清除）
+- **计费窗口（近似）**：按相邻请求间隔 ≥5h 切分（ccusage blocks 同口径的本地近似），最近 8 个窗口横条对比，活跃窗口显示全窗 token 投影；口径标注透明
+- **模型「平均产出」**：模型效率页按模型对比单轮平均生成 token，看哪个模型单轮干活更多
+- **一行式状态栏摘要**：`usage.sh statusline` 输出「今日 token · 折算 · 近 1h 燃烧率 · 日预算 %」，可直接挂进 tmux status-right / SwiftBar 等
+- **动效**：KPI 数字滚动落定、页签淡入淡出、本轮横幅呼吸脉点、热力图悬停描边——全部尊重系统「减弱动态效果」设置
 - **交互式仪表盘**（`/usage-ui`）：总览 / 每日趋势（含每日明细表）/ 会话排行 / 模型效率 / 请求明细 / 失败请求六个标签页；来源、模型、会话、时间范围（今天 / 近 7 天 / 30 天 / 全部）全局筛选即时生效——**明细里点击会话/模型名直接切换为该会话/该模型的日志**（筛选条一键清除）；请求明细**分页浏览**（每页 50 条 + 页码直跳）；表格点击表头排序；界面自动适配 ZCode 明暗主题。**默认内嵌全部历史**，`/usage-ui <条数>` 可限制（1–20000；会话内嵌渲染有体积上限，超大的历史建议用本地面板或侧栏）
 - **缓存率全链路**：缓存命中率、缓存量（读+写）进洞察；来源构成、模型分布、会话排行、请求明细逐项带缓存率
 - **悬停明细**：热力图、趋势图、时段分布鼠标悬停即时显示完整用量分解
