@@ -1,6 +1,6 @@
 {
   "name": "usage-detail",
-  "version": "0.15.2",
+  "version": "0.16.0",
   "description": "ZCode 本地逐条用量分析：请求明细钻取（token 构成、tok/s、缓存率）、会话侧栏实时仪表盘、会话健康分、模型效率排行、浪费取证、预算与燃烧告警、折算成本（官方牌价）、活跃热力图与导出——只读本地 SQLite，零模型开销。",
   "author": {
     "name": "axdlee",

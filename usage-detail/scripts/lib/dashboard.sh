@@ -94,51 +94,96 @@ cmd_dashboard() {
       cat <<'UD_HEAD'
 <div id="usage-dashboard">
 <style>
-#usage-dashboard .ud-toggle{background:none;border:none;color:var(--muted-foreground);font-size:12px;padding:2px 6px;}
-#usage-dashboard .ud-toggle[aria-pressed="true"]{color:var(--foreground);font-weight:500;}
-#usage-dashboard .ud-toggle:hover{color:var(--foreground);}
-#usage-dashboard .ud-swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+/* ===== token 层：宿主变量之上派生，统一节奏（轻分隔、紧凑行、克制的色彩） ===== */
+#usage-dashboard{
+  --ud-soft:color-mix(in srgb,var(--border) 55%,transparent);
+  --ud-accent:var(--primary,var(--viz-series-1,#6c7bd0));
+  --ud-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:13px;line-height:1.55;-webkit-font-smoothing:antialiased;
+}
+#usage-dashboard ::-webkit-scrollbar{width:8px;height:8px;}
+#usage-dashboard ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+#usage-dashboard ::-webkit-scrollbar-thumb:hover{background:var(--muted-foreground);}
+#usage-dashboard :focus-visible{outline:2px solid var(--ud-accent);outline-offset:1px;border-radius:4px;}
+#usage-dashboard h3{font-size:13px;font-weight:600;margin:20px 0 8px;letter-spacing:.01em;}
+#usage-dashboard .num,#usage-dashboard .tabular-nums{font-variant-numeric:tabular-nums;}
+/* ===== 分段控件（ud-toggle 组）：合体浅底 + 浮起选中块 ===== */
+#usage-dashboard .viz-row{display:inline-flex;align-items:center;gap:2px;background:var(--muted);border-radius:8px;padding:2px;}
+#usage-dashboard .ud-toggle{border:none;background:transparent;border-radius:6px;padding:2px 10px;font-size:12px;color:var(--muted-foreground);white-space:nowrap;}
+#usage-dashboard .ud-toggle[aria-pressed="true"]{background:var(--card);color:var(--foreground);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.1);}
+#usage-dashboard .ud-toggle:hover:not([aria-pressed="true"]){color:var(--foreground);}
+#usage-dashboard .ud-swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
+/* ===== 顶部筛选区：一行流式排布，弱化容器感 ===== */
+#usage-dashboard .viz-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:4px;}
+#usage-dashboard .viz-controls .form-label{margin:0;}
+#usage-dashboard .viz-controls .form-select{width:auto;max-width:200px;padding:3px 8px;font-size:12px;border-radius:7px;}
 #usage-dashboard .ud-sortable{cursor:pointer;user-select:none;}
 #usage-dashboard .ud-sortable:hover{color:var(--foreground);}
-#usage-dashboard select.form-select{max-width:220px;}
 #usage-dashboard .ud-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle;}
-#usage-dashboard .ud-tag{font-size:11px;color:var(--muted-foreground);background:var(--muted);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle;}
-#usage-dashboard .ud-stack{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--muted);margin:8px 0 4px;}
-#usage-dashboard .ud-stack span{height:100%;}
-/* 内容卡片：accent 左色条 + 淡色底 + 值/标签字号层级（color-mix 不支持时回退纯卡片底） */
-#usage-dashboard .ud-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:9px;margin-top:6px;}
-#usage-dashboard .ud-card{--ac:var(--muted-foreground);position:relative;padding:10px 12px 9px 16px;border-radius:10px;border:1px solid var(--border);background:var(--card);background:color-mix(in srgb,var(--ac) 7%,var(--card));overflow:hidden;}
-#usage-dashboard .ud-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ac);opacity:.9;}
-#usage-dashboard .ud-card-v{font-size:17px;font-weight:600;line-height:1.3;font-variant-numeric:tabular-nums;word-break:break-word;}
-#usage-dashboard .ud-card-s{font-size:11.5px;color:var(--muted-foreground);margin-top:1px;}
-#usage-dashboard .ud-card-l{font-size:11px;color:var(--muted-foreground);margin-top:3px;letter-spacing:.02em;}
-#usage-dashboard .viz-stat{--ac:var(--blue);position:relative;overflow:hidden;background:var(--card);background:color-mix(in srgb,var(--ac) 6%,var(--card));}
-#usage-dashboard .viz-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ac);opacity:.9;}
-#usage-dashboard .ud-pager{display:flex;align-items:center;gap:10px;margin-top:10px;}
-#usage-dashboard .ud-pager .btn{margin-top:0;}
-#usage-dashboard .ud-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0;}
-#usage-dashboard .ud-legend .form-check{display:inline-flex;align-items:center;gap:4px;margin:0;}
+#usage-dashboard .ud-tag{font-size:11px;color:var(--muted-foreground);background:var(--muted);border-radius:5px;padding:2px 7px;margin-left:6px;vertical-align:middle;}
 #usage-dashboard .ud-click{cursor:pointer;}
 #usage-dashboard .ud-flink{cursor:pointer;text-decoration:underline dotted var(--muted-foreground);text-underline-offset:3px;}
-#usage-dashboard .ud-leg{display:flex;flex-direction:column;gap:5px;min-width:0;}
-#usage-dashboard .ud-leg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;line-height:1.4;}
+#usage-dashboard .ud-flink:hover{color:var(--foreground);}
+/* ===== KPI 数字带：去卡片化，细分隔线分组的数字群 ===== */
+#usage-dashboard .ud-band{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:6px 0 2px;}
+#usage-dashboard .ud-band>div{padding:2px 18px;border-left:1px solid var(--ud-soft);min-width:0;}
+#usage-dashboard .ud-band>div:first-child{border-left:none;padding-left:0;}
+#usage-dashboard .ud-band .v{font-size:22px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.25;}
+#usage-dashboard .ud-band .l{font-size:11.5px;color:var(--muted-foreground);margin-top:1px;}
+#usage-dashboard .ud-band .s{font-size:11px;color:var(--muted-foreground);opacity:.8;margin-top:1px;}
+@media (max-width:560px){#usage-dashboard .ud-band{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:12px;}#usage-dashboard .ud-band>div:nth-child(3){border-left:none;padding-left:0;}}
+/* ===== 紧凑事实行：标签 + 色点 + 值，替代成片卡片 ===== */
+#usage-dashboard .ud-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:0 32px;border-top:1px solid var(--ud-soft);}
+#usage-dashboard .ud-fact{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--ud-soft);font-size:12.5px;min-width:0;}
+#usage-dashboard .ud-fact .fdot{width:7px;height:7px;border-radius:2px;flex:none;}
+#usage-dashboard .ud-fact .fl{flex:1;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#usage-dashboard .ud-fact .fv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}
+#usage-dashboard .ud-fact .fs{font-size:11px;color:var(--muted-foreground);font-weight:400;margin-left:5px;}
+#usage-dashboard .ud-fact.ud-wide{grid-column:1/-1;flex-wrap:wrap;}
+#usage-dashboard .ud-collapsed .ud-fact:nth-child(n+7){display:none;}
+#usage-dashboard .ud-more{margin-top:6px;}
+#usage-dashboard .ud-more .btn{font-size:11.5px;padding:1px 10px;margin:0;}
+#usage-dashboard .ud-budget-bar{flex:0 0 110px;height:5px;border-radius:3px;background:var(--muted);overflow:hidden;}
+#usage-dashboard .ud-budget-bar>i{display:block;height:100%;background:var(--ud-accent);border-radius:3px;}
+#usage-dashboard .ud-budget-bar.ud-over>i{background:var(--red,var(--viz-series-1));}
+/* ===== 图例（构成/趋势） ===== */
+#usage-dashboard .ud-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0;}
+#usage-dashboard .ud-legend .form-check{display:inline-flex;align-items:center;gap:4px;margin:0;}
+#usage-dashboard .ud-leg{display:flex;flex-direction:column;gap:4px;min-width:0;}
+#usage-dashboard .ud-leg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;line-height:1.5;padding:1px 4px;margin:0 -4px;border-radius:5px;}
+#usage-dashboard .ud-leg-row:hover{background:var(--muted);}
 #usage-dashboard .ud-leg-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #usage-dashboard .ud-leg-row .n{flex:0 0 auto;color:var(--muted-foreground);font-variant-numeric:tabular-nums;}
-#usage-dashboard #ud-mgr-mask{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:60;display:flex;align-items:center;justify-content:center;}
-#usage-dashboard #ud-mgr-mask[hidden]{display:none;}
-#usage-dashboard .ud-mgr-t input{width:86px;padding:3px 8px;font-size:12px;border-radius:6px;}
-#usage-dashboard .ud-mgr-h{font-size:12.5px;font-weight:600;margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border);}
-#usage-dashboard .ud-mgr-h:first-child{border-top:none;padding-top:0;margin-top:0;}
-#usage-dashboard .ud-mgr-sub{font-size:11.5px;color:var(--muted-foreground);margin:2px 0 8px;}
-#usage-dashboard .ud-sw-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dashed var(--border);}
-#usage-dashboard .ud-sw-row:last-child{border-bottom:none;}
-#usage-dashboard .ud-sw-row .form-check{margin:0;flex:none;}
-#usage-dashboard .ud-budget-bar{height:6px;border-radius:3px;background:var(--muted);overflow:hidden;margin-top:4px;}
-#usage-dashboard .ud-budget-bar>i{display:block;height:100%;background:var(--viz-series-1);}
-#usage-dashboard .ud-budget-bar.ud-over>i{background:var(--red,var(--viz-series-1));}
-#usage-dashboard .ud-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start;}
+#usage-dashboard .ud-stack{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--muted);margin:8px 0 4px;gap:1px;}
+#usage-dashboard .ud-stack span{height:100%;}
+/* ===== 页签：下划线式，弱化胶囊感 ===== */
+#usage-dashboard .nav.nav-pills{display:flex;gap:2px;border-bottom:1px solid var(--ud-soft);margin:14px 0 12px;flex-wrap:wrap;}
+#usage-dashboard .nav-pills .nav-link{border-radius:6px 6px 0 0;padding:5px 12px;font-size:12.5px;color:var(--muted-foreground);background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;}
+#usage-dashboard .nav-pills .nav-link.active{color:var(--foreground);font-weight:600;background:none;border-bottom-color:var(--ud-accent);}
+#usage-dashboard .nav-pills .nav-link:hover:not(.active){color:var(--foreground);background:var(--muted);}
+/* ===== 表格：轻表头 + 细行分隔 + 柔和悬停 ===== */
+#usage-dashboard table{font-size:12.5px;}
+#usage-dashboard thead th{font-size:11px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap;background:transparent;}
+#usage-dashboard td{border-color:var(--ud-soft);}
+#usage-dashboard tbody tr{transition:background .12s;}
+#usage-dashboard tbody tr:hover td{background:color-mix(in srgb,var(--muted) 40%,transparent);}
+#usage-dashboard .ud-exp td{background:var(--muted);padding:12px 14px;}
+#usage-dashboard .table-responsive{overflow-x:auto;}
+#usage-dashboard #ud-detail table{min-width:1080px;}
+#usage-dashboard #ud-sessions table{min-width:900px;}
+#usage-dashboard #ud-errors table{min-width:760px;}
+#usage-dashboard .ud-pager{display:flex;align-items:center;gap:10px;margin-top:10px;}
+#usage-dashboard .ud-pager .btn{margin-top:0;}
+/* ===== 横幅（本轮统计）：呼吸脉点的浅色条 ===== */
+#usage-dashboard .ud-turn{display:flex;align-items:baseline;gap:8px;padding:8px 12px;margin:0 0 12px;border-radius:10px;background:color-mix(in srgb,var(--ud-accent) 7%,var(--card));border:1px solid color-mix(in srgb,var(--ud-accent) 16%,transparent);font-size:12.5px;line-height:1.6;}
+#usage-dashboard .ud-turn::before{content:'';align-self:center;width:7px;height:7px;border-radius:50%;background:var(--ud-accent);flex:none;animation:ud-pulse 2.4s ease-in-out infinite;}
+@keyframes ud-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ud-accent) 28%,transparent);}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--ud-accent) 28%,transparent);}}
+#usage-dashboard .ud-turn[hidden]{display:none;}
+#usage-dashboard .ud-turn-t{color:var(--muted-foreground);white-space:nowrap;font-size:11px;margin-left:auto;padding-left:12px;}
+/* ===== 会话详情三列 + 时间线 ===== */
+#usage-dashboard .ud-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start;}
 @media (max-width:900px){#usage-dashboard .ud-grid3{grid-template-columns:1fr;}}
-#usage-dashboard .ud-timeline{position:relative;margin:6px 0 0 4px;padding-left:14px;border-left:2px solid var(--border);}
+#usage-dashboard .ud-timeline{position:relative;margin:6px 0 0 4px;padding-left:14px;border-left:2px solid var(--ud-soft);}
 #usage-dashboard .ud-tl-item{position:relative;display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;}
 #usage-dashboard .ud-tl-dot{position:absolute;left:-20px;top:50%;transform:translateY(-50%);width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 3px var(--card);}
 #usage-dashboard .ud-tl-dot.ud-tl-c{background:var(--yellow);}
@@ -146,21 +191,25 @@ cmd_dashboard() {
 #usage-dashboard .ud-tl-dot.ud-tl-more{background:var(--muted-foreground);}
 #usage-dashboard .ud-tl-t{font-variant-numeric:tabular-nums;color:var(--muted-foreground);flex:0 0 auto;}
 #usage-dashboard .ud-tl-x{color:var(--foreground);}
-#usage-dashboard .ud-flink:hover{color:var(--foreground);}
-#usage-dashboard .ud-click:hover td{background:var(--muted);}
-#usage-dashboard .ud-exp td{background:var(--muted);padding:12px 14px;}
 #usage-dashboard .ud-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:4px 0;}
 #usage-dashboard .ud-kv-l{font-size:11px;color:var(--muted-foreground);}
 #usage-dashboard .ud-kv-v{font-size:13px;font-weight:500;}
-#usage-dashboard .ud-sec{margin-top:12px;}
+#usage-dashboard .ud-sec{margin-top:14px;}
 #usage-dashboard pre.ud-raw{font-size:11px;background:var(--muted);border-radius:8px;padding:8px 10px;overflow-x:auto;white-space:pre;}
-#usage-dashboard .table-responsive{overflow-x:auto;}
-#usage-dashboard #ud-detail table{min-width:1080px;}
-#usage-dashboard #ud-sessions table{min-width:900px;}
-#usage-dashboard #ud-errors table{min-width:760px;}
-#usage-dashboard .ud-turn{display:flex;align-items:baseline;gap:8px;padding:7px 12px;margin:0 0 10px;border-radius:10px;background:var(--muted);font-size:12.5px;line-height:1.6;}
-#usage-dashboard .ud-turn[hidden]{display:none;}
-#usage-dashboard .ud-turn-t{color:var(--muted-foreground);white-space:nowrap;font-size:11px;margin-left:auto;padding-left:12px;}
+/* ===== 设置弹窗：毛玻璃遮罩 + 悬浮面板 + 吸顶标题 ===== */
+#usage-dashboard #ud-mgr-mask{position:fixed;inset:0;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;}
+#usage-dashboard #ud-mgr-mask[hidden]{display:none;}
+#usage-dashboard .ud-mgr-panel{width:min(720px,96vw);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid var(--border);background:var(--card);box-shadow:0 16px 48px rgba(0,0,0,.22);}
+#usage-dashboard .ud-mgr-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid var(--ud-soft);background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}
+#usage-dashboard .ud-mgr-head h3{margin:0;font-size:14px;font-weight:650;}
+#usage-dashboard .ud-mgr-body{padding:14px 18px 18px;}
+#usage-dashboard .ud-mgr-t input{width:86px;padding:3px 8px;font-size:12px;border-radius:6px;}
+#usage-dashboard .ud-mgr-h{font-size:12.5px;font-weight:600;margin:18px 0 8px;padding-top:14px;border-top:1px solid var(--ud-soft);}
+#usage-dashboard .ud-mgr-h:first-child{border-top:none;padding-top:0;margin-top:0;}
+#usage-dashboard .ud-mgr-sub{font-size:11.5px;color:var(--muted-foreground);margin:2px 0 8px;}
+#usage-dashboard .ud-sw-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--ud-soft);}
+#usage-dashboard .ud-sw-row:last-child{border-bottom:none;}
+#usage-dashboard .ud-sw-row .form-check{margin:0;flex:none;}
 </style>
 UD_HEAD
       if [[ "$cmd" == dashboard-this ]]; then
@@ -188,12 +237,12 @@ UD_HEAD
   <span class="text-small text-muted" id="ud-meta"></span>
 </div>
 <div id="ud-mgr-mask" hidden>
-  <div class="card" style="width:min(760px,94vw);max-height:86vh;overflow:auto;padding:16px 18px" role="dialog" aria-label="价格与预算设置">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <h3 style="margin:0;font-size:16px">设置</h3>
-      <button type="button" class="btn" id="ud-mgr-close" style="margin:0;padding:2px 10px;font-size:12px">关闭</button>
+  <div class="ud-mgr-panel" role="dialog" aria-label="价格与预算设置">
+    <div class="ud-mgr-head">
+      <h3>设置</h3>
+      <button type="button" class="btn" id="ud-mgr-close" style="margin:0;padding:2px 12px;font-size:12px">关闭</button>
     </div>
-    <div id="ud-mgr-body"></div>
+    <div class="ud-mgr-body" id="ud-mgr-body"></div>
   </div>
 </div>
 <div class="nav nav-pills" role="tablist" aria-label="用量视图">
@@ -205,14 +254,14 @@ UD_HEAD
   <button class="nav-link" id="ud-tab-errors" role="tab" aria-controls="ud-errors" aria-selected="false" type="button">失败请求</button>
 </div>
 <div id="ud-overview" role="tabpanel" aria-labelledby="ud-tab-overview">
-  <div class="viz-grid">
-    <div class="card viz-stat" style="--ac:var(--blue)"><div class="text-muted text-small">请求次数</div><div class="viz-stat-value tabular-nums" id="ud-k1">–</div><div class="text-small text-muted" id="ud-k1c"></div></div>
-    <div class="card viz-stat" style="--ac:#8b5cf6"><div class="text-muted text-small">输入 token</div><div class="viz-stat-value tabular-nums" id="ud-k2">–</div><div class="text-small text-muted" id="ud-k2c"></div></div>
-    <div class="card viz-stat" style="--ac:var(--green)"><div class="text-muted text-small">生成 token</div><div class="viz-stat-value tabular-nums" id="ud-k3">–</div><div class="text-small text-muted" id="ud-k3c"></div></div>
-    <div class="card viz-stat" style="--ac:var(--yellow)"><div class="text-muted text-small">活跃会话</div><div class="viz-stat-value tabular-nums" id="ud-k4">–</div><div class="text-small text-muted" id="ud-k4c"></div></div>
+  <div class="ud-band">
+    <div><div class="v tabular-nums" id="ud-k1">–</div><div class="l">请求次数</div><div class="s" id="ud-k1c"></div></div>
+    <div><div class="v tabular-nums" id="ud-k2">–</div><div class="l">输入 token</div><div class="s" id="ud-k2c"></div></div>
+    <div><div class="v tabular-nums" id="ud-k3">–</div><div class="l">生成 token</div><div class="s" id="ud-k3c"></div></div>
+    <div><div class="v tabular-nums" id="ud-k4">–</div><div class="l">活跃会话</div><div class="s" id="ud-k4c"></div></div>
   </div>
-  <div class="ud-sec"><div class="ud-kv-l">用量洞察</div><div class="ud-card-grid" id="ud-insights" aria-live="polite"></div></div>
-  <div class="ud-sec"><div class="ud-kv-l">性能体检</div><div class="ud-card-grid" id="ud-health"></div></div>
+  <div class="ud-sec"><div class="ud-kv-l">用量洞察</div><div class="ud-facts" id="ud-insights" aria-live="polite"></div><div class="ud-more" id="ud-insights-more" hidden></div></div>
+  <div class="ud-sec"><div class="ud-kv-l">性能体检</div><div class="ud-facts" id="ud-health"></div></div>
   <div id="ud-quota-card" hidden></div>
   <div class="ud-grid3">
     <div>
@@ -226,7 +275,7 @@ UD_HEAD
     </div>
     <div>
       <h3>常用工具</h3>
-      <div class="card" style="padding:12px 14px"><div id="ud-tools-donut"></div></div>
+      <div id="ud-tools-donut"></div>
     </div>
   </div>
   <h3>最活跃会话（Top 5）</h3>
@@ -468,6 +517,7 @@ function __usageBoot(D) {
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
   var heatMode = 'hour', heatLastW = -1, sessExp = -1, detExp = -1;
+  var insightsOpen = false; // 洞察区折叠状态：默认只露 6 项，重渲染（筛选/保存后）保持
 
   function cutOf() {
     if (st.rng === 'all') return 0;
@@ -567,42 +617,34 @@ function __usageBoot(D) {
     rows.forEach(function (r) { var k = dayKey(r[1]); perDay[k] = (perDay[k] || 0) + N(r[4]) + N(r[5]); });
     for (var k in perDay) { if (perDay[k] > peakV) { peakV = perDay[k]; peak = k; } }
     var hit = a.inn ? Math.round(a.ca / a.inn * 100) : 0;
-    // 内容卡片：accent 按信息类型固定（蓝=活跃/耗时，绿=缓存/任务，黄=重试，红=浪费，紫=峰值/拆分，橙=成本，灰=体量）
+    // 紧凑事实行：语义色只用于色点（蓝=活跃/耗时，绿=缓存/任务，黄=重试，红=浪费，紫=峰值/拆分，橙=成本，灰=体量）
     var C = { blue: 'var(--blue)', green: 'var(--green)', yellow: 'var(--yellow)', red: 'var(--red)', purple: '#8b5cf6', gold: 'var(--viz-series-2,var(--yellow))', gray: 'var(--muted-foreground)' };
-    function card(v, l, ac, s) {
-      return '<div class="ud-card" style="--ac:' + (C[ac] || C.gray) + '"><div class="ud-card-v tabular-nums">' + v + '</div>' +
-        (s ? '<div class="ud-card-s">' + s + '</div>' : '') + '<div class="ud-card-l">' + l + '</div></div>';
+    function row(l, v, ac, s) {
+      return '<div class="ud-fact"><span class="fdot" style="background:' + (C[ac] || C.gray) + '"></span><span class="fl">' + l + '</span><span class="fv">' + v + (s ? '<span class="fs">' + s + '</span>' : '') + '</span></div>';
     }
-    var out = '';
-    out += card(days.length + ' 天', '活跃天数', 'blue');
-    out += card(cur + ' 天', '连续活跃', 'blue', '最长 ' + longest + ' 天');
-    out += card(peak ? peak.slice(5) : '–', '峰值日', 'purple', peak ? fmt(peakV) + ' token' : '');
-    out += card(hit + '%', '缓存命中率', 'green', '缓存读 ' + fmt(a.ca) + ' token');
-    out += card(fmt(a.ca + a.ccw), '缓存量（读+写）', 'green');
-    out += card(D.todos && D.todos[1] > 0 ? N(D.todos[0]) + '/' + D.todos[1] : '–', '任务完成', 'green',
-      D.todos && D.todos[1] > 0 ? Math.round(N(D.todos[0]) / D.todos[1] * 100) + '% 完成' : '');
-    out += card(D.stability ? fmtI(D.stability[0]) + ' / ' + fmtI(D.stability[1]) : '–', '重试 / 取消', 'yellow');
-    out += card(a.req ? (a.dur / a.req / 1000).toFixed(1) + ' s' : '–', '平均耗时', 'blue');
-    out += card(fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub), '主会话 / 子代理', 'purple', fmtI(a.req - a.sub) + ' 主 · ' + fmtI(a.sub) + ' 子代理');
+    var items = [];
+    items.push(row('活跃天数', days.length + ' 天', 'blue'));
+    items.push(row('连续活跃', cur + ' 天', 'blue', '最长 ' + longest));
+    if (peak) items.push(row('峰值日', peak.slice(5), 'purple', fmt(peakV) + ' tok'));
+    items.push(row('缓存命中率', hit + '%', 'green', '读 ' + fmt(a.ca)));
+    if (a.ca + a.ccw > 0) items.push(row('缓存量（读+写）', fmt(a.ca + a.ccw), 'green'));
+    if (D.todos && D.todos[1] > 0) items.push(row('任务完成', N(D.todos[0]) + '/' + D.todos[1], 'green', Math.round(N(D.todos[0]) / D.todos[1] * 100) + '%'));
+    if (D.stability) items.push(row('重试 / 取消', fmtI(D.stability[0]) + ' / ' + fmtI(D.stability[1]), 'yellow'));
+    if (a.req) items.push(row('平均耗时', (a.dur / a.req / 1000).toFixed(1) + ' s', 'blue'));
+    if (a.sub) items.push(row('主会话 / 子代理', fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub), 'purple'));
     if (D.hours) {
       var pk = -1, pv2 = -1;
       for (var hh = 0; hh < 24; hh++) { var kk2 = (hh < 10 ? '0' : '') + hh; var c2 = N(D.hours[kk2]); if (c2 > pv2) { pv2 = c2; pk = hh; } }
-      if (pk >= 0) out += card(pk + ' 点', '峰值时段', 'blue', fmtI(pv2) + ' 次请求');
+      if (pk >= 0) items.push(row('峰值时段', pk + ' 点', 'blue', fmtI(pv2) + ' 次'));
     }
-    if (D.disk && D.disk.logs) out += card(fmtMB(D.disk.logs), '数据体量', 'gray', '导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db));
+    if (D.disk && D.disk.logs) items.push(row('数据体量', fmtMB(D.disk.logs), 'gray', '导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db)));
     var totalCost = 0, anyCost = false, unpricedTok = 0;
     rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } else unpricedTok += N(r[4]) + N(r[5]); });
     if (anyCost) {
       var aTok = a.inn + a.out;
-      out += card(fmtCost(totalCost), '折算成本（API 牌价）', 'gold', unpricedTok > 0 && aTok ? '未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : '');
+      items.push(row('折算成本（API 牌价）', fmtCost(totalCost), 'gold', unpricedTok > 0 && aTok ? '未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : ''));
     }
-    // 浪费取证：失败/取消请求白耗的 token（本地口径，CLI 详单见 usage.sh waste）
-    (function () {
-      var wReq = 0, wTok = 0;
-      rows.forEach(function (r) { if (r[8] === 1 || r[8] === 2) { wReq++; wTok += N(r[4]) + N(r[5]); } });
-      if (wReq > 0) out += card(fmt(wTok) + ' token', '浪费取证', 'red', fmtI(wReq) + ' 次失败/取消');
-    })();
-    // 本地预算：日 / 30 天折算金额进度（价格/预算对话框里设置）
+    // 本地预算：整宽行 + 进度条（日 / 30 天）
     if (st.budget && (N(st.budget.daily) > 0 || N(st.budget.monthly) > 0)) {
       var nowD = new Date();
       var dayStart = new Date(nowD.toDateString()).getTime();
@@ -610,43 +652,55 @@ function __usageBoot(D) {
       var dayCost = 0, mCost = 0;
       rows.forEach(function (r) { var c = rowCost(r); if (c == null) return; if (r[1] >= dayStart) dayCost += c; if (r[1] >= mStart) mCost += c; });
       var bd = N(st.budget.daily), bm = N(st.budget.monthly);
-      function budgetCard(v, tot, pd, l) {
-        return '<div class="ud-card" style="--ac:' + C.gold + '"><div class="ud-card-v tabular-nums">' + v +
-          ' <span class="ud-card-s">/ ' + fmtCost(tot) + '</span></div>' +
-          '<div class="ud-budget-bar' + (pd >= 100 ? ' ud-over' : '') + '"><i style="width:' + pd + '%"></i></div>' +
-          '<div class="ud-card-l">' + l + '</div></div>';
+      function budgetRow(l, v, tot, pd) {
+        return '<div class="ud-fact ud-wide"><span class="fdot" style="background:' + C.gold + '"></span><span class="fl">' + l + '</span>' +
+          '<span class="ud-budget-bar' + (pd >= 100 ? ' ud-over' : '') + '"><i style="width:' + Math.min(100, pd) + '%"></i></span>' +
+          '<span class="fv">' + v + '<span class="fs">/ ' + fmtCost(tot) + ' · ' + pd + '%</span></span></div>';
       }
-      if (bd > 0) out += budgetCard(fmtCost(dayCost), bd, Math.min(100, Math.round(dayCost / bd * 100)), '今日折算 / 日预算');
-      if (bm > 0) out += budgetCard(fmtCost(mCost), bm, Math.min(100, Math.round(mCost / bm * 100)), '本月折算 / 月预算');
+      if (bd > 0) items.push(budgetRow('今日折算 / 日预算', fmtCost(dayCost), bd, Math.min(100, Math.round(dayCost / bd * 100))));
+      if (bm > 0) items.push(budgetRow('本月折算 / 月预算', fmtCost(mCost), bm, Math.min(100, Math.round(mCost / bm * 100))));
     }
-    $('ud-insights').innerHTML = out;
+    // 浪费取证：失败/取消请求白耗的 token
+    (function () {
+      var wReq = 0, wTok = 0;
+      rows.forEach(function (r) { if (r[8] === 1 || r[8] === 2) { wReq++; wTok += N(r[4]) + N(r[5]); } });
+      if (wReq > 0) items.push(row('浪费取证', fmt(wTok) + ' tok', 'red', fmtI(wReq) + ' 次失败/取消'));
+    })();
+    var host = $('ud-insights');
+    host.innerHTML = items.join('');
+    // 降噪：默认只展示前 6 项，其余折叠进「展开全部」
+    host.classList.toggle('ud-collapsed', !insightsOpen && items.length > 6);
+    var more = $('ud-insights-more');
+    more.hidden = items.length <= 6;
+    if (items.length > 6) {
+      more.innerHTML = '<button type="button" class="btn">' + (insightsOpen ? '收起洞察' : '展开全部 ' + items.length + ' 项') + '</button>';
+    }
   }
 
-  // 健康度卡片：性能与稳定性体检（全部本地聚合）
+  // 健康度体检：性能与稳定性紧凑行（全部本地聚合）
   function renderHealth(rows) {
     var host = $('ud-health');
     if (!host) return;
     var a = agg(rows);
     var CB = { blue: 'var(--blue)', green: 'var(--green)', yellow: 'var(--yellow)', red: 'var(--red)', purple: '#8b5cf6', gray: 'var(--muted-foreground)' };
-    function hcard(v, l, ac, s) {
-      return '<div class="ud-card" style="--ac:' + (CB[ac] || CB.gray) + '"><div class="ud-card-v tabular-nums">' + v + '</div>' +
-        (s ? '<div class="ud-card-s">' + s + '</div>' : '') + '<div class="ud-card-l">' + l + '</div></div>';
+    function hrow(l, v, ac, s) {
+      return '<div class="ud-fact"><span class="fdot" style="background:' + (CB[ac] || CB.gray) + '"></span><span class="fl">' + l + '</span><span class="fv">' + v + (s ? '<span class="fs">' + s + '</span>' : '') + '</span></div>';
     }
     var out = '';
     var ttft = 0, tn = 0, genTok = 0, genMs = 0;
     rows.forEach(function (r) { var t = N(r[11]); if (t > 0) { ttft += t; tn++; } var d = N(r[7]) - t; if (d > 0) { genMs += d; genTok += N(r[5]); } });
-    if (tn) out += hcard((ttft / tn / 1000).toFixed(2) + ' s', '平均首字', 'yellow', '到首个 token 的延迟');
-    if (genMs > 0) out += hcard(fmtI(Math.round(genTok / (genMs / 1000))) + ' tok/s', '生成速率', 'blue');
+    if (tn) out += hrow('平均首字', (ttft / tn / 1000).toFixed(2) + ' s', 'yellow', '首个 token 延迟');
+    if (genMs > 0) out += hrow('生成速率', fmtI(Math.round(genTok / (genMs / 1000))) + ' tok/s', 'blue');
     if (D.stability && a) {
       var errPct = a.req ? Math.round(D.stability[2] / a.req * 1000) / 10 : 0;
-      out += hcard(errPct + '%', '错误率', 'red', '失败请求 / 全部请求');
+      out += hrow('错误率', errPct + '%', 'red', '失败 / 全部');
     }
     var peakCtx = 0;
     (D.compactions || []).forEach(function (c) { if (N(c[2]) > peakCtx) peakCtx = N(c[2]); });
-    if (peakCtx > 0) out += hcard(fmt(peakCtx), '峰值上下文', 'purple', '压缩前最高 token');
+    if (peakCtx > 0) out += hrow('峰值上下文', fmt(peakCtx), 'purple', '压缩前最高');
     var toolMs = 0, toolC = 0;
     (D.sessionTools || []).forEach(function (t) { toolC += N(t[2]); toolMs += N(t[3]); });
-    if (toolC) out += hcard(fmtI(toolC) + ' 次', '工具调用', 'gray', '累计 ' + (toolMs / 1000).toFixed(0) + ' s');
+    if (toolC) out += hrow('工具调用', fmtI(toolC) + ' 次', 'gray', '累计 ' + (toolMs / 1000).toFixed(0) + ' s');
     host.innerHTML = out;
   }
 
@@ -1753,6 +1807,10 @@ function __usageBoot(D) {
     }).catch(function () {});
   }
   $('ud-tab-trend').addEventListener('click', function () { requestAnimationFrame(drawTrend); });
+  $('ud-insights-more').addEventListener('click', function () {
+    insightsOpen = !insightsOpen;
+    apply(); // 重渲染洞察区并保持其他视图一致
+  });
   if (typeof ResizeObserver === 'function') {
     new ResizeObserver(function () { drawTrend(); }).observe($('ud-trend-chart'));
     new ResizeObserver(function () {
@@ -1813,7 +1871,7 @@ if (window.__USAGE_DATA_URL__) {
     if (!text) { el.hidden = true; return; }
     var d = new Date();
     var p2 = function (n) { return n < 10 ? '0' + n : '' + n; };
-    el.innerHTML = '<span>⏱</span><span>' + text.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }) +
+    el.innerHTML = '<span>' + text.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }) +
       '</span><span class="ud-turn-t">' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ' 更新</span>';
     el.hidden = false;
   }

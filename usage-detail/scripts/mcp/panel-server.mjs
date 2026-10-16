@@ -315,7 +315,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.15.2' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.16.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
