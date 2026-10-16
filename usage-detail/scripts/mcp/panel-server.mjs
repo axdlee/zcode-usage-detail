@@ -315,7 +315,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.15.1' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.15.2' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -537,6 +537,12 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'usage_prices_sync',
+    description: '从 models.dev 同步官方模型价格表（可选联网动作，App-only 不经模型）。完成后返回同步摘要；页面随后按新价重算。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  {
     name: 'usage_detail',
     description: 'ZCode 本地请求明细分页（每行：时间/模型/来源/输入/生成/缓存读/缓存写/耗时ms/首字ms/状态/会话）。status: 0 完成 1 失败 2 取消 3 进行中，缺省全部。',
     inputSchema: {
@@ -675,6 +681,20 @@ function handleToolCall(name, args) {
   }
   if (name === 'open_full_panel') {
     return ensureServe().then((r) => ({ structuredContent: r, content: [{ type: 'text', text: r.url + (r.started ? '（已启动）' : '（已在运行）') }] }));
+  }
+  if (name === 'usage_prices_sync') {
+    // 联网同步 models.dev 价格表（与 serve /api/sync-prices、usage.sh prices sync 同一实现）
+    return new Promise((resolve) => {
+      execFile('bash', [USAGE_SH, 'prices', 'sync'], { timeout: 90000, env: process.env }, (err, stdout) => {
+        if (err) {
+          resolve({ isError: true, content: [{ type: 'text', text: '同步失败：' + ((err.message || err) + '').slice(0, 300) }] });
+          return;
+        }
+        dashCache.html = null; // 新价生效：面板下次取资源时按新价重算
+        const msg = String(stdout || '').trim().split('\n').pop() || '已同步';
+        resolve({ structuredContent: { ok: true, prices: slimPrices(''), message: msg }, content: [{ type: 'text', text: msg }] });
+      });
+    });
   }
   return { isError: true, content: [{ type: 'text', text: '未知工具：' + name }] };
 }

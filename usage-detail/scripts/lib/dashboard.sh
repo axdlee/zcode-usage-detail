@@ -184,7 +184,7 @@ UD_HEAD
   <label class="form-check form-switch" id="ud-cost-wrap" hidden><input type="checkbox" class="form-check-input" id="ud-f-cost"><span class="form-check-label text-small">折算成本（API 牌价）</span></label>
   <button type="button" class="btn" id="ud-price-sync" style="margin:0;padding:2px 10px;font-size:12px">同步价格</button>
   <button type="button" class="btn" id="ud-price-mgr" style="margin:0;padding:2px 10px;font-size:12px">设置</button>
-  <button type="button" class="btn" id="ud-export-report" hidden style="margin:0;padding:2px 10px;font-size:12px">导出报表</button>
+  <button type="button" class="btn" id="ud-export-report" style="margin:0;padding:2px 10px;font-size:12px">导出报表</button>
   <span class="text-small text-muted" id="ud-meta"></span>
 </div>
 <div id="ud-mgr-mask" hidden>
@@ -243,8 +243,8 @@ UD_HEAD
   <div style="display:flex;justify-content:space-between;align-items:center">
     <h3 style="margin-bottom:0">活跃热力图</h3>
     <div class="viz-row" role="group" aria-label="热力图粒度" id="ud-heat-toggle">
-      <button type="button" class="ud-toggle" data-hm="hour" aria-pressed="false">小时</button>
-      <button type="button" class="ud-toggle" data-hm="day" aria-pressed="true">每日</button>
+      <button type="button" class="ud-toggle" data-hm="hour" aria-pressed="true">小时</button>
+      <button type="button" class="ud-toggle" data-hm="day" aria-pressed="false">每日</button>
       <button type="button" class="ud-toggle" data-hm="week" aria-pressed="false">每周</button>
       <button type="button" class="ud-toggle" data-hm="month" aria-pressed="false">月历</button>
     </div>
@@ -467,7 +467,7 @@ function __usageBoot(D) {
   var st = { p: -1, m: -1, s: -1, rng: 'today', day: null, hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
-  var heatMode = 'day', heatLastW = -1, sessExp = -1, detExp = -1;
+  var heatMode = 'hour', heatLastW = -1, sessExp = -1, detExp = -1;
 
   function cutOf() {
     if (st.rng === 'all') return 0;
@@ -805,12 +805,9 @@ function __usageBoot(D) {
     }
     if (heatMode === 'hour') {
       // 近 7 天 × 24 小时矩阵：行=天、列=小时，悬停看该小时请求/token
-      var d7 = {};
-      rows.forEach(function (r) {
-        var k = dayKey(r[1]);
-        d7[k] = 1;
-      });
-      var dayKeys7 = Object.keys(d7).sort().slice(-7);
+      // 近 7 天 = 今天回推 7 个自然日（不从数据取日期，停用日也要成行）
+      var dayKeys7 = [];
+      for (var di7 = 6; di7 >= 0; di7--) dayKeys7.push(dayKey(Date.now() - di7 * 86400000));
       var daySet = {};
       dayKeys7.forEach(function (k) { daySet[k] = 1; });
       var cells7 = dayKeys7.map(function (k) { var arr = []; for (var i = 0; i < 24; i++) arr.push({ tok: 0, req: 0 }); return { k: k, h: arr }; });
@@ -1497,13 +1494,20 @@ function __usageBoot(D) {
       fetch('/api/sync-prices', { method: 'POST' }).then(function () { location.reload(); }).catch(function () {
         btn.textContent = '同步失败'; btn.disabled = false;
       });
-    } else if (window.zcode && window.zcode.sendFollowUpMessage) {
-      window.zcode.sendFollowUpMessage({ prompt: '请运行 /usage prices sync 从 models.dev 同步官方价格表，完成后用 /usage-ui 重新生成用量仪表盘', title: '同步官方价格表' });
-      btn.textContent = '已请求同步';
-      setTimeout(function () { btn.textContent = '同步价格'; btn.disabled = false; }, 3000);
+      return;
+    }
+    var zc = window.zcode || null;
+    var reset = function (t) { btn.textContent = t; setTimeout(function () { btn.textContent = '同步价格'; btn.disabled = false; }, 3000); };
+    if (zc && typeof zc.callTool === 'function') {
+      // 直调 App-only 同步工具（后台 execFile prices sync，约数秒），完成后按新价软刷新
+      zc.callTool('usage_prices_sync', {}).then(function (r) {
+        var sc = (r && r.structuredContent) || {};
+        if (sc.ok && sc.prices) { mgrState.prices = sc.prices; softReloadPrices(sc.prices); reset('已同步'); }
+        else if (r && r.isError) { reset('同步失败'); }
+        else reset('已同步');
+      }).catch(function () { reset('同步失败'); });
     } else {
-      btn.textContent = '当前环境不支持';
-      setTimeout(function () { btn.textContent = '同步价格'; btn.disabled = false; }, 3000);
+      reset('当前环境不支持');
     }
   });
   // ---- 价格 / 预算管理（serve 模式可编辑并即时重算；其他环境只读引导） ----
@@ -1712,10 +1716,27 @@ function __usageBoot(D) {
   }
   $('ud-mgr-close').addEventListener('click', function () { $('ud-mgr-mask').hidden = true; });
   $('ud-mgr-mask').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
-  if (window.__USAGE_SERVE__) $('ud-export-report').hidden = false;
+  $('ud-export-report').hidden = false;
   $('ud-export-report').addEventListener('click', function () {
-    if (!window.__USAGE_SERVE__) return; // 侧栏禁止页面级导航（宿主会判面板崩溃）
-    location.href = '/report.html';
+    var btn = this;
+    if (window.__USAGE_SERVE__) { location.href = '/report.html'; return; }
+    // 侧栏（MCP App）禁止页面级导航（宿主会报 App page stopped）：
+    // 确保本地 serve 面板运行后，交系统浏览器下载报表（Content-Disposition 附件）。
+    btn.disabled = true;
+    btn.textContent = '准备中…';
+    var zc = window.zcode || null;
+    var done = function () { setTimeout(function () { btn.disabled = false; btn.textContent = '导出报表'; }, 2500); };
+    var call = (zc && typeof zc.callTool === 'function')
+      ? Promise.resolve(zc.callTool('open_full_panel', {}))
+      : Promise.reject(new Error('no-calltool'));
+    call.then(function (r) {
+      var base = ((r && r.structuredContent && r.structuredContent.url) || 'http://127.0.0.1:7741').replace(/\/$/, '');
+      if (!(zc && typeof zc.openExternal === 'function')) { btn.textContent = '当前环境不支持导出'; return; }
+      zc.openExternal({ href: base + '/report.html' });
+      btn.textContent = '已交浏览器下载';
+    }).catch(function () {
+      btn.textContent = '导出失败（需本地面板）';
+    }).then(done, done);
   });
   // 官方配额（可选）：配置 API Key 后 serve 模式显示官方口径配额卡
   if (window.__USAGE_SERVE__) {

@@ -163,7 +163,7 @@ class ServerPanelTest(unittest.TestCase):
         by_id = {m.get("id"): m for m in msgs if m.get("id")}
         caps = by_id[1]["result"]["capabilities"]
         self.assertTrue(caps["resources"]["subscribe"])
-        self.assertEqual(len(by_id[2]["result"]["tools"]), 9)  # 7 数据工具 + settings_get/set
+        self.assertEqual(len(by_id[2]["result"]["tools"]), 10)  # 7 数据工具 + settings_get/set + open_full_panel + prices_sync
         uris = [r["uri"] for r in by_id[3]["result"]["resources"]]
         self.assertIn("ui://usage-detail/panel.html", uris)
         self.assertIn("ui://usage-detail/turn.txt", uris)
@@ -252,6 +252,27 @@ class ServerPanelTest(unittest.TestCase):
         self.assertTrue(sc["ok"])
         self.assertIn("Model-A", sc["prices"]["models"])  # 保存响应带瘦身表，面板据此软刷新
         self.assertTrue(sc["prices"]["modelsSlim"])
+
+    def test_16b_prices_sync_error_path(self):
+        # PATH 不可用 → prices sync 无法启动 → 工具返回 isError（离线可测，不访问 models.dev）
+        import shutil
+        node = shutil.which("node")  # 先在正常 PATH 下解析，随后给子进程一个不可用的 PATH
+        env = dict(self.env)
+        env["PATH"] = "/nonexistent"
+        proc = subprocess.Popen(
+            [node, str(PLUGIN / "scripts/mcp/panel-server.mjs")], env=env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        out, _ = proc.communicate("\n".join([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                        "params": {"name": "usage_prices_sync", "arguments": {}}}),
+        ]) + "\n", timeout=60)
+        proc.wait()
+        by_id = {m.get("id"): m for m in (json.loads(l) for l in out.splitlines() if l.strip()) if m.get("id")}
+        r = by_id[2]["result"]
+        self.assertTrue(r.get("isError"))
+        self.assertIn("同步失败", r["content"][0]["text"])
 
     def test_17_panel_shell_serve_flag(self):
         # 侧栏壳必须显式声明非 serve 环境：dashboard 片段里的保存/导出分支据此避免页面级导航
