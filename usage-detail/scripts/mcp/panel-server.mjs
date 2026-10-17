@@ -310,7 +310,8 @@ function buildSummary() {
     windowEstimate,
     daily, hours, tools, failures, states,
     disk: D.disk || {},
-    serveUrl: 'http://127.0.0.1:7741',
+    // 常驻面板实际地址：端口可能已顺延（usage-serve.json 是 serve 写下的事实源）
+    serveUrl: (() => { const m = servePidFile(); return 'http://127.0.0.1:' + (m && m.port ? m.port : 7741); })(),
   };
 }
 
@@ -333,7 +334,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.22.3' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.22.4' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -660,9 +661,14 @@ import { spawn } from 'node:child_process';
 let PLUGIN_VERSION = 'unknown';
 try { PLUGIN_VERSION = JSON.parse(fs.readFileSync(path.join(HERE, '..', '..', '.zcode-plugin', 'plugin.json'), 'utf8')).version || 'unknown'; } catch (e) {}
 
-function serveRunning() {
+const SERVE_PID_FILE = path.join(os.homedir(), '.zcode', 'usage-serve.json');
+function servePidFile() {
+  try { return JSON.parse(fs.readFileSync(SERVE_PID_FILE, 'utf8')); } catch (e) { return null; }
+}
+
+function serveRunning(port) {
   return new Promise((resolve) => {
-    const req = http2.get('http://127.0.0.1:7741/api/live', { timeout: 1200 }, (res) => {
+    const req = http2.get(`http://127.0.0.1:${port}/api/live`, { timeout: 1200 }, (res) => {
       let b = '';
       res.on('data', (c) => { b += c; });
       res.on('end', () => {
@@ -680,8 +686,8 @@ function serveRunning() {
 // 旧版本常驻 serve 缺新路由（如 /report.html、/api/turn）会 404：按 pid 文件重启它
 function killStaleServe() {
   try {
-    const meta = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-serve.json'), 'utf8'));
-    if (!meta.pid || (meta.port && meta.port !== 7741)) return;
+    const meta = servePidFile();
+    if (!meta || !meta.pid) return; // pid+进程名校验已防误杀；端口不限（支持顺延端口上的旧实例）
     if (process.platform === 'win32') {
       // Windows 无 ps：tasklist 校验映像名后 taskkill（防 pid 被无关进程复用误杀）
       const img = execFileSync('tasklist', ['/FI', `PID eq ${meta.pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
@@ -697,23 +703,38 @@ function killStaleServe() {
   } catch (e) {}
 }
 
+// 端口策略与 serve.mjs 对齐：默认 7741；被占时 serve 自动顺延 7742-7749 并把实际端口
+// 写进 usage-serve.json——这里以该文件为事实源返回真实地址，不再假设固定 7741
 async function ensureServe() {
-  const cur = await serveRunning();
+  const known = servePidFile();
+  const knownPort = known && known.port ? Number(known.port) : 7741;
+  const cur = await serveRunning(knownPort);
   if (cur.ok) {
-    if (cur.v === PLUGIN_VERSION) return { url: 'http://127.0.0.1:7741', started: false };
+    if (cur.v === PLUGIN_VERSION) return { url: `http://127.0.0.1:${knownPort}`, started: false };
     killStaleServe();
     for (let i = 0; i < 12; i++) {
       await new Promise((r) => setTimeout(r, 300));
-      if (!(await serveRunning()).ok) break;
+      if (!(await serveRunning(knownPort)).ok) break;
     }
+  } else if (knownPort !== 7741 && (await serveRunning(7741)).ok) {
+    // pid 文件丢失但默认端口上有活实例：跟随实际
+    const r = await serveRunning(7741);
+    if (r.ok && r.v === PLUGIN_VERSION) return { url: 'http://127.0.0.1:7741', started: false };
   }
-  const child = spawn('node', [path.join(HERE, '..', 'serve.mjs'), '7741'], { detached: true, stdio: 'ignore' });
+  // 不传端口启动：serve 在 7741 被占时自行顺延并回写 usage-serve.json
+  const child = spawn('node', [path.join(HERE, '..', 'serve.mjs')], { detached: true, stdio: 'ignore' });
   child.unref();
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 400));
-    if (await serveRunning().then((r) => r.ok)) return { url: 'http://127.0.0.1:7741', started: true };
+    const meta = servePidFile();
+    const p = meta && meta.port ? Number(meta.port) : 7741;
+    const r = await serveRunning(p);
+    if (r.ok) {
+      if (r.v === PLUGIN_VERSION) return { url: `http://127.0.0.1:${p}`, started: true };
+      // 起来的是旧版本（理论上刚被 kill 过）：按旧路径继续等/报错
+    }
   }
-  return { url: 'http://127.0.0.1:7741', started: false, error: '启动超时，可手动运行 usage.sh serve' };
+  return { url: `http://127.0.0.1:${knownPort}`, started: false, error: '启动超时，可手动运行 usage.sh serve' };
 }
 
 let quotaToolCache = { at: 0, v: null };

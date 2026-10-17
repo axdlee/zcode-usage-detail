@@ -78,6 +78,40 @@ class ServerPanelTest(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertIn("本轮用量", j["text"])
 
+    def test_04a_port_shift_on_busy(self):
+        # 7741 被占时 serve 自动顺延 7742+ 并把实际端口写进 usage-serve.json（退避策略）。
+        # 7741 是全局资源：已被占用（如日常 serve 在跑）则跳过，避免干扰真实环境。
+        import socket
+        probe = socket.socket()
+        busy = probe.connect_ex(("127.0.0.1", 7741)) == 0
+        probe.close()
+        if busy:
+            self.skipTest("7741 已被占用，跳过顺延测试")
+        holder = socket.socket()
+        holder.bind(("127.0.0.1", 7741))
+        holder.listen(1)
+        pidfile = self.home.zcode_path("usage-serve.json")
+        backup = pidfile.read_text() if pidfile.exists() else None  # 类夹具 serve 的记录，测后还原
+        try:
+            proc = subprocess.Popen(["node", str(PLUGIN / "scripts/serve.mjs")],
+                                    env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            shifted = None
+            for _ in range(40):
+                time.sleep(0.3)
+                if pidfile.exists():
+                    meta = json.loads(pidfile.read_text())
+                    if meta.get("port") not in (7741, None):
+                        shifted = meta["port"]
+                        break
+            self.assertEqual(shifted, 7742, "应顺延到 7742")
+            with urllib.request.urlopen("http://127.0.0.1:7742/api/live", timeout=3) as r:
+                self.assertEqual(r.status, 200)
+            proc.terminate()
+        finally:
+            holder.close()
+            if backup is not None:
+                pidfile.write_text(backup)
+
     def test_04_switches_roundtrip(self):
         st, before = self.post("/api/switches", {})
         st, after = self.post("/api/switches", {"permissionAlerts": True, "turnstats": "notify"})

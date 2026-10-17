@@ -556,10 +556,29 @@ const server = http.createServer(async function (req, res) {
   }
 });
 
+// 端口策略：默认端口被占（EADDRINUSE）自动顺延 7742-7749，实际端口写入 usage-serve.json
+// （panel-server 的 open_full_panel 以该文件为准返回真实地址）；用户显式指定端口被占则报错退出
+const PORT_BASE = port === 7741; // 未显式指定时 argv[2] 缺省回退 7741
+let listenPort = port;
+server.on('error', function (e) {
+  if (e && e.code === 'EADDRINUSE') {
+    if (PORT_BASE && listenPort < 7749) {
+      listenPort++;
+      server.listen(listenPort, '127.0.0.1');
+      return;
+    }
+    console.error(PORT_BASE
+      ? '7741-7749 端口均被占用，无法启动本地面板'
+      : `端口 ${port} 已被占用（你显式指定了该端口），换一个端口再试：usage.sh serve <端口>`);
+    process.exit(1);
+  }
+  throw e;
+});
+
 server.listen(port, '127.0.0.1', function () {
-  const url = 'http://127.0.0.1:' + port;
-  console.log('ZCode 用量面板已启动：' + url + '  （Ctrl-C 退出，仅监听本机，v' + PLUGIN_VERSION + '）');
-  try { fs.writeFileSync(path.join(os.homedir(), '.zcode', 'usage-serve.json'), JSON.stringify({ pid: process.pid, version: PLUGIN_VERSION, port })); } catch (e) {}
+  const url = 'http://127.0.0.1:' + listenPort;
+  console.log('ZCode 用量面板已启动：' + url + (listenPort !== port ? `（${port} 被占，已顺延）` : '') + '  （Ctrl-C 退出，仅监听本机，v' + PLUGIN_VERSION + '）');
+  try { fs.writeFileSync(path.join(os.homedir(), '.zcode', 'usage-serve.json'), JSON.stringify({ pid: process.pid, version: PLUGIN_VERSION, port: listenPort })); } catch (e) {}
   setInterval(budgetWatchTick, 60000).unref(); // 预算/燃烧告警：每分钟检查，当日每档最多提醒一次
   if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
   else if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();

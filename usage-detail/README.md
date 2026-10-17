@@ -15,6 +15,7 @@ Per-request usage analytics for ZCode, entirely local: every model request is on
 - **BYOK provider display names**: custom providers (provider_id is often `new-provider`) are shown under the name you set in `provider_config.json` (e.g. `hub-linuxdo`). Only the name mapping is read — API keys in that file are never read or sent anywhere (0.22.0)
 - **Model name normalization**: the same model stored in mixed-case variants (`GLM-5.3-Flash` / `glm-5.3-flash`) merges into one row / one filter option, displayed under the most-used variant (0.22.0)
 - **Billing windows (approximate)**: local 5-hour split (same rule as ccusage blocks) with the last 8 windows as bars; the active window shows a full-window token projection.
+- **Port adaptive**: the local panel defaults to 7741; when occupied it shifts to 7742-7749 automatically (logs and the "open panel" entry always point at the real port), while an explicitly requested busy port fails with a clear error (0.22.4)
 - **Statusline one-liner**: `usage.sh statusline` prints "today tokens · cost · burn rate · budget %" for tmux / SwiftBar.
 - **Polished motion**: KPI count-up, tab fade, pulsing live banner, heatmap hover outline - all respecting reduced-motion.
 
