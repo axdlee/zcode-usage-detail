@@ -144,7 +144,7 @@ cmd_dashboard() {
 #usage-dashboard .ud-fact{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--ud-soft);font-size:12.5px;min-width:0;}
 #usage-dashboard .ud-fact .fdot{width:7px;height:7px;border-radius:2px;flex:none;}
 #usage-dashboard .ud-fact .fl{flex:1;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#usage-dashboard .ud-fact .fv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;max-width:62%;overflow:hidden;text-overflow:ellipsis;}
+#usage-dashboard .ud-fact .fv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;max-width:70%;overflow:hidden;text-overflow:ellipsis;}
 #usage-dashboard .ud-fact .fs{font-size:11px;color:var(--muted-foreground);font-weight:400;margin-left:5px;}
 #usage-dashboard .ud-fact.ud-wide{grid-column:1/-1;flex-wrap:wrap;}
 #usage-dashboard .ud-collapsed .ud-fact:nth-child(n+7){display:none;}

@@ -4,7 +4,7 @@ Per-request usage analytics for ZCode, entirely local: every model request is on
 
 中文文档：[README_CN.md](./README_CN.md)
 
-![demo](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-overview.png)
+![demo](https://raw.githubusercontent.com/axdlee/zcode-usage-detail/main/screenshots/dashboard-overview-dark.png)
 
 ## Features
 
