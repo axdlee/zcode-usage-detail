@@ -18,7 +18,7 @@
 
 ## 功能
 
-> **平台支持**：macOS 完整支持；Windows 与 Linux 支持全部核心能力（侧栏面板 / MCP / 钩子 / 仪表盘 / CLI）——CLI 依赖 bash（Windows 用 Git Bash；服务未在 PATH 找到 bash.exe 时自动探测 Git for Windows 常见安装位置，也可用 `ZCODE_BASH` 环境变量指定）、无 sqlite3 时自动走 node 替身（含 readfile 与 CSV 导出）与 Node ≥ 22.13（ZCode 自带）；系统通知按平台原生通道（osascript / WinRT toast / notify-send），不可用时静默。配置文件（价格表/开关/凭据）带 UTF-8 BOM 也能正常读取；本地写入在文件被占用时自动重试兜底（0.22.1）。
+> **平台支持**：macOS 完整支持；Windows 与 Linux 支持全部核心能力（侧栏面板 / MCP / 钩子 / 仪表盘 / CLI）——CLI 依赖 bash（Windows 用 Git Bash；服务未在 PATH 找到 bash.exe 时自动探测 Git for Windows 常见安装位置，也可用 `ZCODE_BASH` 环境变量指定）、无 sqlite3 时自动走 node 替身（含 readfile 与 CSV 导出）与 Node ≥ 22.13（ZCode 自带）；系统通知按平台原生通道（osascript / WinRT toast / notify-send），不可用时静默；macOS 通知归因到运行中的 ZCode（显示 ZCode 图标而非「脚本编辑器」卷轴），ZCode 未运行时回退系统默认（0.22.2）。配置文件（价格表/开关/凭据）带 UTF-8 BOM 也能正常读取；本地写入在文件被占用时自动重试兜底（0.22.1）。
 
 - **燃烧率与节奏**：近 1h tok/min + 折算金额常驻洞察前排，按近 7 天日均给出「放缓 / 平稳 / 加速」节奏标记
 - **项目用量页签**：按项目聚合（会话数 / 请求 / token / 近 7 天 sparkline），点击项目行筛选会话表。项目取**真实 git 仓库根**：在子目录 / 孙目录里开的会话自动归并到所在项目，不再出现深层目录冒充项目名；目录已删、非 git 仓库或未安装 git（Windows 常见）时退化为按原目录分组（0.22.0）

@@ -9,8 +9,14 @@ if (!msg) process.exit(0);
 try {
   if (process.platform === 'darwin') {
     const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    spawn('osascript', ['-e', `display notification "${esc(msg)}" with title "${esc(title)}" subtitle "${esc(subtitle)}"`],
-      { detached: true, stdio: 'ignore' }).unref();
+    // 通知归因 ZCode.app：display notification 默认归属「脚本编辑器」（卷轴图标，观感差）；
+    // 经 ZCode 转发后显示 ZCode 图标。is running 判断不会拉起未运行的 app——
+    // 从 CLI/tmux 发通知时 ZCode 没开就回退系统默认归属。
+    const n = `display notification "${esc(msg)}" with title "${esc(title)}" subtitle "${esc(subtitle)}"`;
+    const script = 'if application id "dev.zcode.app" is running then\n' +
+      `  tell application id "dev.zcode.app" to ${n}\n` +
+      'else\n' + `  ${n}\n` + 'end if';
+    spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
   } else if (process.platform === 'win32') {
     // WinRT toast：PowerShell 5.1 起自带，无需任何模块；toast 归因到系统 PowerShell 应用
     const sq = (t) => String(t).replace(/'/g, "''");
