@@ -214,6 +214,10 @@ function clampLimit(v) {
 
 function dataJSON(limit) {
   limit = clampLimit(limit);
+  // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table
+  if (q("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
+    return { providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), prices: {}, total: 0, covered: 0, rows: [] };
+  }
   // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
   const pp = pricePath();
   const pfText = pp ? fs.readFileSync(pp, 'utf8') : null;

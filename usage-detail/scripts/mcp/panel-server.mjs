@@ -100,6 +100,10 @@ function dataJSON(limit) {
   else if (Number(limit) > 0) limit = Math.max(1, Math.min(20000, Number(limit)));
   if (metaCache.v && metaCache.v.limit === limit && Date.now() - metaCache.at < 15000) return metaCache.v.data;
   const disk = { logs: duMB(path.join(os.homedir(), '.zcode/v2/logs')), rollout: duMB(path.join(os.homedir(), '.zcode/cli/rollout')), artifacts: duMB(path.join(os.homedir(), '.zcode/cli/artifacts')), db: duMB(DB) };
+  // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table
+  if (q1("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
+    return { providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk, prices: {}, total: 0, covered: 0, rows: [] };
+  }
   const data = JSON.parse(q1(metaSQL(limit, disk)));
   metaCache = { at: Date.now(), v: { limit, data } };
   return data;
@@ -324,7 +328,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.20.1' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.21.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';

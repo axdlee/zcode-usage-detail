@@ -48,6 +48,10 @@ cmd_dashboard() {
     # turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
     turn_expr="NULL"
     [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"
+    # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
+    if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
+      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"prices":{},"total":0,"covered":0,"rows":[]}'
+    else
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
            P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM U)),
@@ -96,6 +100,7 @@ cmd_dashboard() {
                 LEFT JOIN S SI ON SI.v = R.session_id
                 LEFT JOIN M MI ON MI.v = R.model_id
                 LEFT JOIN P PI ON PI.v = R.provider_id)), '<', '\u003c');")
+    fi
     mkdir -p "$(dirname "$out")"
     {
       cat <<'UD_HEAD'
@@ -229,17 +234,32 @@ cmd_dashboard() {
 #usage-dashboard .ud-sec{margin-top:14px;}
 #usage-dashboard pre.ud-raw{font-size:11px;background:var(--muted);border-radius:8px;padding:8px 10px;overflow-x:auto;white-space:pre;}
 /* ===== 设置弹窗：毛玻璃遮罩 + 悬浮面板 + 吸顶标题 ===== */
-#usage-dashboard #ud-mgr-mask{position:fixed;inset:0;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;}
+#usage-dashboard #ud-mgr-mask{position:fixed;inset:0;background:rgba(8,10,14,.46);-webkit-backdrop-filter:blur(10px) saturate(1.1);backdrop-filter:blur(10px) saturate(1.1);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;animation:ud-fade-in .14s ease-out;}
 #usage-dashboard #ud-mgr-mask[hidden]{display:none;}
-#usage-dashboard .ud-mgr-panel{width:min(720px,96vw);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid var(--border);background:var(--card);box-shadow:0 16px 48px rgba(0,0,0,.22);}
-#usage-dashboard .ud-mgr-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid var(--ud-soft);background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}
-#usage-dashboard .ud-mgr-head h3{margin:0;font-size:14px;font-weight:650;}
-#usage-dashboard .ud-mgr-body{padding:14px 18px 18px;}
-#usage-dashboard .ud-mgr-t input{width:86px;padding:3px 8px;font-size:12px;border-radius:6px;}
-#usage-dashboard .ud-mgr-h{font-size:12.5px;font-weight:600;margin:18px 0 8px;padding-top:14px;border-top:1px solid var(--ud-soft);}
+@keyframes ud-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes ud-pop-in{from{opacity:0;transform:translateY(10px) scale(.975)}to{opacity:1;transform:none}}
+#usage-dashboard .ud-mgr-panel{width:min(760px,96vw);max-height:88vh;overflow:auto;border-radius:18px;border:1px solid color-mix(in srgb,var(--border) 80%,transparent);background:var(--card);box-shadow:0 24px 64px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.12);animation:ud-pop-in .18s cubic-bezier(.2,.8,.2,1);}
+#usage-dashboard .ud-mgr-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:14px 20px 12px;border-bottom:1px solid var(--ud-soft);background:color-mix(in srgb,var(--card) 88%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);}
+#usage-dashboard .ud-mgr-head h3{margin:0;font-size:15px;font-weight:700;letter-spacing:.01em;}
+#usage-dashboard .ud-mgr-close{width:30px;height:30px;border-radius:50%;border:1px solid transparent;background:var(--muted);color:var(--muted-foreground);font-size:15px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s,transform .12s;}
+#usage-dashboard .ud-mgr-close:hover{background:color-mix(in srgb,var(--foreground) 10%,transparent);color:var(--foreground);transform:scale(1.06);}
+#usage-dashboard .ud-mgr-body{padding:16px 20px 20px;}
+#usage-dashboard .ud-mgr-t input{width:86px;padding:4px 9px;font-size:12px;border-radius:8px;border-color:transparent;background:color-mix(in srgb,var(--muted) 55%,transparent);transition:border-color .12s,background .12s;}
+#usage-dashboard .ud-mgr-t input:hover,#usage-dashboard .ud-mgr-t input:focus{border-color:var(--ud-accent);background:var(--card);}
+#usage-dashboard .ud-mgr-t input:focus-visible{outline:2px solid color-mix(in srgb,var(--ud-accent) 45%,transparent);outline-offset:1px;}
+#usage-dashboard #ud-mgr-rows tr{transition:background .1s;}
+#usage-dashboard #ud-mgr-rows tbody tr:hover{background:color-mix(in srgb,var(--muted) 38%,transparent);}
+#usage-dashboard #ud-mgr-wrap thead th{position:sticky;top:0;z-index:1;background:var(--card);box-shadow:0 1px 0 var(--border);}
+#usage-dashboard .ud-mgr-act{margin:0;padding:2px 10px;font-size:12px;border-radius:7px;}
+#usage-dashboard .ud-mgr-act.ud-mgr-del:hover{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,transparent);}
+#usage-dashboard .ud-mgr-card{background:color-mix(in srgb,var(--muted) 34%,transparent);border:1px solid var(--ud-soft);border-radius:12px;padding:10px 12px;margin:6px 0 2px;}
+#usage-dashboard .ud-mgr-card .ud-sw-row{border-bottom:none;padding:5px 0;}
+#usage-dashboard .ud-mgr-h{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;margin:20px 0 8px;padding-top:16px;border-top:1px solid var(--ud-soft);}
+#usage-dashboard .ud-mgr-h::before{content:'';width:3px;height:12px;border-radius:2px;background:var(--ud-accent);opacity:.75;flex:none;}
 #usage-dashboard .ud-mgr-h:first-child{border-top:none;padding-top:0;margin-top:0;}
 #usage-dashboard .ud-mgr-sub{font-size:11.5px;color:var(--muted-foreground);margin:2px 0 8px;}
-#usage-dashboard .ud-sw-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--ud-soft);}
+#usage-dashboard .ud-sw-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--ud-soft);}
+#usage-dashboard .ud-sw-row>div:first-child{flex:1 1 220px;} /* 窄屏描述换行堆叠，控件不被挤成竖条 */
 #usage-dashboard .ud-sw-row:last-child{border-bottom:none;}
 #usage-dashboard .ud-sw-row .form-check{margin:0;flex:none;}
 </style>
@@ -271,8 +291,8 @@ UD_HEAD
 <div id="ud-mgr-mask" hidden>
   <div class="ud-mgr-panel" role="dialog" aria-label="价格与预算设置">
     <div class="ud-mgr-head">
-      <h3>设置</h3>
-      <button type="button" class="btn" id="ud-mgr-close" style="margin:0;padding:2px 12px;font-size:12px">关闭</button>
+      <div><h3 style="margin:0">设置</h3><div class="text-small text-muted" style="margin-top:1px">价格 · 预算 · 通知 · 厂商配额（全部本地存储）</div></div>
+      <button type="button" class="ud-mgr-close" id="ud-mgr-close" aria-label="关闭设置" title="关闭">✕</button>
     </div>
     <div class="ud-mgr-body" id="ud-mgr-body"></div>
   </div>
@@ -331,7 +351,7 @@ UD_HEAD
       <button type="button" class="ud-toggle" data-hm="month" aria-pressed="false">月历</button>
     </div>
   </div>
-  <div id="ud-heatmap"></div>
+  <div id="ud-heatmap" style="overflow-x:auto"></div>
 </div>
 <div id="ud-trend" role="tabpanel" aria-labelledby="ud-tab-trend" hidden>
   <div class="viz-row" role="group" aria-label="指标切换" id="ud-series-toggle">
@@ -819,9 +839,9 @@ function __usageBoot(D) {
     if (D.disk && D.disk.logs) items.push(row('数据体量', fmtMB(D.disk.logs), 'gray', '导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db)));
     var totalCost = 0, anyCost = false, unpricedTok = 0;
     rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } else unpricedTok += N(r[4]) + N(r[5]); });
-    if (anyCost) {
+    if (anyCost || unpricedTok > 0) { // 全部未定价也要给提示，不能整行消失
       var aTok = a.inn + a.out;
-      items.push(row('折算成本（API 牌价）', fmtCost(totalCost), 'gold', unpricedTok > 0 && aTok ? '未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : ''));
+      items.push(row('折算成本（API 牌价）', anyCost ? fmtCost(totalCost) : '–', 'gold', unpricedTok > 0 && aTok ? '未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : ''));
     }
     // 本地预算：整宽行 + 进度条（日 / 30 天）
     if (st.budget && (N(st.budget.daily) > 0 || N(st.budget.monthly) > 0)) {
@@ -1075,7 +1095,8 @@ function __usageBoot(D) {
       cells7.forEach(function (c) { c.h.forEach(function (x) { if (x.tok > 0) hv.push(x.tok); }); });
       hv.sort(function (a, b) { return a - b; });
       var hq = [0.25, 0.5, 0.75].map(function (pp) { return hv.length ? hv[Math.min(hv.length - 1, Math.floor(hv.length * pp))] : 1; });
-      var CW = 16, CG = 2, LX = 46, TY = 20;
+      var CG = 2, LX = 46, TY = 20;
+      var CW = Math.max(4, Math.min(16, Math.floor((w - LX - 4 - 24 * CG) / 24))); // 格宽随容器自适应（380px 侧栏也能放下，宽屏封顶 16）
       var W4 = LX + 24 * (CW + CG) + 4, H4 = TY + 7 * (CW + CG) + 6;
       var out4 = '';
       [0, 6, 12, 18].forEach(function (hh) { out4 += '<text x="' + (LX + hh * (CW + CG)) + '" y="13" font-size="10" fill="var(--muted-foreground)">' + hh + '时</text>'; });
@@ -1962,7 +1983,7 @@ function __usageBoot(D) {
       '<td class="ud-mgr-t"><input data-k="out" value="' + e.out + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="cache" value="' + e.cache + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + (e.ctxOverride || '') + '" placeholder="' + (e.ctx ? String(e.ctx) : '自动') + '" title="上下文窗口 token 数，留空按模型自动检测（水印曲线用）" inputmode="numeric"></td>' +
-      '<td class="text-nowrap"><button type="button" class="btn ud-mgr-save" style="margin:0;padding:1px 8px;font-size:12px">保存</button> <button type="button" class="btn ud-mgr-del" style="margin:0;padding:1px 8px;font-size:12px">删除</button></td></tr>';
+      '<td class="text-nowrap"><button type="button" class="btn ud-mgr-act ud-mgr-save" style="margin:0">保存</button> <button type="button" class="btn ud-mgr-act ud-mgr-del" style="margin:0" title="删除该模型价">删除</button></td></tr>';
   }
   function swRow(id, name, desc, on) {
     return '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + name + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + desc + '</div></div>' +
@@ -1986,18 +2007,18 @@ function __usageBoot(D) {
       '<div class="ud-mgr-h">成本单价（元 / 每百万 token）</div>' +
       '<div class="ud-mgr-sub">GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。默认列出当前用量相关模型，搜索可查全量；修改保存后按新价重算。</div>' +
       '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="搜索模型…" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + ' 个模型' + (p.modelsSlim && p.modelsTotal != null ? '（全量 ' + p.modelsTotal + '）' : '') + (list.length >= 60 ? '（仅显示前 60）' : '') + '</span></div>' +
-      '<div class="table-responsive" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px"><table class="table table-sm" style="margin:0"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th title="上下文窗口 token 数，留空自动检测">窗口</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
+      '<div class="table-responsive" id="ud-mgr-wrap" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:10px"><table class="table table-sm" style="margin:0"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th title="上下文窗口 token 数，留空自动检测">窗口</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
       list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
       '</tbody></table></div>' +
-      '<div style="display:flex;gap:8px;align-items:center;margin:10px 0 2px;flex-wrap:wrap"><span class="text-small text-muted">新增模型价：</span><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致）" style="width:230px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:76px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
+      '<div class="ud-mgr-card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="text-small text-muted">新增模型价：</span><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致）" style="width:230px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:76px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
       '<div class="ud-mgr-h">通用</div>' +
-      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<div class="ud-mgr-card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<label class="text-small text-muted">USD→CNY 汇率<input class="form-control form-control-sm" id="ud-mgr-rate" value="' + (p.usdCny == null ? '' : p.usdCny) + '" placeholder="默认 7.2" style="width:90px;margin-left:4px" inputmode="decimal"></label>' +
       '<label class="form-check form-switch text-small" style="margin:0">每日自动同步模型价<input type="checkbox" class="form-check-input" id="ud-sw-autosync"' + (p.autoSync !== false ? ' checked' : '') + ' style="margin-left:6px"></label>' +
       '<button type="button" class="btn" id="ud-mgr-gsave" style="margin:0;padding:2px 10px;font-size:12px">保存通用</button>' +
       '</div>' +
       '<div class="ud-mgr-h">预算（折算金额，超 80% 黄色进度、100% 红色）</div>' +
-      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<div class="ud-mgr-card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<label class="text-small text-muted">日预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bd" value="' + (N(b.daily) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
       '<label class="text-small text-muted">月预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bm" value="' + (N(b.monthly) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
       '<button type="button" class="btn" id="ud-mgr-bsave" style="margin:0;padding:2px 10px;font-size:12px">保存预算</button>' +
@@ -2246,7 +2267,7 @@ function __usageBoot(D) {
         if (!v.ok && v.error) html += '<div class="text-muted" style="font-size:11px;margin-top:1px">' + esc(String(v.error).slice(0, 110)) + '</div>';
         if (v.id === 'glm' && v.ok) {
           var peak = glmPlanPeak(Date.now());
-          html += '<div style="display:flex;justify-content:space-between;margin:4px 0 0" class="text-small"><span>模型积分 · 当前时段</span><span class="text-muted">' +
+          html += '<div style="display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;margin:4px 0 0" class="text-small"><span style="flex:none">积分时段</span><span class="text-muted" style="text-align:right">' +
             (peak ? '高峰 1× · 18:00 后转半价' : '非高峰 0.5× · 工作日 14:00–18:00 为高峰') + '</span></div>';
         }
         (v.items || []).forEach(function (it) {
@@ -2314,6 +2335,18 @@ function __usageBoot(D) {
     } else {
       tip.style.display = 'none';
     }
+  });
+  // 页签切换（bash 生成版不经过 serve 壳的 TAB_JS，这里内嵌同款逻辑；缺了页签就是死按钮）
+  Array.prototype.forEach.call(document.querySelectorAll('.nav-pills [role=tab]'), function (t) {
+    t.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.nav-pills [role=tab]'), function (x) {
+        x.classList.toggle('active', x === t);
+        x.setAttribute('aria-selected', String(x === t));
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[role=tabpanel]'), function (p) {
+        p.hidden = (p.id !== t.getAttribute('aria-controls'));
+      });
+    });
   });
   // 支持 #tab hash 定位（本地面板跳转：#trend/#sessions/#detail/#errors）
   var h = (location.hash || '').replace('#', '');
