@@ -57,7 +57,7 @@ cmd_prices() {
         command -v node >/dev/null 2>&1 || { echo "prices sync 需要 node（同步仅是可选操作，内置价格表已可用）" >&2; exit 1; }
         tmp=$(mktemp)
         curl -fsSL --max-time 30 https://models.dev/api.json -o "$tmp" || { echo "下载 models.dev 失败" >&2; rm -f "$tmp"; exit 1; }
-        node - "$tmp" "${ZCODE_USAGE_PRICES:-$HOME/.zcode/usage-prices.json}" <<'NODE'
+        node - "$tmp" "${ZCODE_USAGE_PRICES:-$HOME/.zcode/usage-prices.json}" "$SCRIPT_DIR/default-prices.json" <<'NODE'
 const fs = require('fs');
 const md = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const user = process.argv[3];
@@ -71,7 +71,18 @@ out.currency = out.currency || 'CNY';
 // models.dev 全部是 USD 价；表是 CNY 口径时按汇率换算入库（ZCODE_USAGE_USD_CNY 覆盖）
 const RATE = out.currency === 'CNY' ? (Number(process.env.ZCODE_USAGE_USD_CNY) || Number(out.usdCny) || 7.2) : 1;
 // 智谱官方 CNY 权威价（与 bigmodel 官网定价页核对），models.dev 的全球口径与之有偏差，不同步覆盖
-const PINNED = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'];
+const PINNED = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx',
+  // DeepSeek 官方 CNY 高峰牌价 + 峰谷 tariff（2026-10 核对官方价目页：工作日 9-12/14-18 高峰，周末节假日空闲半价）
+  'deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'];
+// 官方权威条目以内置表为准种子进用户文件：models.dev 的 DeepSeek 价已过期（且无 tariff），
+// 重跑 sync 即把现行官方牌价 + 分时计价配置带给老用户
+let seeded = 0;
+try {
+  const bn = JSON.parse(fs.readFileSync(process.argv[4], 'utf8')).models || {};
+  for (const m of PINNED) {
+    if (bn[m]) { out.models[m] = JSON.parse(JSON.stringify(bn[m])); seeded++; }
+  }
+} catch (e) {}
 // BYOK：全量同步所有供应商的所有带价模型；同名模型先到先得，自定义条目不会被覆盖
 let n = 0;
 for (const prov of Object.keys(md)) {
@@ -89,7 +100,7 @@ out.source = 'models.dev';
 out.updated = new Date().toISOString().slice(0, 10);
 fs.mkdirSync(require('path').dirname(user), { recursive: true });
 fs.writeFileSync(user, JSON.stringify(out, null, 2) + '\n');
-console.log('已同步 ' + n + ' 个官方模型价到 ' + user + '（币种 ' + out.currency + (RATE !== 1 ? '，USD 按 ' + RATE + ' 换算' : '') + '；自定义与官方权威条目保留）');
+console.log('已同步 ' + n + ' 个官方模型价到 ' + user + '（币种 ' + out.currency + (RATE !== 1 ? '，USD 按 ' + RATE + ' 换算' : '') + '；官方权威条目 ' + seeded + ' 个按内置表更新）');
 NODE
         rm -f "$tmp"
         ;;

@@ -516,8 +516,13 @@ function __usageBoot(D) {
   function tierMult(ts, t) {
     if (!t || !t.tiers) return 1;
     var d = new Date(ts);
-    var h = d.getHours();
-    if (typeof t.tz === 'number') h = ((d.getUTCHours() + t.tz) % 24 + 24) % 24;
+    var off = typeof t.tz === 'number' ? t.tz * 3600e3 : 0;
+    var loc = off ? new Date(ts + off) : d; // 时区平移后按目标时区取小时/星期
+    var h = off ? loc.getUTCHours() : d.getHours();
+    if (t.weekend != null) { // 周末统一倍率（如 DeepSeek 周末全天按空闲价）
+      var dow = off ? loc.getUTCDay() : d.getDay();
+      if (dow === 0 || dow === 6) return t.weekend;
+    }
     for (var i = 0; i < t.tiers.length; i++) {
       var tier = t.tiers[i] || {};
       var ws = tier.hours || [];
@@ -527,6 +532,32 @@ function __usageBoot(D) {
       }
     }
     return 1;
+  }
+  // 系统当前时间落在哪个档位（"现在进行时"指示用）：返回 {name, mult, until} 或 null
+  function curTier(t, now) {
+    if (!t || !t.tiers) return null;
+    var d = new Date(now);
+    var off = typeof t.tz === 'number' ? t.tz * 3600e3 : 0;
+    var loc = off ? new Date(now + off) : d;
+    var h = off ? loc.getUTCHours() : d.getHours();
+    if (t.weekend != null) {
+      var dow = off ? loc.getUTCDay() : d.getDay();
+      if (dow === 0 || dow === 6) return { name: '周末价', mult: t.weekend, until: null };
+    }
+    var best = null;
+    for (var i = 0; i < t.tiers.length; i++) {
+      var tier = t.tiers[i] || {};
+      var ws = tier.hours || [];
+      for (var j = 0; j < ws.length; j++) {
+        var b = ws[j][0], e = ws[j][1];
+        if (b <= e ? (h >= b && h < e) : (h >= b || h < e)) {
+          best = { name: tier.name || (tier.mult > 1 ? '高峰' : '空闲'), mult: tier.mult == null ? 1 : tier.mult, until: e < b || e > 24 ? null : e };
+          break;
+        }
+      }
+      if (best) break;
+    }
+    return best || { name: '标准', mult: 1, until: null };
   }
   function rowCost(r) {
     var p = priceOf(r[2]);
@@ -733,6 +764,24 @@ function __usageBoot(D) {
           }
           items.push(row('近 1h 燃烧率', fmtI(perMin) + ' tok/min', 'red', pace));
         }
+    })();
+    // 分时计价当前档：按系统当前时间判定（有 tariff 配置的模型才显示，取筛选内用量最大的一个为代表）
+    (function () {
+      var tok = {};
+      rows.forEach(function (r) { tok[r[2]] = (tok[r[2]] || 0) + N(r[4]) + N(r[5]); });
+      var pick = null, pickTok = 0;
+      Object.keys(tok).forEach(function (mi) {
+        var p = priceOf(mi); // priceOf 接收模型索引（内部转名字查价）
+        if (p && p.tariff && p.tariff.tiers && tok[mi] > pickTok) { pick = { name: String(MD[mi] || ''), p: p }; pickTok = tok[mi]; }
+      });
+      if (!pick) return;
+      var ct = curTier(pick.p.tariff, Date.now());
+      if (!ct) return;
+      var val = ct.name + (ct.mult === 1 ? '' : ' ' + ct.mult + '×');
+      if (ct.until != null) val += ' · 至 ' + ct.until + ':00';
+      var sub = pick.name;
+      if (ct.name === '周末价') sub += ' · 周末全天空闲价';
+      items.push(row('当前时段', val, 'gold', sub));
     })();
     if (peak) items.push(row('峰值日', peak.slice(5), 'purple', fmt(peakV) + ' tok'));
     items.push(row('缓存命中率', hit + '%', 'green', '读 ' + fmt(a.ca)));
@@ -2068,7 +2117,7 @@ function __usageBoot(D) {
       }).catch(function () { finish(null); });
     } else finish(null);
   }
-  mgrState.builtins = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'];
+  mgrState.builtins = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'];
   $('ud-price-mgr').addEventListener('click', function () {
     mgrState.q = ''; // 重开弹框不残留上次搜索词（瘦身表按旧词过滤会得到空列表）
     $('ud-mgr-mask').hidden = false;
@@ -2156,6 +2205,13 @@ function __usageBoot(D) {
   // 前端 60s 节流：面板每次刷新（切 tab/软刷新）都会进这里，避免频繁外网请求。
   (function () {
     var lastAt = 0;
+    // GLM Coding Plan 积分峰谷（docs.bigmodel.cn/cn/coding-plan/overview，2026-10 核对）：
+    // 工作日 14:00–18:00（UTC+8）按基础积分 1× 抵扣，其余时段 0.5×。法定节假日/调休周末不区分（无公开机器可读源）
+    function glmPlanPeak(now) {
+      var loc = new Date(now + 8 * 3600e3);
+      var dow = loc.getUTCDay(), h = loc.getUTCHours();
+      return dow >= 1 && dow <= 5 && h >= 14 && h < 18;
+    }
     function render(j) {
       if (!j || !Array.isArray(j.vendors) || !j.vendors.length) return;
       var okCount = j.vendors.filter(function (v) { return v.ok; }).length;
@@ -2167,6 +2223,11 @@ function __usageBoot(D) {
         html += '<div style="margin:10px 0 0"><div style="display:flex;justify-content:space-between;align-items:baseline" class="text-small"><span style="font-weight:600">' + esc(v.name || v.id) + '</span>' +
           (v.stale ? '<span class="ud-tag">观测滞后</span>' : (!v.ok ? '<span class="text-muted">不可用</span>' : '')) + '</div>';
         if (!v.ok && v.error) html += '<div class="text-muted" style="font-size:11px;margin-top:1px">' + esc(String(v.error).slice(0, 110)) + '</div>';
+        if (v.id === 'glm' && v.ok) {
+          var peak = glmPlanPeak(Date.now());
+          html += '<div style="display:flex;justify-content:space-between;margin:4px 0 0" class="text-small"><span>模型积分 · 当前时段</span><span class="text-muted">' +
+            (peak ? '高峰 1× · 18:00 后转半价' : '非高峰 0.5× · 工作日 14:00–18:00 为高峰') + '</span></div>';
+        }
         (v.items || []).forEach(function (it) {
           if (it.pct != null) {
             var pct = Math.max(0, Math.min(100, Math.round(it.pct)));
