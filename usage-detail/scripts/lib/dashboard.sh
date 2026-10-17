@@ -48,9 +48,14 @@ cmd_dashboard() {
     # turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
     turn_expr="NULL"
     [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"
+    # BYOK 供应商显示名（provider_config.json，只取名映射）+ 项目根归并（git 仓库根）：
+    # node 一次性解析成两个映射表进 META；node/git 不可用或空目录时给空表，前端按原样回退
+    DIRS_JSON=$(qr "SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')")
+    PMETA=$(node "$SCRIPT_DIR/lib/project-meta.mjs" "$DIRS_JSON" 2>/dev/null || echo '{"providerNames":{},"projectMap":{}}')
+    PMETA=${PMETA//\'/\'\'}
     # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
     if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
-      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"prices":{},"total":0,"covered":0,"rows":[]}'
+      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"prices":{},"total":0,"covered":0,"rows":[]}'
     else
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
@@ -76,6 +81,8 @@ cmd_dashboard() {
         'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
         'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
+        'providerNames', json_extract(json('$PMETA'),'$.providerNames'),
+        'projectMap', json_extract(json('$PMETA'),'$.projectMap'),
         'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
@@ -428,6 +435,28 @@ UD_DATA_HEAD
       cat <<'UD_TAIL'
 ;
 function __usageBoot(D) {
+  // 模型名归一：同一模型可能以多种大小写形态入库（GLM-5.3-Flash / glm-5.3-flash），
+  // 不合并会把同模型拆成多行、模型筛选也分裂。建索引前就地合并：lower 相同的形态
+  // 并为一个模型索引，显示名取 token 量最大的原形态；价格匹配本身已有小写兜底不受影响。
+  (function () {
+    var MD0 = D.models || [];
+    if (MD0.length < 2) return;
+    var tokOf = {};
+    (D.rows || []).forEach(function (r) { tokOf[r[2]] = (tokOf[r[2]] || 0) + (r[4] || 0) + (r[5] || 0); });
+    var keyIdx = {}, remap = [], disp = [], bestTok = {};
+    for (var i = 0; i < MD0.length; i++) {
+      var k = String(MD0[i] || '').toLowerCase();
+      if (k in keyIdx) { remap[i] = keyIdx[k]; continue; }
+      keyIdx[k] = disp.length; remap[i] = disp.length; disp.push(MD0[i]);
+    }
+    if (disp.length === MD0.length) return; // 本就无重名形态
+    for (var j = 0; j < MD0.length; j++) {
+      var gi = keyIdx[String(MD0[j] || '').toLowerCase()], t = tokOf[j] || 0;
+      if (!(gi in bestTok) || t > bestTok[gi]) { bestTok[gi] = t; disp[gi] = MD0[j]; }
+    }
+    D.models = disp;
+    (D.rows || []).forEach(function (r) { r[2] = remap[r[2]] != null ? remap[r[2]] : r[2]; });
+  })();
   var PV = D.providers || [], MD = D.models || [], TL = D.sessions || [], R = D.rows || [];
   var TOOLS = D.tools || [], SD = D.sessionDirs || [];
   var PRICE = (D.prices && typeof D.prices === 'object') ? D.prices : null;
@@ -522,7 +551,8 @@ function __usageBoot(D) {
       var id = raw.replace(/^account:/, '');
       return esc(PV_CN[id] || id);
     }
-    return esc(raw);
+    // BYOK 自定义接入（如 new-provider）：用 provider_config.json 里的 providerName 显示
+    return esc((D.providerNames || {})[raw] || raw);
   }
   function pvTag(p) { return /^account:/.test(String(PV[p] || '')) ? '官方账号' : '自定义接入'; }
 
@@ -614,6 +644,10 @@ function __usageBoot(D) {
     var parts = String(dir || '').split(/[\\/]+/).filter(Boolean);
     return parts.length ? parts[parts.length - 1] : String(dir || '');
   }
+  // 项目归并：数据层已把每个会话目录解析到 git 仓库根（projectMap）——
+  // 子/孙目录的会话因此并入真实项目，不再出现 src/utils 这类叶子目录冒充项目名
+  var PMAP = D.projectMap || {};
+  function projKey(dir) { return PMAP[dir] || dir; }
   function fmtCost(c) { return c == null ? '–' : CURSYM + (c >= 100 ? Math.round(c).toLocaleString('zh-CN') : c.toFixed(2)); }
   // 列表用短格式：小数字原样、大数 k/M，悬停（data-tip 即时层）看完整值；fmt() 的万/亿保留给卡片与图表
   function fmtK(n) {
@@ -1413,11 +1447,11 @@ function __usageBoot(D) {
     if (!headEl || !bodyEl) return;
     var per = {};
     rows.forEach(function (r) {
-      var dir = SD[r[0]] || '（未知目录）';
-      var o = per[dir] || (per[dir] = { req: 0, inn: 0, out: 0, cost: 0, hasCost: false, last: 0, sess: {}, tok: 0 });
+      var dir = projKey(SD[r[0]] || '（未知目录）');
+      var o = per[dir] || (per[dir] = { req: 0, inn: 0, out: 0, cost: 0, hasCost: false, last: 0, sess: {}, dirs: {}, tok: 0 });
       o.req++; o.inn += N(r[4]); o.out += N(r[5]); o.tok = o.inn + o.out;
       if (r[1] > o.last) o.last = r[1];
-      o.sess[r[0]] = 1;
+      o.sess[r[0]] = 1; o.dirs[SD[r[0]] || ''] = 1;
       var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; }
     });
     // 近 7 天 sparkline 序列（按项目）
@@ -1427,7 +1461,7 @@ function __usageBoot(D) {
     rows.forEach(function (r) {
       var k = dayKey(r[1]);
       if (days7.indexOf(k) < 0) return;
-      var dir = SD[r[0]] || '（未知目录）';
+      var dir = projKey(SD[r[0]] || '（未知目录）');
       var o = sp[dir] || (sp[dir] = {});
       o[k] = (o[k] || 0) + N(r[4]) + N(r[5]);
     });
@@ -1446,7 +1480,9 @@ function __usageBoot(D) {
     bodyEl.innerHTML = list.length ? list.map(function (o) {
       var base = baseName(o.dir);
       var sel = st.proj === o.dir;
-      return '<tr class="ud-click" data-proj="' + esc(o.dir) + '" title="点击只看该项目的会话"><td class="text-nowrap">' + esc(base) + (sel ? ' <span class="ud-tag">已选</span>' : '') + '<div class="ud-kv-l" style="margin-top:1px">' + esc(o.dir) + '</div></td>' +
+      var dirs = Object.keys(o.dirs).filter(Boolean);
+      var dirNote = dirs.length > 1 ? ' · 含 ' + dirs.length + ' 个目录' : '';
+      return '<tr class="ud-click" data-proj="' + esc(o.dir) + '" title="点击只看该项目的会话\n' + esc(dirs.join('\n')) + '"><td class="text-nowrap">' + esc(base) + (sel ? ' <span class="ud-tag">已选</span>' : '') + '<div class="ud-kv-l" style="margin-top:1px">' + esc(o.dir) + (dirs.length > 1 ? ' <span class="ud-tag">' + dirNote + '</span>' : '') + '</div></td>' +
         '<td class="text-end tabular-nums">' + fmtI(Object.keys(o.sess).length) + '</td>' +
         '<td class="text-end tabular-nums">' + fmtI(o.req) + '</td>' +
         '<td class="text-end tabular-nums">' + tokCell(o.tok) + '</td>' +
@@ -1503,7 +1539,7 @@ function __usageBoot(D) {
 
   function renderSessions(rows) {
     var keys = { 1: 'req', 2: 'inn', 3: 'out', 4: 'tot', 5: 'last', 6: 'cost', 7: 'rate', 8: 'health' };
-    var list = sessAgg(rows).filter(function (o) { return !st.proj || (SD[o.g] || '') === st.proj; })
+    var list = sessAgg(rows).filter(function (o) { return !st.proj || projKey(SD[o.g] || '') === st.proj; })
       .sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
     var hasCmp = (D.compactions || []).length > 0;
     var cols = [
@@ -2357,6 +2393,33 @@ function __usageBoot(D) {
     var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-' + h + '"]');
     if (btn) btn.click();
   }
+  // 「本轮」兜底：从已加载数据聚合最新一轮（turn_id 相同的成功请求群，口径对齐 turn-stats.mjs：
+  // 速率 = 生成 / (总耗时 − 首字)），不依赖 turnstats 钩子与资源订阅——
+  // 侧栏订阅失败、钩子未开、file 版静默等任何情况下横幅都有数据可显；
+  // 实时通道（订阅/轮询）拿到数据后会覆盖此兜底
+  window.__udTurnFallback = function () {
+    if (!R.length) return '';
+    var lastTs = 0, lastTurn = null;
+    R.forEach(function (r) { if (r[1] > lastTs) { lastTs = r[1]; lastTurn = r[14]; } });
+    if (lastTurn == null || lastTurn === '') return ''; // 老库无 turn_id：无法分轮
+    var reqs = 0, miss = 0, ca = 0, gen = 0, genMs = 0, ttft = 0, durMs = 0;
+    R.forEach(function (r) {
+      if (r[14] !== lastTurn || r[8] !== 0) return;
+      reqs++;
+      miss += Math.max(0, N(r[4]) - N(r[6]));
+      ca += N(r[6]); gen += N(r[5]); durMs += N(r[7]);
+      genMs += Math.max(1, N(r[7]) - N(r[11]));
+      var t = N(r[11]); if (t > 0 && (ttft === 0 || t < ttft)) ttft = t;
+    });
+    if (!reqs) return '';
+    var parts = ['本轮用量'];
+    if (genMs > 0) parts.push('⚡ ' + Math.round(gen / genMs * 1000) + ' tok/s');
+    parts.push('输入 ' + fmt(miss + ca) + ' tok（缓存 ' + (miss + ca ? Math.round(ca / (miss + ca) * 100) : 0) + '%）');
+    if (gen > 0) parts.push('生成 ' + fmtI(gen) + ' tok');
+    parts.push(fmtI(reqs) + ' 次请求');
+    if (durMs > 0) parts.push('本轮 ' + fmtDur(durMs));
+    return parts.join(' · ') + '（截至 ' + pad(new Date(lastTs).getHours()) + ':' + pad(new Date(lastTs).getMinutes()) + ' 数据）';
+  };
   window.__usageBootDone = true;
 }
 if (window.__USAGE_DATA_URL__) {
@@ -2371,7 +2434,11 @@ if (window.__USAGE_DATA_URL__) {
   if (!el) return;
   function render(text) {
     text = String(text || '').trim();
-    if (!text) { el.hidden = true; return; }
+    if (!text) {
+      // 实时通道无数据（turnstats 未开/无本轮标记/读取失败）：退回已加载数据的兜底聚合
+      text = typeof window.__udTurnFallback === 'function' ? window.__udTurnFallback() : '';
+      if (!text) { el.hidden = true; return; }
+    }
     var d = new Date();
     var p2 = function (n) { return n < 10 ? '0' + n : '' + n; };
     el.innerHTML = '<span>' + text.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }) +
@@ -2399,6 +2466,8 @@ if (window.__USAGE_DATA_URL__) {
   } else if (location.protocol === 'http:' || location.protocol === 'https:') {
     refreshHttp();
     setInterval(refreshHttp, 15000);
+  } else {
+    render(''); // file 版（/usage-ui）：无实时通道，直接显示兜底
   }
 })();
 </script>

@@ -45,7 +45,7 @@ function priceText() {
 }
 
 // 全量 META（与 serve.mjs 同一形状：行数组 + 索引映射，前端聚合）
-function metaSQL(limit, disk) {
+function metaSQL(limit, disk, extraJson) {
   const pt = priceText();
   const PJ = pt != null ? `CAST('${pt.replace(/'/g, "''")}' AS text)` : 'NULL';
   return `
@@ -66,6 +66,8 @@ function metaSQL(limit, disk) {
     'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
     'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
+    'providerNames', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."providerNames"'),
+    'projectMap', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."projectMap"'),
     'prices',(SELECT CASE
           WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
           ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
@@ -101,9 +103,12 @@ function dataJSON(limit) {
   const disk = { logs: duMB(path.join(os.homedir(), '.zcode/v2/logs')), rollout: duMB(path.join(os.homedir(), '.zcode/cli/rollout')), artifacts: duMB(path.join(os.homedir(), '.zcode/cli/artifacts')), db: duMB(DB) };
   // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table
   if (q1("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
-    return { providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk, prices: {}, total: 0, covered: 0, rows: [] };
+    return { providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk, providerNames: {}, projectMap: {}, prices: {}, total: 0, covered: 0, rows: [] };
   }
-  const data = JSON.parse(q1(metaSQL(limit, disk)));
+  let dirsList = [];
+  try { dirsList = JSON.parse(q1(`SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')`) || '[]'); } catch (e) {}
+  const extra = JSON.stringify({ providerNames: vendorDisplayNames(), projectMap: buildProjectMap(dirsList) });
+  const data = JSON.parse(q1(metaSQL(limit, disk, extra)));
   metaCache = { at: Date.now(), v: { limit, data } };
   return data;
 }
@@ -238,6 +243,7 @@ function buildSessionDetail(id) {
 function buildSummary() {
   const D = dataJSON(DEFAULT_LIMIT);
   const R = D.rows || [], MD = D.models || [], PV = D.providers || [], TL = D.sessions || [];
+  const PVN = D.providerNames || {}; // BYOK 真实供应商名（provider_config.json，只取名映射）
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   let inn = 0, out = 0, ca = 0, todayReq = 0;
   const pvAgg = {}, mdAgg = {};
@@ -245,7 +251,7 @@ function buildSummary() {
   for (const r of R) {
     inn += r[4]; out += r[5]; ca += r[6];
     if (r[1] >= today0.getTime()) todayReq++;
-    const pv = PV[r[3]] || '?', md = MD[r[2]] || '?';
+    const pv = PVN[PV[r[3]]] || PV[r[3]] || '?', md = MD[r[2]] || '?';
     pvAgg[pv] = (pvAgg[pv] || 0) + r[4] + r[5];
     mdAgg[md] = (mdAgg[md] || 0) + r[4] + r[5];
     const s = sessAgg[r[0]] || (sessAgg[r[0]] = { title: TL[r[0]] || '（无标题）', req: 0, tot: 0, last: 0 });
@@ -327,12 +333,13 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.21.3' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.22.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
 const { SHELL_CSS, TAB_JS } = await import('../shell.mjs');
 const USAGE_SH = path.join(HERE, '..', 'usage.sh');
+import { providerNames as vendorDisplayNames, projectMap as buildProjectMap } from '../lib/project-meta.mjs';
 let dashCache = { at: 0, html: null };
 function getPanelHtml() {
   return new Promise((resolve, reject) => {
@@ -640,6 +647,14 @@ function killStaleServe() {
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-serve.json'), 'utf8'));
     if (!meta.pid || (meta.port && meta.port !== 7741)) return;
+    if (process.platform === 'win32') {
+      // Windows 无 ps：tasklist 校验映像名后 taskkill（防 pid 被无关进程复用误杀）
+      const img = execFileSync('tasklist', ['/FI', `PID eq ${meta.pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
+      if (/node\.exe/i.test(img)) {
+        try { execFileSync('taskkill', ['/PID', String(meta.pid), '/F'], { stdio: 'ignore' }); } catch (e) {}
+      }
+      return;
+    }
     const cmd = execFileSync('ps', ['-p', String(meta.pid), '-o', 'command='], { encoding: 'utf8' });
     if (cmd.includes('serve.mjs')) {
       try { process.kill(meta.pid); } catch (e) {}
