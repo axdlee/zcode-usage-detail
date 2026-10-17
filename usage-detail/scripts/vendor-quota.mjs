@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function credsFile() {
-  try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-vendors.json'), 'utf8')) || {}; } catch (e) { return {}; }
+  try { return JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-vendors.json'), 'utf8')).replace(/^\uFEFF/, '')) || {}; } catch (e) { return {}; }
 }
 function keyFor(vendor, envName) {
   if (process.env[envName]) return process.env[envName];

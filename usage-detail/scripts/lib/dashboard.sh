@@ -37,7 +37,7 @@ cmd_dashboard() {
     fi
     pf=$(price_file)
     if [[ -n "$pf" ]]; then
-      PJ_SQL="(SELECT CAST(readfile($(sql_quote "$pf")) AS text) AS pj)"
+      PJ_SQL="(SELECT replace(CAST(readfile($(sql_quote "$pf")) AS text), char(65279), '') AS pj)"
     else
       PJ_SQL="(SELECT NULL AS pj)"
     fi
@@ -49,9 +49,10 @@ cmd_dashboard() {
     turn_expr="NULL"
     [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"
     # BYOK 供应商显示名（provider_config.json，只取名映射）+ 项目根归并（git 仓库根）：
-    # node 一次性解析成两个映射表进 META；node/git 不可用或空目录时给空表，前端按原样回退
+    # node 一次性解析成两个映射表进 META；node/git 不可用或空目录时给空表，前端按原样回退。
+    # dirs 走 stdin：Git Bash(MSYS) 会改写 argv 里以 / 开头的路径参数，JSON 清单会被篡改
     DIRS_JSON=$(qr "SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')")
-    PMETA=$(node "$SCRIPT_DIR/lib/project-meta.mjs" "$DIRS_JSON" 2>/dev/null || echo '{"providerNames":{},"projectMap":{}}')
+    PMETA=$(printf '%s' "$DIRS_JSON" | node "$SCRIPT_DIR/lib/project-meta.mjs" 2>/dev/null || echo '{"providerNames":{},"projectMap":{}}')
     PMETA=${PMETA//\'/\'\'}
     # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
     if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then

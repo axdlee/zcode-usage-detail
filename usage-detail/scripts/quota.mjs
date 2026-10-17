@@ -27,7 +27,7 @@ function resolveEndpoint() {
   ];
   for (const f of ruleFiles) {
     try {
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+      const j = JSON.parse(String(fs.readFileSync(f, 'utf8')).replace(/^\uFEFF/, ''));
       const rules = (j.config && j.config.providerConfigRules && j.config.providerConfigRules.providerRules) || [];
       for (const r of rules) {
         const c = r.config || {};
@@ -41,12 +41,12 @@ function resolveEndpoint() {
   }
   // 1.5) 用户手动放置的令牌文件
   try {
-    const tf = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-quota-token.json'), 'utf8'));
+    const tf = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-quota-token.json'), 'utf8')).replace(/^\uFEFF/, ''));
     if (tf && tf.token) return { token: tf.token, base: tf.base || 'https://open.bigmodel.cn' };
   } catch (e) {}
   // 2) ZCode 桌面端 OAuth 凭据（编码套餐登录态）
   try {
-    const creds = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode/v2/credentials.json'), 'utf8'));
+    const creds = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode/v2/credentials.json'), 'utf8')).replace(/^\uFEFF/, ''));
     const raw = creds['oauth:bigmodel:access_token'];
     if (raw) {
       let token = raw;

@@ -95,12 +95,30 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
 
 // ---------- 价格表与预算的用户设置（serve 模式的面板内管理） ----------
 let pricesCache = { at: 0, v: null };
+// Windows 记事本等编辑器保存的 UTF-8 文件常带 BOM，JSON.parse 会直接抛错——读取后剥除
+const stripBom = (s) => String(s == null ? '' : s).replace(/^\uFEFF/, '');
+// 原子写 + Windows 兜底：rename 到被占用（杀毒/并发读）的目标会 EPERM——短重试后直写保功能
+function atomicWrite(file, data, mode) {
+  const tmp = file + '.tmp';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (mode != null) fs.writeFileSync(tmp, data, { mode }); else fs.writeFileSync(tmp, data);
+  for (let i = 0; i < 3; i++) {
+    try { fs.renameSync(tmp, file); return; } catch (e) {
+      if (i === 2) {
+        try { if (mode != null) fs.writeFileSync(file, data, { mode }); else fs.writeFileSync(file, data); } catch (e2) {}
+        try { fs.unlinkSync(tmp); } catch (e2) {}
+        return;
+      }
+      const until = Date.now() + 60; while (Date.now() < until) { /* 短退避 */ }
+    }
+  }
+}
 function readPrices() {
   const pp = pricePath();
   if (!pp || !fs.existsSync(pp)) return { currency: 'CNY', usdCny: null, autoSync: true, models: {} };
   if (pricesCache.v && Date.now() - pricesCache.at < 5000) return pricesCache.v;
   let v;
-  try { v = JSON.parse(fs.readFileSync(pp, 'utf8')); } catch (e) { v = { currency: 'CNY', models: {} }; }
+  try { v = JSON.parse(stripBom(fs.readFileSync(pp, 'utf8'))); } catch (e) { v = { currency: 'CNY', models: {} }; }
   if (!v.models || typeof v.models !== 'object') v = { currency: v.currency || 'CNY', models: v };
   v.usdCny = v.usdCny != null ? v.usdCny : null;
   v.autoSync = v.autoSync !== false;
@@ -118,10 +136,7 @@ function writePrices(next) {
     autoSync: next.autoSync != null ? next.autoSync !== false : (prev.autoSync !== false),
     models: next.models || prev.models || {},
   };
-  const tmp = pp + '.tmp';
-  fs.mkdirSync(path.dirname(pp), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
-  fs.renameSync(tmp, pp);
+  atomicWrite(pp, JSON.stringify(merged, null, 2) + '\n');
   pricesCache = { at: 0, v: null };
   frag.html = null; // 改价后立即重算
 }
@@ -138,7 +153,7 @@ function priceEntry(m) {
 const VENDOR_IDS = ['deepseek', 'kimi', 'openrouter', 'minimax'];
 function vendorKeysPath() { return path.join(os.homedir(), '.zcode', 'usage-vendors.json'); }
 function readVendorFile() {
-  try { return JSON.parse(fs.readFileSync(vendorKeysPath(), 'utf8')) || {}; } catch (e) { return {}; }
+  try { return JSON.parse(stripBom(fs.readFileSync(vendorKeysPath(), 'utf8'))) || {}; } catch (e) { return {}; }
 }
 function readVendorMask() {
   const v = readVendorFile();
@@ -152,20 +167,15 @@ function writeVendorKeys(keys) {
     if (k) cur[id] = { key: k };
     else delete cur[id]; // 空串 = 清除该厂商凭据
   }
-  const tmp = vendorKeysPath() + '.tmp';
-  fs.mkdirSync(path.dirname(vendorKeysPath()), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(cur, null, 2) + '\n', { mode: 0o600 });
-  fs.renameSync(tmp, vendorKeysPath());
+  atomicWrite(vendorKeysPath(), JSON.stringify(cur, null, 2) + '\n', 0o600);
   return readVendorMask();
 }
 function budgetPath() { return path.join(os.homedir(), '.zcode', 'usage-budget.json'); }
 function readBudget() {
-  try { return JSON.parse(fs.readFileSync(budgetPath(), 'utf8')); } catch (e) { return { daily: 0, monthly: 0 }; }
+  try { return JSON.parse(stripBom(fs.readFileSync(budgetPath(), 'utf8'))); } catch (e) { return { daily: 0, monthly: 0 }; }
 }
 function writeBudget(b) {
-  const tmp = budgetPath() + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ daily: Number(b.daily) || 0, monthly: Number(b.monthly) || 0 }) + '\n');
-  fs.renameSync(tmp, budgetPath());
+  atomicWrite(budgetPath(), JSON.stringify({ daily: Number(b.daily) || 0, monthly: Number(b.monthly) || 0 }) + '\n');
 }
 function readBody(req) {
   return new Promise(function (resolve, reject) {
@@ -180,9 +190,9 @@ const TURNSTATS_FILE = path.join(os.homedir(), '.zcode', 'usage-turnstats.json')
 const ALERTS_CFG = path.join(os.homedir(), '.zcode', 'usage-alerts.json');
 function readSwitches() {
   let ts = { enabled: false, mode: 'inject' };
-  try { ts = Object.assign(ts, JSON.parse(fs.readFileSync(TURNSTATS_FILE, 'utf8'))); } catch (e) {}
+  try { ts = Object.assign(ts, JSON.parse(stripBom(fs.readFileSync(TURNSTATS_FILE, 'utf8')))); } catch (e) {}
   let al = {};
-  try { al = JSON.parse(fs.readFileSync(ALERTS_CFG, 'utf8')); } catch (e) {}
+  try { al = JSON.parse(stripBom(fs.readFileSync(ALERTS_CFG, 'utf8'))); } catch (e) {}
   return {
     turnstats: ts.enabled === true ? (ts.mode === 'notify' ? 'notify' : 'inject') : 'off',
     budgetAlerts: al.budget !== false,
@@ -192,18 +202,14 @@ function readSwitches() {
 function writeSwitches(b) {
   if (b.turnstats === 'off' || b.turnstats === 'notify' || b.turnstats === 'inject') {
     const v = b.turnstats === 'off' ? { enabled: false } : { enabled: true, mode: b.turnstats };
-    const tmp = TURNSTATS_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(v) + '\n');
-    fs.renameSync(tmp, TURNSTATS_FILE);
+    atomicWrite(TURNSTATS_FILE, JSON.stringify(v) + '\n');
   }
   const al = readSwitches();
   if (typeof b.budgetAlerts === 'boolean' || typeof b.permissionAlerts === 'boolean') {
     const next = {};
     if (typeof b.budgetAlerts === 'boolean') next.budget = b.budgetAlerts;
     if (typeof b.permissionAlerts === 'boolean') next.permission = b.permissionAlerts;
-    const tmp = ALERTS_CFG + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(next) + '\n');
-    fs.renameSync(tmp, ALERTS_CFG);
+    atomicWrite(ALERTS_CFG, JSON.stringify(next) + '\n');
   }
   return readSwitches();
 }
@@ -224,7 +230,7 @@ function dataJSON(limit) {
   }
   // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
   const pp = pricePath();
-  const pfText = pp ? fs.readFileSync(pp, 'utf8') : null;
+  const pfText = pp ? stripBom(fs.readFileSync(pp, 'utf8')) : null;
   const dirs = q(`SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')`).trim() || '[]';
   let dirsList = [];
   try { dirsList = JSON.parse(dirs); } catch (e) {}
@@ -296,11 +302,36 @@ function requestJSON(id) {
   return row ? JSON.parse(row) : { error: '未找到该请求' };
 }
 
+// bash 可执行解析：Windows 的 Git for Windows 默认只把 git.exe 加入 PATH，bash.exe 常缺——
+// 面板/仪表盘生成全部依赖 bash，按常见安装位置兜底查找；找到后进程内缓存
+let bashCmdCache;
+function resolveBash() {
+  if (bashCmdCache) return bashCmdCache;
+  let cmd = 'bash';
+  if (process.platform === 'win32') {
+    const candidates = [
+      process.env.ZCODE_BASH,
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+      path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Git', 'bin', 'bash.exe'),
+    ].filter(Boolean);
+    cmd = candidates.find((c) => { try { return fs.existsSync(c); } catch (e) { return false; } }) || 'bash';
+  }
+  bashCmdCache = cmd;
+  return cmd;
+}
+
 function renderFragment(limit) {
   const out = path.join(os.tmpdir(), 'zcode-usage-serve-' + process.pid + '.html');
   const args = [USAGE_SH, 'dashboard', out];
   if (limit > 0) args.push(String(limit)); // -1（全部）走脚本默认，避免 num_arg 校验负数
-  execFileSync('bash', args, { encoding: 'utf8', timeout: 120000 });
+  try {
+    execFileSync(resolveBash(), args, { encoding: 'utf8', timeout: 120000 });
+  } catch (e) {
+    if (e && e.code === 'ENOENT') throw new Error('未找到 bash（Windows 需安装 Git for Windows，或设置 ZCODE_BASH 指向 bash.exe）');
+    throw e;
+  }
   let html = fs.readFileSync(out, 'utf8');
   try { fs.unlinkSync(out); } catch (e) {}
   // 切换为服务模式：数据走 /api/data，由 boot 函数异步加载
@@ -354,7 +385,7 @@ try {
     let stale = !fs.existsSync(USER_PRICE);
     if (!stale) stale = Date.now() - fs.statSync(USER_PRICE).mtimeMs >= 86400e3;
     if (stale && fs.existsSync(process.env.ZCODE_USAGE_PRICES || '/dev/null') === false || stale) {
-      spawn('bash', [USAGE_SH, 'prices', 'sync'], { detached: true, stdio: 'ignore' }).unref();
+      spawn(resolveBash(), [USAGE_SH, 'prices', 'sync'], { detached: true, stdio: 'ignore' }).unref();
     }
   }
 } catch (e) {}
@@ -511,7 +542,7 @@ const server = http.createServer(async function (req, res) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': 'attachment; filename="zcode-usage-report.html"' });
       res.end(html);
     } else if (req.method === 'POST' && u.pathname === '/api/sync-prices') {
-      const out = execFileSync('bash', [USAGE_SH, 'prices', 'sync'], { encoding: 'utf8', timeout: 90000 });
+      const out = execFileSync(resolveBash(), [USAGE_SH, 'prices', 'sync'], { encoding: 'utf8', timeout: 90000 });
       frag.html = null;
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, message: out.trim().split('\n').pop() }));

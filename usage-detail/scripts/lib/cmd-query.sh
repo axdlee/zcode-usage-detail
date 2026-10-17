@@ -180,7 +180,8 @@ cmd_export() {
     case "$kind" in
       csv)
         out="${out:-zcode-usage-export.csv}"
-        sqlite3 -readonly -csv "$DB" "
+        # qc()：CLI 用 sqlite3 -csv，无 sqlite3 环境（Windows 常见）走 node 替身的 -csv 模式
+        qc "
           SELECT datetime(m.started_at/1000,'unixepoch','localtime') AS time,
                  substr(coalesce(s.title,''),1,80) AS session,
                  s.directory AS project,

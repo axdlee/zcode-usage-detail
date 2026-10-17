@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const HERE_NOTIFY = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
 
 try {
-  const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-alerts.json'), 'utf8'));
+  const v = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-alerts.json'), 'utf8')).replace(/^\uFEFF/, ''));
   if (v.permission !== true) process.exit(0);
   let tool = '';
   try {

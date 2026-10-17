@@ -41,7 +41,7 @@ function turnExpr() {
 
 function priceText() {
   const p = USER_PRICE;
-  try { return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null; } catch (e) { return null; }
+  try { return fs.existsSync(p) ? stripBom(fs.readFileSync(p, 'utf8')) : null; } catch (e) { return null; }
 }
 
 // 全量 META（与 serve.mjs 同一形状：行数组 + 索引映射，前端聚合）
@@ -333,13 +333,34 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.22.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.22.1' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
 const { SHELL_CSS, TAB_JS } = await import('../shell.mjs');
 const USAGE_SH = path.join(HERE, '..', 'usage.sh');
 import { providerNames as vendorDisplayNames, projectMap as buildProjectMap } from '../lib/project-meta.mjs';
+
+// bash 可执行解析（Windows 的 Git for Windows 默认只把 git.exe 加入 PATH，bash.exe 常缺；
+// 侧栏面板与价格同步都依赖 bash，按常见安装位置兜底查找）——与 serve.mjs 同逻辑
+let bashCmdCache;
+function resolveBash() {
+  if (bashCmdCache) return bashCmdCache;
+  let cmd = 'bash';
+  if (process.platform === 'win32') {
+    const candidates = [
+      process.env.ZCODE_BASH,
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+      path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Git', 'bin', 'bash.exe'),
+    ].filter(Boolean);
+    cmd = candidates.find((c) => { try { return fs.existsSync(c); } catch (e) { return false; } }) || 'bash';
+  }
+  bashCmdCache = cmd;
+  return cmd;
+}
+
 let dashCache = { at: 0, html: null };
 function getPanelHtml() {
   return new Promise((resolve, reject) => {
@@ -347,8 +368,10 @@ function getPanelHtml() {
     const gen = (limitEnv) => new Promise((res2, rej2) => {
       // 唯一临时名：并发 resources/read 会同时起多个 gen，固定 pid 名会互相 unlink/读错文件
       const tmp = path.join(os.tmpdir(), 'usage-detail-panel-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.html');
-      execFile('bash', [USAGE_SH, 'dashboard', tmp], { timeout: 120000, env: { ...process.env, ZCODE_USAGE_LIMIT: limitEnv } }, (err) => {
-        if (err) return rej2(new Error('生成仪表盘失败：' + (err.message || err)));
+      execFile(resolveBash(), [USAGE_SH, 'dashboard', tmp], { timeout: 120000, env: { ...process.env, ZCODE_USAGE_LIMIT: limitEnv } }, (err) => {
+        if (err) return rej2(new Error(err && err.code === 'ENOENT'
+          ? '未找到 bash（Windows 需安装 Git for Windows，或设置 ZCODE_BASH 指向 bash.exe）'
+          : '生成仪表盘失败：' + (err.message || err)));
         try {
           const frag = fs.readFileSync(tmp, 'utf8');
           fs.unlinkSync(tmp);
@@ -425,12 +448,24 @@ const TURNSTATS_FILE = path.join(os.homedir(), '.zcode', 'usage-turnstats.json')
 const ALERTS_CFG = path.join(os.homedir(), '.zcode', 'usage-alerts.json');
 
 function atomicWrite(file, data, mode) {
+  // 原子写 + Windows 兜底：rename 到被占用（杀毒/并发读）的目标会 EPERM——短重试后直写保功能
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, data, mode != null ? { mode } : undefined);
-  fs.renameSync(tmp, file);
+  for (let i = 0; i < 3; i++) {
+    try { fs.renameSync(tmp, file); return; } catch (e) {
+      if (i === 2) {
+        try { fs.writeFileSync(file, data, mode != null ? { mode } : undefined); } catch (e2) {}
+        try { fs.unlinkSync(tmp); } catch (e2) {}
+        return;
+      }
+      const until = Date.now() + 60; while (Date.now() < until) { /* 短退避 */ }
+    }
+  }
 }
+// Windows 记事本等编辑器保存的 UTF-8 文件常带 BOM，JSON.parse 会直接抛错——读取后剥除
+const stripBom = (s) => String(s == null ? '' : s).replace(/^\uFEFF/, '');
 function readJsonCfg(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; }
+  try { return JSON.parse(stripBom(fs.readFileSync(file, 'utf8'))); } catch (e) { return fallback; }
 }
 function readPricesCfg() {
   const v = readJsonCfg(PRICES_FILE, null);
@@ -767,7 +802,7 @@ function handleToolCall(name, args) {
   if (name === 'usage_prices_sync') {
     // 联网同步 models.dev 价格表（与 serve /api/sync-prices、usage.sh prices sync 同一实现）
     return new Promise((resolve) => {
-      execFile('bash', [USAGE_SH, 'prices', 'sync'], { timeout: 90000, env: process.env }, (err, stdout) => {
+      execFile(resolveBash(), [USAGE_SH, 'prices', 'sync'], { timeout: 90000, env: process.env }, (err, stdout) => {
         if (err) {
           resolve({ isError: true, content: [{ type: 'text', text: '同步失败：' + ((err.message || err) + '').slice(0, 300) }] });
           return;

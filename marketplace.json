@@ -4,7 +4,7 @@
     {
       "name": "usage-detail",
       "source": "./usage-detail",
-      "version": "0.22.0",
+      "version": "0.22.1",
       "description": "Local per-request usage analytics for ZCode: drill-down request rows (token breakdown, tok/s, cache rate), a live session side-panel dashboard, session health scores, model leaderboard, waste forensics, budget and burn alerts, list-price converted costs, activity heatmap and export - read-only local SQLite, zero model overhead.",
       "displayName": "Usage Detail",
       "displayName_i18n": {

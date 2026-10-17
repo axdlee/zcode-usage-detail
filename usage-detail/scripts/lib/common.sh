@@ -22,10 +22,12 @@ fi
 if [[ "${ZCODE_USAGE_SQLITE:-}" == "node" ]] || ! command -v sqlite3 >/dev/null 2>&1; then
   q() { node "$SCRIPT_DIR/sqlite.mjs" -header "$DB" "$1"; }
   qr() { node "$SCRIPT_DIR/sqlite.mjs" "$DB" "$1"; }
+  qc() { node "$SCRIPT_DIR/sqlite.mjs" -csv -header "$DB" "$1"; }
 else
   q() { sqlite3 -readonly -header -column "$DB" "$1"; }
   # 输出原始单值（供 JSON 组装），不带表格格式化
   qr() { sqlite3 -readonly "$DB" "$1"; }
+  qc() { sqlite3 -readonly -csv -header "$DB" "$1"; }
 fi
 
 is_num() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }

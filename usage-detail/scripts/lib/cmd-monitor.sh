@@ -183,9 +183,10 @@ const os = require('node:os'), path = require('node:path'), fs = require('node:f
 const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
 const { DatabaseSync } = require('node:sqlite');
 let prices = { models: {}, usdCny: null, currency: 'CNY' };
-try { const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-prices.json'), 'utf8')); prices.models = v.models || {}; prices.usdCny = v.usdCny; prices.currency = v.currency || 'CNY'; } catch (e) {}
+const stripBom = (t) => String(t).replace(/^\uFEFF/, '');
+try { const v = JSON.parse(stripBom(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-prices.json'), 'utf8'))); prices.models = v.models || {}; prices.usdCny = v.usdCny; prices.currency = v.currency || 'CNY'; } catch (e) {}
 let budget = { daily: 0, monthly: 0 };
-try { budget = { ...budget, ...JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-budget.json'), 'utf8')) }; } catch (e) {}
+try { budget = { ...budget, ...JSON.parse(stripBom(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-budget.json'), 'utf8'))) }; } catch (e) {}
 const rate = Number(process.env.ZCODE_USAGE_USD_CNY) || Number(prices.usdCny) || 7.2;
 const db = new DatabaseSync(DB, { readOnly: true });
 const now = Date.now(), t0 = new Date(new Date().toDateString()).getTime();

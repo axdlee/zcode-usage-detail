@@ -14,7 +14,7 @@ export function providerNames() {
   if (nameCache.v && Date.now() - nameCache.at < 60000) return nameCache.v;
   const v = {};
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json'), 'utf8'));
+    const cfg = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json'), 'utf8')).replace(/^\uFEFF/, ''));
     for (const r of ((cfg.config && cfg.config.providerConfigRules && cfg.config.providerConfigRules.providerRules) || [])) {
       const id = String(r.providerId || '');
       const name = String(r.providerName || '').trim();
@@ -46,12 +46,16 @@ export function projectMap(dirs) {
   return m;
 }
 
-// CLI 入口（bash 版 dashboard 消费）：node project-meta.mjs '<dirs-json>'
+// CLI 入口（bash 版 dashboard 消费）：echo '<dirs-json>' | node project-meta.mjs
 // → {"providerNames":{...},"projectMap":{...}}
-// 仅作为主模块运行时生效——被 import 时 argv[2] 是宿主脚本的参数，绝不能碰
+// dirs 走 stdin：Git Bash(MSYS) 会把 argv 里以 / 开头的路径参数自动改写成 Windows
+// 安装路径（/home/x → C:/Program Files/Git/home/x），JSON 目录清单会被篡改；stdin 不经转换。
+// 仅作为主模块运行——被 import 时 argv 是宿主脚本的参数，绝不能碰。
 const asMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (asMain) {
+  let raw = '';
+  try { if (!process.stdin.isTTY) raw = fs.readFileSync(0, 'utf8'); } catch (e) {}
   let dirs = [];
-  try { dirs = JSON.parse(process.argv[2] || '[]'); } catch (e) {}
+  try { dirs = JSON.parse(raw.trim() || process.argv[2] || '[]'); } catch (e) {}
   process.stdout.write(JSON.stringify({ providerNames: providerNames(), projectMap: projectMap(dirs) }));
 }

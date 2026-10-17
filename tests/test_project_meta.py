@@ -90,6 +90,17 @@ class ProjectMetaTest(unittest.TestCase):
                          "无 git 时所有目录都应退化为空串")
         self.assertEqual(r["providerNames"], {})
 
+    def test_04b_dirs_via_stdin(self):
+        # bash 侧经 stdin 传 dirs（Git Bash/MSYS 会篡改 argv 里的 POSIX 路径），stdin 不经转换
+        import subprocess
+        env = self.home.env()
+        deep = PLUGIN / "scripts"
+        proc = subprocess.run(["node", str(PM)], input=json.dumps([str(deep)]),
+                              capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        r = json.loads(proc.stdout)
+        self.assertTrue(r["projectMap"][str(deep)], "stdin 方式应照常解析 git 根")
+
     def test_05_dashboard_text_guards(self):
         # 前端三特性的文本护栏：真名映射 / 项目归并 / 本轮兜底，缺一处即回归
         src = DASH.read_text()
@@ -99,6 +110,12 @@ class ProjectMetaTest(unittest.TestCase):
         self.assertIn("window.__udTurnFallback", src, "本轮兜底函数缺失")
         self.assertIn("window.__udTurnFallback() : ''", src, "横幅未接兜底回退")
         self.assertIn("'providerNames', json_extract(json('$PMETA')", src, "bash META 未注入 providerNames")
+        self.assertIn("| node \"$SCRIPT_DIR/lib/project-meta.mjs\"", src, "dirs 未走 stdin（MSYS 会篡改 argv 路径）")
+        mon = (PLUGIN / "scripts" / "lib" / "cmd-monitor.sh").read_text()
+        self.assertIn("stripBom", mon, "statusline 未剥 BOM")
+        shim = (PLUGIN / "scripts" / "sqlite.mjs").read_text()
+        self.assertIn("readfile", shim, "sqlite 替身缺 readfile（Windows 无 CLI 时价格注入必炸）")
+        self.assertIn("-csv", shim, "sqlite 替身缺 csv 模式（export csv 回落依赖）")
 
 
 if __name__ == "__main__":

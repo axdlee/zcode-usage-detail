@@ -69,6 +69,25 @@ class CostFormulaTest(unittest.TestCase):
             row = next((l for l in r.stdout.splitlines() if "Model-A" in l), "")
             self.assertIn(expect, row, f"{label} 期望含 {expect}，实际行：{row}")
 
+    def test_shim_cost_readfile(self):
+        # Windows 无 sqlite3 CLI 时走 node 替身：readfile() 自定义函数必须可用（同数值断言）
+        env = {**self.env, "ZCODE_USAGE_SQLITE": "node"}
+        r = subprocess.run(["bash", str(USAGE_SH), "cost"], text=True, capture_output=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row = next((l for l in r.stdout.splitlines() if "Model-A" in l), "")
+        self.assertIn("1.4", row, f"替身路径成本口径漂移：{row}")
+
+    def test_bom_price_file(self):
+        # Windows 记事本保存的 UTF-8 带 BOM：CLI 与替身路径都必须照常读价（SQL 层剥 BOM）
+        bom = self.prices.with_suffix(".bom.json")
+        bom.write_bytes(b"\xef\xbb\xbf" + self.prices.read_bytes())
+        for extra in ({}, {"ZCODE_USAGE_SQLITE": "node"}):
+            env = {**self.env, "ZCODE_USAGE_PRICES": str(bom), **extra}
+            r = subprocess.run(["bash", str(USAGE_SH), "cost"], text=True, capture_output=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            row = next((l for l in r.stdout.splitlines() if "Model-A" in l), "")
+            self.assertIn("1.4", row, f"BOM 价格文件读取失败（{extra}）：{row}")
+
     def test_front_end_formula_guards(self):
         # 文本护栏：三处实现都必须是「未命中 = input - cache_read」口径
         dash = (PLUGIN / "scripts" / "lib" / "dashboard.sh").read_text()
