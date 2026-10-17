@@ -195,6 +195,9 @@ cmd_export() {
         ;;
       json)
         out="${out:-zcode-usage-export.json}"
+        # turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
+        turn_expr="NULL"
+        [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"
         qr "
           WITH P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM model_usage)),
                M AS (SELECT model_id AS v, row_number() OVER (ORDER BY model_id)-1 AS i FROM (SELECT DISTINCT model_id FROM model_usage)),
@@ -214,7 +217,7 @@ cmd_export() {
                       R.duration_ms,
                       CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
                       CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${turn_expr}))
                     FROM R
                     LEFT JOIN S SI ON SI.v = R.session_id
                     LEFT JOIN M MI ON MI.v = R.model_id

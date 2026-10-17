@@ -1,6 +1,6 @@
 {
   "name": "usage-detail",
-  "version": "0.18.2",
+  "version": "0.19.0",
   "description": "ZCode 本地逐条用量分析：请求明细钻取（token 构成、tok/s、缓存率）、会话侧栏实时仪表盘、会话健康分、模型效率排行、浪费取证、预算与燃烧告警、折算成本（官方牌价）、活跃热力图与导出——只读本地 SQLite，零模型开销。",
   "author": {
     "name": "axdlee",
@@ -32,6 +32,30 @@
       "title": "官方配额接口地址（可选）",
       "description": "默认 https://open.bigmodel.cn，一般无需修改",
       "default": ""
+    },
+    "deepseekKey": {
+      "type": "string",
+      "title": "DeepSeek API Key（可选）",
+      "description": "配置后配额卡与 usage_quota 显示 DeepSeek 官方余额。Key 仅发送到 api.deepseek.com，只读查询",
+      "default": ""
+    },
+    "kimiKey": {
+      "type": "string",
+      "title": "Kimi API Key（可选）",
+      "description": "配置后配额卡与 usage_quota 显示 Kimi Code 的 5 小时/周窗口用量。Key 仅发送到 api.kimi.com，只读查询",
+      "default": ""
+    },
+    "openrouterKey": {
+      "type": "string",
+      "title": "OpenRouter API Key（可选）",
+      "description": "配置后配额卡与 usage_quota 显示 OpenRouter 预付额度使用情况。Key 仅发送到 openrouter.ai，只读查询",
+      "default": ""
+    },
+    "minimaxKey": {
+      "type": "string",
+      "title": "MiniMax API Key（可选）",
+      "description": "配置后配额卡与 usage_quota 显示 MiniMax Token Plan 窗口用量。Key 仅发送到 api.minimaxi.com，只读查询",
+      "default": ""
     }
   },
   "mcpServers": {
@@ -45,7 +69,11 @@
         "ZCODE_USAGE_DB": "${user_config.dbPath}",
         "ZCODE_USAGE_LIMIT": "${user_config.panelLimit}",
         "ZCODE_USAGE_QUOTA_TOKEN": "${user_config.quotaToken}",
-        "ZCODE_USAGE_QUOTA_BASE": "${user_config.quotaBase}"
+        "ZCODE_USAGE_QUOTA_BASE": "${user_config.quotaBase}",
+        "ZCODE_USAGE_DEEPSEEK_KEY": "${user_config.deepseekKey}",
+        "ZCODE_USAGE_KIMI_KEY": "${user_config.kimiKey}",
+        "ZCODE_USAGE_OPENROUTER_KEY": "${user_config.openrouterKey}",
+        "ZCODE_USAGE_MINIMAX_KEY": "${user_config.minimaxKey}"
       }
     }
   },

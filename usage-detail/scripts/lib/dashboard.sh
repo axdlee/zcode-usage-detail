@@ -45,6 +45,9 @@ cmd_dashboard() {
     rollout_mb=$(du -sm "$HOME/.zcode/cli/rollout" 2>/dev/null | cut -f1 || true); rollout_mb=${rollout_mb:-0}
     artifacts_mb=$(du -sm "$HOME/.zcode/cli/artifacts" 2>/dev/null | cut -f1 || true); artifacts_mb=${artifacts_mb:-0}
     db_mb=$(du -m "$DB" 2>/dev/null | cut -f1 || true); db_mb=${db_mb:-0}
+    # turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
+    turn_expr="NULL"
+    [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
            P AS (SELECT provider_id AS v, row_number() OVER (ORDER BY provider_id)-1 AS i FROM (SELECT DISTINCT provider_id FROM U)),
@@ -88,7 +91,7 @@ cmd_dashboard() {
                   R.duration_ms,
                   CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
                   CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${turn_expr}))
                 FROM R
                 LEFT JOIN S SI ON SI.v = R.session_id
                 LEFT JOIN M MI ON MI.v = R.model_id
@@ -180,6 +183,11 @@ cmd_dashboard() {
 #usage-dashboard .ud-pager .btn{margin-top:0;}
 /* 热力图：格子悬停描边（十字定位感） */
 #usage-dashboard #ud-heatmap svg rect:hover{stroke:var(--foreground);stroke-width:1;}
+/* ===== 环比变更徽章（quota-peek 式：涨幅分级着色） ===== */
+#usage-dashboard .ud-badge{display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:5px;font-size:11px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums;flex:none;vertical-align:1px;}
+#usage-dashboard .ud-badge.up{background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--red);}
+#usage-dashboard .ud-badge.down{background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green);}
+#usage-dashboard .ud-badge.flat{background:var(--muted);color:var(--muted-foreground);font-weight:500;}
 /* ===== 计费窗口（近似）横条列表 ===== */
 #usage-dashboard .ud-win-list{display:flex;flex-direction:column;gap:6px;}
 #usage-dashboard .ud-win{display:grid;grid-template-columns:200px 1fr auto;align-items:center;gap:12px;padding:5px 10px;border:1px solid var(--ud-soft);border-radius:9px;}
@@ -527,6 +535,11 @@ function __usageBoot(D) {
     return base * tierMult(r[1], p.tariff);
   }
   function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : N(mb) + ' MB'; }
+  // 项目名：取最后一段目录名，兼容 Windows 反斜杠与 POSIX 斜杠（尾分隔符、盘符根都安全）
+  function baseName(dir) {
+    var parts = String(dir || '').split(/[\\/]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : String(dir || '');
+  }
   function fmtCost(c) { return c == null ? '–' : CURSYM + (c >= 100 ? Math.round(c).toLocaleString('zh-CN') : c.toFixed(2)); }
   // 列表用短格式：小数字原样、大数 k/M，悬停（data-tip 即时层）看完整值；fmt() 的万/亿保留给卡片与图表
   function fmtK(n) {
@@ -676,26 +689,49 @@ function __usageBoot(D) {
       return '<div class="ud-fact"><span class="fdot" style="background:' + (C[ac] || C.gray) + '"></span><span class="fl">' + l + '</span><span class="fv">' + v + (s ? '<span class="fs">' + s + '</span>' : '') + '</span></div>';
     }
     var items = [];
+    // 今日 vs 昨日环比徽章（quota-peek 式：上涨红 / 下降绿 / ±10% 平稳灰）。
+    // 用全量 R 而非筛选后的 rows：默认筛选是「今天」，昨天的行会被滤掉，环比就没了基准
+    (function () {
+      var t0 = new Date(new Date().toDateString()).getTime();
+      var y0 = t0 - 864e5;
+      var today = 0, yest = 0, todayC = 0, yestC = 0;
+      R.forEach(function (r) {
+        var t = N(r[4]) + N(r[5]);
+        if (r[1] >= t0) { today += t; var c1 = rowCost(r); if (c1 != null) todayC += c1; }
+        else if (r[1] >= y0) { yest += t; var c2 = rowCost(r); if (c2 != null) yestC += c2; }
+      });
+      if (today > 0 || yest > 0) {
+        var badge = '';
+        if (yest > 0) {
+          var pct = Math.round((today - yest) / yest * 100);
+          if (pct >= 10) badge = '<span class="ud-badge up">↑ ' + pct + '%</span>';
+          else if (pct <= -10) badge = '<span class="ud-badge down">↓ ' + Math.abs(pct) + '%</span>';
+          else badge = '<span class="ud-badge flat">→ 平稳</span>';
+        }
+        items.push(row('今日用量', fmt(today) + ' tok ' + badge, 'gold',
+          (yestC > 0 ? '昨日 ' + fmtCost(yestC) : '')));
+      }
+    })();
     items.push(row('活跃天数', days.length + ' 天', 'blue'));
     items.push(row('连续活跃', cur + ' 天', 'blue', '最长 ' + longest));
     // 燃烧率常驻前排（现在进行时的指标，ccusage burn rate / claude-monitor 标配）；
-    // 节奏标记借鉴 coding-usage-bar：当前速率折算日耗 vs 近 7 天日均 → 放缓/平稳/加速
+    // 节奏标记借鉴 coding-usage-bar：当前速率折算日耗 vs 近 7 天日均 → 放缓/平稳/加速。
+    // 同样用全量 R：时间筛选成「今天」时近 7 天基准会失真
     (function () {
-      var nowMs = Date.now(), r1h = 0, c1h = 0;
-      rows.forEach(function (r) { if (r[1] >= nowMs - 3600e3 && r[1] <= nowMs + 60e3) { r1h += N(r[4]) + N(r[5]); var cc = rowCost(r); if (cc != null) c1h += cc; } });
+      var nowMs = Date.now(), r1h = 0;
+      R.forEach(function (r) { if (r[1] >= nowMs - 3600e3 && r[1] <= nowMs + 60e3) { r1h += N(r[4]) + N(r[5]); } });
         if (r1h > 0) {
           var perMin = Math.round(r1h / 60);
-          var sub = c1h > 0 ? '折算 ' + fmtCost(c1h) : '';
           var pace = '';
           var perDay7 = {}, earliest = nowMs - 7 * 864e5;
-          rows.forEach(function (r) { if (r[1] >= earliest && r[1] < new Date(new Date().toDateString()).getTime()) { var k = dayKey(r[1]); perDay7[k] = (perDay7[k] || 0) + N(r[4]) + N(r[5]); } });
+          R.forEach(function (r) { if (r[1] >= earliest && r[1] < new Date(new Date().toDateString()).getTime()) { var k = dayKey(r[1]); perDay7[k] = (perDay7[k] || 0) + N(r[4]) + N(r[5]); } });
           var d7 = Object.keys(perDay7);
           if (d7.length >= 2) {
             var avg7 = d7.reduce(function (a, k) { return a + perDay7[k]; }, 0) / d7.length;
             var ratio = avg7 > 0 ? (r1h * 24) / avg7 : 0;
             pace = ratio < 0.5 ? '节奏：放缓' : ratio <= 1.5 ? '节奏：平稳' : '节奏：加速';
           }
-          items.push(row('近 1h 燃烧率', fmtI(perMin) + ' tok/min', 'red', [sub, pace].filter(Boolean).join(' · ')));
+          items.push(row('近 1h 燃烧率', fmtI(perMin) + ' tok/min', 'red', pace));
         }
     })();
     if (peak) items.push(row('峰值日', peak.slice(5), 'purple', fmt(peakV) + ' tok'));
@@ -1117,22 +1153,37 @@ function __usageBoot(D) {
     rs.forEach(function (r) { if (N(r[4]) > maxIn) maxIn = N(r[4]); });
     // 上下文窗口上限（官方口径）：GLM-5.3 系 1M（docs.z.ai / docs.bigmodel.cn，2026-10 核实）。
     // 按会话内请求最多的模型取窗口；未知模型不画参考线，只显示峰值。
-    var CTX_1M = 1048576;
+    // 窗口优先级：用户覆盖（设置里配置，全模型生效）> 该模型官方窗口（models.dev/内置表）> GLM-5.3 系内置 1M
     var modelCount = {};
     rs.forEach(function (r) { modelCount[r[2]] = (modelCount[r[2]] || 0) + 1; });
     var domModel = -1, domN = -1;
     for (var mk in modelCount) { if (modelCount[mk] > domN) { domN = modelCount[mk]; domModel = +mk; } }
-    var domName = String(MD[domModel] || '').toLowerCase();
-    var ctxLimit = /glm-5\.3/.test(domName) ? CTX_1M : 0;
-    // 主会话点连线（子代理是独立上下文，只画散点，避免主线假性跳变）；压缩事件画竖线标记
-    var pts = [], dots = [], subDots = [];
+    var domName = String(MD[domModel] || '');
+    var ctxOverride = PRICE && Number(PRICE.ctxOverride) > 0 ? Number(PRICE.ctxOverride) : 0;
+    var modelCtx = (PMODELS[domName] && Number(PMODELS[domName].ctx) > 0) ? Number(PMODELS[domName].ctx) : 0;
+    var ctxLimit = ctxOverride || modelCtx || (/glm-5\.3/i.test(domName) ? 1048576 : 0);
+    // 主会话点连线（子代理是独立上下文，只画散点，避免主线假性跳变）；压缩事件画竖线标记；
+    // 轮次（turn_id）变化处画浅分隔：一个轮次 = 一次提问后的完整代理步骤（含其子代理尝试）
+    var pts = [], dots = [], subDots = [], turnSeps = [];
+    var turnIds = [], turnNo = {};
+    rs.forEach(function (r) {
+      var tid = r[14] == null ? '' : String(r[14]);
+      if (tid && turnNo[tid] == null) { turnNo[tid] = turnIds.length + 1; turnIds.push(tid); }
+    });
+    var prevTurn = null;
     rs.forEach(function (r, i) {
       var x = rs.length > 1 ? i / (rs.length - 1) * (W - 8) + 4 : W / 2;
       var y = H - 8 - (H - 16) * N(r[4]) / maxIn;
+      var tid = r[14] == null ? '' : String(r[14]);
+      var turnLabel = tid && turnNo[tid] != null ? ' · 第 ' + turnNo[tid] + ' 轮' : '';
+      if (prevTurn != null && tid && tid !== prevTurn) {
+        turnSeps.push('<line x1="' + x.toFixed(1) + '" y1="4" x2="' + x.toFixed(1) + '" y2="' + (H - 4) + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="2 4" opacity=".8"><title>新一轮请求</title></line>');
+      }
+      prevTurn = tid || prevTurn;
       var d = new Date(r[1]);
       var tt = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
       var st = r[8] === 0 ? '完成' : r[8] === 1 ? '失败' : r[8] === 2 ? '已取消' : '进行中';
-      var tip = '<title>' + esc(tt) + ' · 输入 ' + fmt(N(r[4])) + ' tok · 生成 ' + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + (r[9] === 1 ? ' · 子代理' : '') + '</title>';
+      var tip = '<title>' + esc(tt) + ' · 输入 ' + fmt(N(r[4])) + ' tok · 生成 ' + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + turnLabel + (r[9] === 1 ? ' · 子代理' : '') + '</title>';
       if (r[9] === 1) { subDots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.2 : 3.2) + '" fill="var(--viz-series-2)" fill-opacity="0.9">' + tip + '</circle>'); return; }
       pts.push(x.toFixed(1) + ',' + y.toFixed(1));
       dots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.4 : 3.4) + '" fill="var(--viz-series-1)" fill-opacity="0.85">' + tip + '</circle>');
@@ -1159,7 +1210,7 @@ function __usageBoot(D) {
     var curve = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="上下文水位曲线">' +
       '<defs><linearGradient id="udwl" x1="0" y1="0" x2="0" y2="1">' +
       '<stop offset="0%" stop-color="var(--viz-series-1)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--viz-series-1)" stop-opacity="0.04"/></linearGradient></defs>' +
-      areaPath + limitLine + cmpMarks +
+      areaPath + turnSeps.join('') + limitLine + cmpMarks +
       (pts.length > 1 ? '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/>' : '') +
       dots.join('') + subDots.join('') + '</svg>';
     var startT = fullTs(rs.length ? rs[0][1] : 0), endT = fullTs(o.last);
@@ -1299,7 +1350,7 @@ function __usageBoot(D) {
       .sort(function (a, b) { return b.tok - a.tok; });
     headEl.innerHTML = '<tr><th>项目</th><th class="text-end">会话数</th><th class="text-end">请求数</th><th class="text-end">token 合计</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '<th>近 7 天</th><th class="text-end">最后活动</th></tr>';
     bodyEl.innerHTML = list.length ? list.map(function (o) {
-      var base = o.dir.split('/').filter(Boolean).pop() || o.dir;
+      var base = baseName(o.dir);
       var sel = st.proj === o.dir;
       return '<tr class="ud-click" data-proj="' + esc(o.dir) + '" title="点击只看该项目的会话"><td class="text-nowrap">' + esc(base) + (sel ? ' <span class="ud-tag">已选</span>' : '') + '<div class="ud-kv-l" style="margin-top:1px">' + esc(o.dir) + '</div></td>' +
         '<td class="text-end tabular-nums">' + fmtI(Object.keys(o.sess).length) + '</td>' +
@@ -1722,7 +1773,7 @@ function __usageBoot(D) {
     if (pf) {
       pf.hidden = !st.proj;
       if (st.proj) {
-        var base = String(st.proj).split('/').filter(Boolean).pop() || st.proj;
+        var base = baseName(st.proj);
         pf.textContent = '项目：' + base + ' ✕';
       }
     }
@@ -1840,11 +1891,17 @@ function __usageBoot(D) {
       '<td class="ud-mgr-t"><input data-k="in" value="' + e.in + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="out" value="' + e.out + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="cache" value="' + e.cache + '" inputmode="decimal"></td>' +
+      '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + (e.ctxOverride || '') + '" placeholder="' + (e.ctx ? String(e.ctx) : '自动') + '" title="上下文窗口 token 数，留空按模型自动检测（水印曲线用）" inputmode="numeric"></td>' +
       '<td class="text-nowrap"><button type="button" class="btn ud-mgr-save" style="margin:0;padding:1px 8px;font-size:12px">保存</button> <button type="button" class="btn ud-mgr-del" style="margin:0;padding:1px 8px;font-size:12px">删除</button></td></tr>';
   }
   function swRow(id, name, desc, on) {
     return '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + name + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + desc + '</div></div>' +
       '<input type="checkbox" class="form-check-input" id="' + id + '"' + (on ? ' checked' : '') + '></div>';
+  }
+  function vendorRow(id, name, desc) {
+    var v = (mgrState.vendors || {})[id] || {};
+    return '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + name + (v.configured ? ' <span class="ud-tag">已配置</span>' : '') + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + desc + '</div></div>' +
+      '<input type="password" class="form-control form-control-sm" id="ud-vk-' + id + '" placeholder="' + (v.configured ? '已配置 · 输入新值更换' : '未配置') + '" style="width:190px" autocomplete="off" spellcheck="false"></div>';
   }
   function renderMgr() {
     var body = $('ud-mgr-body');
@@ -1859,7 +1916,7 @@ function __usageBoot(D) {
       '<div class="ud-mgr-h">成本单价（元 / 每百万 token）</div>' +
       '<div class="ud-mgr-sub">GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。默认列出当前用量相关模型，搜索可查全量；修改保存后按新价重算。</div>' +
       '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="搜索模型…" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + ' 个模型' + (p.modelsSlim && p.modelsTotal != null ? '（全量 ' + p.modelsTotal + '）' : '') + (list.length >= 60 ? '（仅显示前 60）' : '') + '</span></div>' +
-      '<div class="table-responsive" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px"><table class="table table-sm" style="margin:0"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
+      '<div class="table-responsive" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px"><table class="table table-sm" style="margin:0"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th title="上下文窗口 token 数，留空自动检测">窗口</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
       list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
       '</tbody></table></div>' +
       '<div style="display:flex;gap:8px;align-items:center;margin:10px 0 2px;flex-wrap:wrap"><span class="text-small text-muted">新增模型价：</span><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致）" style="width:230px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:76px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
@@ -1884,6 +1941,13 @@ function __usageBoot(D) {
       '<option value="notify"' + (tsMode === 'notify' ? ' selected' : '') + '>系统通知（推荐）</option>' +
       '<option value="inject"' + (tsMode === 'inject' ? ' selected' : '') + '>对话内统计行（约 0.3k token/轮）</option>' +
       '</select></div>' +
+      '<div class="ud-mgr-h">厂商配额（可选）</div>' +
+      '<div class="ud-mgr-sub" style="margin:-2px 0 6px">在总览页聚合显示各厂商套餐 / 额度用量。GLM 无需配置（自动读客户端日志）；以下 Key 仅发送到对应厂商官方域名做只读查询，保存在本地 <code>~/.zcode/usage-vendors.json</code>（权限 0600）。</div>' +
+      vendorRow('deepseek', 'DeepSeek', '官方账户余额') +
+      vendorRow('kimi', 'Kimi（Moonshot）', '5 小时 / 周窗口用量') +
+      vendorRow('openrouter', 'OpenRouter', '预付额度使用情况') +
+      vendorRow('minimax', 'MiniMax', 'Token Plan 窗口用量') +
+      '<button type="button" class="btn" id="ud-mgr-vsave" style="margin:6px 0 0;padding:2px 10px;font-size:12px">保存 Key</button>' +
       '<div class="ud-mgr-sub" style="margin-top:8px">权限提醒与每轮统计依赖会话钩子，修改后重开会话生效；预算告警立即生效。</div>';
     var qi = $('ud-mgr-q');
     var qTimer = null, qSeq = 0;
@@ -1906,7 +1970,8 @@ function __usageBoot(D) {
       var m = tr.getAttribute('data-m');
       tr.querySelector('.ud-mgr-save').addEventListener('click', function () {
         var get = function (k) { return tr.querySelector('input[data-k="' + k + '"]').value; };
-        priceSave({ url: '/api/prices/set', data: { model: m, in: get('in'), out: get('out'), cache: get('cache') }, tool: { price: { model: m, in: get('in'), out: get('out'), cache: get('cache') } } }).then(afterPriceSave);
+        var payload = { model: m, in: get('in'), out: get('out'), cache: get('cache'), ctxOverride: get('ctxOverride') };
+        priceSave({ url: '/api/prices/set', data: payload, tool: { price: payload } }).then(afterPriceSave);
       });
       tr.querySelector('.ud-mgr-del').addEventListener('click', function () {
         priceSave({ url: '/api/prices/remove', data: { model: m }, tool: { priceRemove: m } }).then(afterPriceSave);
@@ -1934,6 +1999,29 @@ function __usageBoot(D) {
     $('ud-sw-permission').addEventListener('change', function () { postSwitch({ permissionAlerts: this.checked }); });
     $('ud-sw-budget').addEventListener('change', function () { postSwitch({ budgetAlerts: this.checked }); });
     $('ud-sw-turnstats').addEventListener('change', function () { postSwitch({ turnstats: this.value }); });
+    // 厂商配额 Key：只提交有输入的项；已配置项保持输入框为空即不变更
+    $('ud-mgr-vsave').addEventListener('click', function () {
+      var keys = {};
+      ['deepseek', 'kimi', 'openrouter', 'minimax'].forEach(function (id) {
+        var el = $('ud-vk-' + id);
+        if (el && el.value.trim()) keys[id] = el.value.trim();
+      });
+      if (!Object.keys(keys).length) return;
+      this.disabled = true;
+      this.textContent = '保存中…';
+      var btn = this;
+      priceSave({ url: '/api/vendors/set', data: keys, tool: { vendorKeys: keys } }).then(function (sc) {
+        if (sc && sc.vendors) mgrState.vendors = sc.vendors;
+        renderMgr(); // 重建表单：清空已输入的 Key 明文，刷新「已配置」徽标
+        var okEl = document.createElement('span');
+        okEl.className = 'ud-tag';
+        okEl.textContent = '已保存';
+        btn.replaceWith(okEl);
+      }).catch(function () {
+        btn.disabled = false;
+        btn.textContent = '保存 Key';
+      });
+    });
   }
   function postJSON(url, data) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function (r) { return r.json(); });
@@ -1965,6 +2053,7 @@ function __usageBoot(D) {
     apply();
   }
   function afterPriceSave(sc) {
+    if (sc && sc.vendors) mgrState.vendors = sc.vendors; // Key 保存响应带回配置状态（不含明文）
     if (window.__USAGE_SERVE__) { location.reload(); return; }
     var finish = function (p) {
       if (p) { mgrState.prices = p; softReloadPrices(p); }
@@ -1989,6 +2078,7 @@ function __usageBoot(D) {
       mgrState.prices = sc.prices || { currency: 'CNY', models: {} };
       mgrState.budget = sc.budget || {};
       mgrState.switches = sc.switches || {};
+      if (sc.vendors) mgrState.vendors = sc.vendors;
       if (!st.budget) st.budget = mgrState.budget;
       renderMgr();
     }
@@ -1997,9 +2087,10 @@ function __usageBoot(D) {
       Promise.all([
         fetch('/api/prices').then(function (r) { return r.json(); }),
         fetch('/api/budget').then(function (r) { return r.json(); }),
-        fetch('/api/switches').then(function (r) { return r.json(); }).catch(function () { return {}; })
+        fetch('/api/switches').then(function (r) { return r.json(); }).catch(function () { return {}; }),
+        fetch('/api/vendors').then(function (r) { return r.json(); }).catch(function () { return {}; })
       ]).then(function (rs) {
-        renderFrom({ prices: rs[0], budget: rs[1], switches: rs[2] || {} });
+        renderFrom({ prices: rs[0], budget: rs[1], switches: rs[2] || {}, vendors: rs[3] || {} });
       });
     }
     if (window.__USAGE_SERVE__) { loadServe(); return; }
@@ -2061,20 +2152,45 @@ function __usageBoot(D) {
       btn.textContent = '导出失败（需本地面板）';
     }).then(done, done);
   });
-  // 官方配额（可选）：配置 API Key 后 serve 模式显示官方口径配额卡
-  if (window.__USAGE_SERVE__) {
-    fetch('/api/quota').then(function (r) { return r.json(); }).then(function (j) {
-      if (!j || !j.ok || !Array.isArray(j.limits) || !j.limits.length) return;
+  // 厂商配额卡（可选）：多厂商聚合，serve 走 /api/quota，侧栏经 callTool 直调 usage_quota。
+  // 前端 60s 节流：面板每次刷新（切 tab/软刷新）都会进这里，避免频繁外网请求。
+  (function () {
+    var lastAt = 0;
+    function render(j) {
+      if (!j || !Array.isArray(j.vendors) || !j.vendors.length) return;
+      var okCount = j.vendors.filter(function (v) { return v.ok; }).length;
       var host = $('ud-quota-card');
+      if (!host) return;
       host.hidden = false;
-      host.innerHTML = '<h3 style="margin-top:16px">官方套餐配额' + (j.stale ? ' <span class="ud-tag">观测时间：' + (j.logDate || '–') + '</span>' : '') + '</h3><div class="card" style="padding:12px 14px">' +
-        j.limits.map(function (L) {
-          var pct = Math.max(0, Math.min(100, Math.round(N(L.percentage))));
-          return '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between" class="text-small"><span>' + esc(L.type || '配额') + '</span><span class="tabular-nums text-muted">已用 ' + pct + '%' + (L.resetTime ? ' · ' + esc(String(L.resetTime)) + ' 重置' : '') + '</span></div>' +
-            '<div class="ud-budget-bar' + (pct >= 80 ? ' ud-over' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
-        }).join('') + '</div>';
-    }).catch(function () {});
-  }
+      var html = '<h3 style="margin-top:16px">厂商配额</h3><div class="card" style="padding:4px 14px 10px">';
+      j.vendors.forEach(function (v) {
+        html += '<div style="margin:10px 0 0"><div style="display:flex;justify-content:space-between;align-items:baseline" class="text-small"><span style="font-weight:600">' + esc(v.name || v.id) + '</span>' +
+          (v.stale ? '<span class="ud-tag">观测滞后</span>' : (!v.ok ? '<span class="text-muted">不可用</span>' : '')) + '</div>';
+        if (!v.ok && v.error) html += '<div class="text-muted" style="font-size:11px;margin-top:1px">' + esc(String(v.error).slice(0, 110)) + '</div>';
+        (v.items || []).forEach(function (it) {
+          if (it.pct != null) {
+            var pct = Math.max(0, Math.min(100, Math.round(it.pct)));
+            html += '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between" class="text-small"><span>' + esc(it.label || '配额') + '</span><span class="tabular-nums text-muted">已用 ' + pct + '%' + (it.resets ? ' · ' + esc(String(it.resets)) + ' 重置' : '') + '</span></div>' +
+              '<div class="ud-budget-bar' + (pct >= 80 ? ' ud-over' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
+          } else if (it.text != null) {
+            html += '<div style="display:flex;justify-content:space-between;margin:6px 0" class="text-small"><span>' + esc(it.label || '') + '</span><span class="tabular-nums text-muted">' + esc(String(it.text)) + '</span></div>';
+          }
+        });
+        html += '</div>';
+      });
+      if (!okCount) html += '<div class="ud-mgr-sub" style="margin-top:8px">在设置里填写 DeepSeek / Kimi / OpenRouter / MiniMax 的 API Key 可启用更多厂商；GLM 支持零密钥（客户端日志源）。</div>';
+      host.innerHTML = html + '</div>';
+    }
+    function load() {
+      if (Date.now() - lastAt < 60000) return;
+      lastAt = Date.now();
+      if (window.__USAGE_SERVE__) fetch('/api/quota').then(function (r) { return r.json(); }).then(render).catch(function () {});
+      else if (window.zcode && typeof window.zcode.callTool === 'function') {
+        window.zcode.callTool('usage_quota', {}).then(function (r) { render(r && r.structuredContent); }).catch(function () {});
+      }
+    }
+    load();
+  })();
   $('ud-tab-trend').addEventListener('click', function () { requestAnimationFrame(drawTrend); });
   $('ud-insights-more').addEventListener('click', function () {
     insightsOpen = !insightsOpen;

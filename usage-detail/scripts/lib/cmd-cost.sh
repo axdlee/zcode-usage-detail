@@ -78,8 +78,10 @@ for (const prov of Object.keys(md)) {
   for (const [m, v] of Object.entries((md[prov] || {}).models || {})) {
     const p = v.price || v.cost;
     if (!p || (!p.input && !p.output)) continue; // 跳过订阅占位（全 0 价）
-    if (out.models[m] || PINNED.includes(m.toLowerCase())) continue;
-    out.models[m] = { in: (p.input || 0) * RATE, out: (p.output || 0) * RATE, cache: (p.cache_read || 0) * RATE };
+    const ctx = v.limit && v.limit.context ? v.limit.context : undefined;
+    if (out.models[m]) { if (!out.models[m].ctx && ctx) out.models[m].ctx = ctx; continue; }
+    if (PINNED.includes(m.toLowerCase())) continue; // 官方权威价不覆盖；其 ctx 由内置表提供
+    out.models[m] = { in: (p.input || 0) * RATE, out: (p.output || 0) * RATE, cache: (p.cache_read || 0) * RATE, ...(ctx ? { ctx } : {}) };
     n++;
   }
 }

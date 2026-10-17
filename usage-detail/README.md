@@ -40,15 +40,16 @@ Then open `/usage` for the CLI summary or `/usage-ui` for the dashboard. After i
 
 - **Commands / skills**: `/usage`, `/usage-ui`, `/usage-this`, `/usage-this-ui`, `/usage-today` backed by the `usage-detail` skill (read-only CLI: summary/recent/day/days/sessions/models/providers/errors/months/projects/blocks/waste/export…).
 - **MCP server** (`usage-detail-panel`): tools `usage_summary/detail/trend/sessions/session/quota`, `open_full_panel`; resources for the side-panel page and the per-turn stats feed.
+- **Multi-vendor quota card (opt-in)**: the dashboard and `usage_quota` aggregate GLM (zero-key, reads local client logs) with DeepSeek / Kimi / OpenRouter / MiniMax once you fill in each vendor's API key in plugin settings — keys are sent only to that vendor's official API, stored locally (mode 0600), never logged.
 - **Hooks**: `UserPromptSubmit` (per-turn stats guard, silent unless enabled), `Stop` (async, writes a local turn-done marker; optional macOS notification), `PermissionRequest` (async, opt-in reminder).
 - **Local panel service**: `usage.sh serve` (or `open_full_panel`) starts a read-only HTTP server bound to `127.0.0.1:7741`.
 
 ## Privacy & side effects
 
 - **Reads** `~/.zcode/cli/db/db.sqlite` (read-only connection) and the plugin's own config files under `~/.zcode/`.
-- **Writes** only its own config/state files: `~/.zcode/usage-prices.json`, `usage-budget.json`, `usage-alerts.json`, `usage-alerts-state.json`, `usage-turnstats.json`, `usage-turn-done.json`, `usage-serve.json`.
+- **Writes** only its own config/state files: `~/.zcode/usage-prices.json`, `usage-budget.json`, `usage-alerts.json`, `usage-alerts-state.json`, `usage-turnstats.json`, `usage-turn-done.json`, `usage-serve.json`, `usage-vendors.json` (optional vendor quota keys, mode 0600).
 - **Local network**: the panel service listens on `127.0.0.1` only.
-- **Outbound network**: daily price sync from [models.dev](https://models.dev) (disable with `ZCODE_USAGE_NO_AUTOSYNC=1`); optional official quota lookup at `open.bigmodel.cn` only if you configure an API key. No telemetry, no other endpoints.
+- **Outbound network**: daily price sync from [models.dev](https://models.dev) (disable with `ZCODE_USAGE_NO_AUTOSYNC=1`); optional GLM quota lookup (reads local client logs, no credentials sent, or `open.bigmodel.cn` if you configure an API key); optional per-vendor quota lookups — DeepSeek `api.deepseek.com`, Kimi `api.kimi.com`, OpenRouter `openrouter.ai`, MiniMax `api.minimaxi.com` — each only if you configure that vendor's API key, read-only, keys stored locally and never logged. No telemetry, no other endpoints.
 - **Notifications**: cross-platform system toasts — macOS `osascript`, Windows WinRT toast via PowerShell, Linux `notify-send` — silently skipped where unavailable.
 - Third-party material: pricing data from models.dev (converted, cached locally); everything else is original code, MIT licensed.
 

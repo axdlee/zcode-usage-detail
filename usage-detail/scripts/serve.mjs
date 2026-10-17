@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { queryAllVendors } from './vendor-quota.mjs';
 
 const port = Number(process.argv[2]) || 7741;
 const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
@@ -36,6 +37,8 @@ function q(sql) {
   if (!row) return '';
   return String(row[Object.keys(row)[0]]);
 }
+// turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
+const TURN_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'") === '1' ? 'R.turn_id' : 'NULL';
 
 function pricePath() {
   if (process.env.ZCODE_USAGE_PRICES && fs.existsSync(process.env.ZCODE_USAGE_PRICES)) return process.env.ZCODE_USAGE_PRICES;
@@ -81,7 +84,7 @@ const META_SQL = (pfText, limit, disk) => `
               R.duration_ms,
               CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
               CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
+              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${TURN_EXPR}))
             FROM R
             LEFT JOIN S SI ON SI.v = R.session_id
             LEFT JOIN M MI ON MI.v = R.model_id
@@ -121,7 +124,36 @@ function writePrices(next) {
 }
 function priceEntry(m) {
   const i = Number(m.in), o = Number(m.out), c = Number(m.cache);
-  return { in: Number.isFinite(i) ? Math.max(0, i) : 0, out: Number.isFinite(o) ? Math.max(0, o) : 0, cache: Number.isFinite(c) ? Math.max(0, c) : 0 };
+  const e = { in: Number.isFinite(i) ? Math.max(0, i) : 0, out: Number.isFinite(o) ? Math.max(0, o) : 0, cache: Number.isFinite(c) ? Math.max(0, c) : 0 };
+  if (m.ctx != null) e.ctx = Number(m.ctx) || undefined; // 上下文窗口（models.dev / 内置表），改价时保留
+  const co = Number(m.ctxOverride); // 用户显式覆盖的上下文窗口（0/空 = 清除覆盖，还原自动检测）
+  if (Number.isFinite(co) && co > 0) e.ctxOverride = Math.round(co);
+  return e;
+}
+
+// 多厂商配额凭据（可选）：与 panel-server 同一文件同一格式，权限 0600；只回传「是否已配置」，不回明文
+const VENDOR_IDS = ['deepseek', 'kimi', 'openrouter', 'minimax'];
+function vendorKeysPath() { return path.join(os.homedir(), '.zcode', 'usage-vendors.json'); }
+function readVendorFile() {
+  try { return JSON.parse(fs.readFileSync(vendorKeysPath(), 'utf8')) || {}; } catch (e) { return {}; }
+}
+function readVendorMask() {
+  const v = readVendorFile();
+  return Object.fromEntries(VENDOR_IDS.map((id) => [id, { configured: !!(v[id] && (v[id].key || v[id].token)) }]));
+}
+function writeVendorKeys(keys) {
+  const cur = readVendorFile();
+  for (const id of VENDOR_IDS) {
+    if (!(id in (keys || {}))) continue;
+    const k = String(keys[id] || '').trim();
+    if (k) cur[id] = { key: k };
+    else delete cur[id]; // 空串 = 清除该厂商凭据
+  }
+  const tmp = vendorKeysPath() + '.tmp';
+  fs.mkdirSync(path.dirname(vendorKeysPath()), { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(cur, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(tmp, vendorKeysPath());
+  return readVendorMask();
 }
 function budgetPath() { return path.join(os.homedir(), '.zcode', 'usage-budget.json'); }
 function readBudget() {
@@ -227,17 +259,16 @@ function diskJSON() {
 }
 
 let quotaCache = { at: 0, v: null };
-function quotaJSON() {
+async function quotaJSON() {
   if (quotaCache.v && Date.now() - quotaCache.at < 60000) return quotaCache.v;
+  let v;
   try {
-    const out = execFileSync(process.execPath, [path.join(HERE, 'quota.mjs')], { encoding: 'utf8', timeout: 25000 });
-    quotaCache = { at: Date.now(), v: JSON.parse(out) };
+    v = await queryAllVendors(); // 多厂商聚合（GLM 走零密钥日志源，其余可选 Key）
   } catch (e) {
-    let msg = e.message;
-    try { msg = JSON.parse(e.stdout || '{}').error || msg; } catch (e2) {}
-    quotaCache = { at: Date.now(), v: { ok: false, error: String(msg).slice(0, 160) } };
+    v = { ok: false, vendors: [], error: String((e && e.message) || e).slice(0, 160) };
   }
-  return quotaCache.v;
+  quotaCache = { at: Date.now(), v };
+  return v;
 }
 
 function requestJSON(id) {
@@ -389,7 +420,7 @@ const server = http.createServer(async function (req, res) {
       res.end(dataJSON(u.searchParams.get('limit')));
     } else if (req.method === 'GET' && u.pathname === '/api/quota') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify(quotaJSON()));
+      res.end(JSON.stringify(await quotaJSON()));
     } else if (req.method === 'GET' && u.pathname === '/api/request') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(requestJSON(u.searchParams.get('id') || '')));
@@ -412,7 +443,13 @@ const server = http.createServer(async function (req, res) {
       const model = String(b.model || '').trim();
       if (!model) throw new Error('模型名不能为空');
       const next = readPrices();
-      next.models[model] = priceEntry(b);
+      const prev = next.models[model] || {};
+      // ctxOverride 显式传空串 = 清除覆盖；未传 = 保留原值
+      next.models[model] = priceEntry({
+        ...b,
+        ctx: prev.ctx ?? b.ctx,
+        ctxOverride: b.ctxOverride !== undefined ? b.ctxOverride : prev.ctxOverride,
+      });
       writePrices(next);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, model: model }));
@@ -425,6 +462,13 @@ const server = http.createServer(async function (req, res) {
       writePrices(next);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true }));
+    } else if (req.method === 'POST' && u.pathname === '/api/vendors/set') {
+      const b = await readBody(req);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, vendors: writeVendorKeys(b) }));
+    } else if (req.method === 'GET' && u.pathname === '/api/vendors') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(readVendorMask()));
     } else if (req.method === 'POST' && u.pathname === '/api/prices/remove') {
       const b = await readBody(req);
       const next = readPrices();

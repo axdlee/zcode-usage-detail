@@ -30,6 +30,15 @@ function q1(sql) {
   if (!row) return '';
   return String(row[Object.keys(row)[0]]);
 }
+// turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
+let turnExprCache = null;
+function turnExpr() {
+  if (turnExprCache == null) {
+    try { turnExprCache = q1("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'") === '1' ? 'R.turn_id' : 'NULL'; }
+    catch (e) { turnExprCache = 'NULL'; }
+  }
+  return turnExprCache;
+}
 
 function priceText() {
   const p = USER_PRICE;
@@ -77,7 +86,7 @@ function metaSQL(limit, disk) {
               R.duration_ms,
               CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
               CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count))
+              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${turnExpr()}))
             FROM R
             LEFT JOIN S SI ON SI.v = R.session_id
             LEFT JOIN M MI ON MI.v = R.model_id
@@ -315,7 +324,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.18.2' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.19.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -404,9 +413,9 @@ const BUDGET_FILE = path.join(os.homedir(), '.zcode', 'usage-budget.json');
 const TURNSTATS_FILE = path.join(os.homedir(), '.zcode', 'usage-turnstats.json');
 const ALERTS_CFG = path.join(os.homedir(), '.zcode', 'usage-alerts.json');
 
-function atomicWrite(file, data) {
+function atomicWrite(file, data, mode) {
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, data);
+  fs.writeFileSync(tmp, data, mode != null ? { mode } : undefined);
   fs.renameSync(tmp, file);
 }
 function readJsonCfg(file, fallback) {
@@ -431,6 +440,26 @@ function writePricesCfg(next) {
   metaCache = { at: 0, v: null };
 }
 function readBudgetCfg() { return readJsonCfg(BUDGET_FILE, { daily: 0, monthly: 0 }); }
+
+// 多厂商配额凭据（全部可选）：~/.zcode/usage-vendors.json，权限 0600。
+// 读取侧（vendor-quota.mjs）按 env → 文件顺序解析；此处只写入与回传「是否已配置」，绝不回传明文。
+const VENDOR_IDS = ['deepseek', 'kimi', 'openrouter', 'minimax'];
+function vendorKeysPath() { return path.join(os.homedir(), '.zcode', 'usage-vendors.json'); }
+function readVendorMask() {
+  const v = readJsonCfg(vendorKeysPath(), {}) || {};
+  return Object.fromEntries(VENDOR_IDS.map((id) => [id, { configured: !!(v[id] && (v[id].key || v[id].token)) }]));
+}
+function writeVendorKeys(keys) {
+  const cur = readJsonCfg(vendorKeysPath(), {}) || {};
+  for (const id of VENDOR_IDS) {
+    if (!(id in (keys || {}))) continue;
+    const k = String(keys[id] || '').trim();
+    if (k) cur[id] = { key: k };
+    else delete cur[id]; // 空串 = 清除该厂商凭据
+  }
+  atomicWrite(vendorKeysPath(), JSON.stringify(cur, null, 2) + '\n', 0o600);
+  return readVendorMask();
+}
 
 // 瘦身价格表：宿主对 structuredContent 有 64 KiB 上限（超限字段被省略），而同步后的全量
 // 价目有数千模型（数百 KiB），必须裁剪。默认只返回当前用量出现过的模型 + GLM 系内置价；
@@ -519,12 +548,12 @@ const TOOLS = [
   },
   {
     name: 'usage_quota',
-    description: '官方套餐配额查询（可选功能）：需在插件设置里配置智谱开放平台 API Key（quotaToken），未配置时返回配置指引。返回 5 小时池/周池/MCP 桠的官方用量百分比与重置时间。',
+    description: '多厂商配额聚合（可选功能）：GLM（零密钥客户端日志源）恒查；DeepSeek / Kimi / OpenRouter / MiniMax 在插件设置填写对应 API Key 后启用，Key 仅发送到对应厂商官方域名。返回各窗口已用百分比/余额与重置时间。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'usage_settings_get',
-    description: '读取本地配置：价格表（含币种/汇率/自动同步，默认瘦身为主会话相关模型，query 可搜索全量）、预算、通知开关。',
+    description: '读取本地配置：价格表（含币种/汇率/自动同步，默认瘦身为主会话相关模型，query 可搜索全量）、预算、通知开关、多厂商配额 Key 配置状态（只回传是否已配置，不回传明文）。',
     inputSchema: {
       type: 'object',
       properties: { query: { type: 'string', description: '按模型名子串搜索价格（缺省只返回当前用量相关 + GLM 内置）' } },
@@ -534,15 +563,16 @@ const TOOLS = [
   },
   {
     name: 'usage_settings_set',
-    description: '写入本地配置（App-only，不经模型）：price 更新单模型价、priceGeneral 币种/汇率/自动同步、budget 日月预算、switches 通知开关、priceRemove 删除模型价。',
+    description: '写入本地配置（App-only，不经模型）：price 更新单模型价（可带 ctxOverride 覆盖上下文窗口）、priceGeneral 币种/汇率/自动同步、budget 日月预算、switches 通知开关、priceRemove 删除模型价、vendorKeys 多厂商配额 Key（写入本地凭据文件，不回传明文）。',
     inputSchema: {
       type: 'object',
       properties: {
-        price: { type: 'object', description: '{model,in,out,cache}' },
+        price: { type: 'object', description: '{model,in,out,cache,ctxOverride?}' },
         priceGeneral: { type: 'object', description: '{currency,usdCny,autoSync}' },
         priceRemove: { type: 'string', description: '要删除的模型名' },
         budget: { type: 'object', description: '{daily,monthly}' },
         switches: { type: 'object', description: '{turnstats:off|notify|inject, budgetAlerts:bool, permissionAlerts:bool}' },
+        vendorKeys: { type: 'object', description: '{deepseek?,kimi?,openrouter?,minimax?}：API Key，空串清除' },
       },
       additionalProperties: false,
     },
@@ -628,6 +658,7 @@ async function ensureServe() {
   return { url: 'http://127.0.0.1:7741', started: false, error: '启动超时，可手动运行 usage.sh serve' };
 }
 
+let quotaToolCache = { at: 0, v: null };
 function handleToolCall(name, args) {
   if (name === 'usage_summary') {
     return { structuredContent: buildSummary(), content: [{ type: 'text', text: '用量摘要已生成' }] };
@@ -647,21 +678,25 @@ function handleToolCall(name, args) {
   }
   if (name === 'usage_settings_get') {
     return {
-      structuredContent: { prices: slimPrices(args && args.query), budget: readBudgetCfg(), switches: readSwitchesCfg() },
+      structuredContent: { prices: slimPrices(args && args.query), budget: readBudgetCfg(), switches: readSwitchesCfg(), vendors: readVendorMask() },
       content: [{ type: 'text', text: '配置已读取' }],
     };
   }
   if (name === 'usage_settings_set') {
     let saved = { ok: true };
-    if (args && args.price && args.price.model) {
-      const m = String(args.price.model).trim();
-      if (m) {
-        const next = readPricesCfg();
-        const num = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? x : 0; };
-        next.models[m] = { in: num(args.price.in), out: num(args.price.out), cache: num(args.price.cache) };
-        writePricesCfg(next);
+      if (args && args.price && args.price.model) {
+        const m = String(args.price.model).trim();
+        if (m) {
+          const next = readPricesCfg();
+          const num = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? x : 0; };
+          const prevEntry = next.models[m] || {};
+          next.models[m] = { in: num(args.price.in), out: num(args.price.out), cache: num(args.price.cache) };
+          if (prevEntry.ctx != null) next.models[m].ctx = prevEntry.ctx; // 改价保留上下文窗口字段
+          const co = Number(args.price.ctxOverride); // 用户覆盖的上下文窗口（空/0 = 清除覆盖）
+          if (Number.isFinite(co) && co > 0) next.models[m].ctxOverride = Math.round(co);
+          writePricesCfg(next);
+        }
       }
-    }
     if (args && args.priceRemove) {
       const next = readPricesCfg();
       delete next.models[String(args.priceRemove).trim()];
@@ -677,24 +712,31 @@ function handleToolCall(name, args) {
     }
     if (args && args.budget) writeBudgetCfg(args.budget);
     if (args && args.switches) saved.switches = writeSwitchesCfg(args.switches);
+    if (args && args.vendorKeys) saved.vendors = writeVendorKeys(args.vendorKeys);
     // 附带保存后的瘦身价格表：面板保存成功直接软刷新（MCP App 沙箱内禁止 location.reload）
-    if (args && (args.price || args.priceRemove || args.priceGeneral)) saved.prices = slimPrices('');
+    if (args && (args.price || args.priceRemove || args.priceGeneral || args.vendorKeys)) saved.prices = slimPrices('');
     return {
       structuredContent: saved,
       content: [{ type: 'text', text: '配置已保存' }],
     };
   }
   if (name === 'usage_quota') {
-    if (!process.env.ZCODE_USAGE_QUOTA_TOKEN) {
-      return {
-        structuredContent: { configured: false },
-        content: [{ type: 'text', text: '未配置官方配额 API Key。请在 ZCode 插件设置里给 usage-detail 填写 quotaToken（智谱开放平台 bigmodel.cn 创建的 API Key），保存后重启即可查询官方 coding-plan 配额；也可以直接看 ZCode 的 Usage Stats → Coding Plan（零配置）。' }],
-      };
-    }
-    const out = execFileSync(process.execPath, [path.join(HERE, 'quota.mjs')], { encoding: 'utf8', timeout: 25000 });
-    const j = JSON.parse(out);
-    const lines = (j.limits || []).map((L) => (L.type || '配额') + '：已用 ' + Math.round(L.percentage || 0) + '%' + (L.resetTime ? '，' + L.resetTime + ' 重置' : ''));
-    return { structuredContent: j, content: [{ type: 'text', text: lines.length ? lines.join('\n') : '凭据可用但暂无配额观测。' }] };
+    // 多厂商配额聚合：GLM 零密钥（客户端日志源）恒查，其余厂商按已配置的 Key 查询。
+    // 结果缓存 60s：侧栏面板每次刷新都会调，避免频繁外网请求与子进程拉起。
+    const cached = quotaToolCache.v && Date.now() - quotaToolCache.at < 60000 ? quotaToolCache.v : null;
+    const load = cached
+      ? Promise.resolve(cached)
+      : import('../vendor-quota.mjs').then((mod) => mod.queryAllVendors()).then((j) => { quotaToolCache = { at: Date.now(), v: j }; return j; });
+    return load.then((j) => {
+      const blocks = (j.vendors || []).map((v) => {
+        if (!v.ok) return v.name + '：查询失败（' + ((v.error || '未知错误') + '').slice(0, 120) + '）';
+        return v.name + '\n' + (v.items || []).map((it) => '  ' + (it.label || '配额') + '：' + (it.pct != null ? '已用 ' + it.pct + '%' : String(it.text || '未知')) + (it.resets ? '，' + it.resets + ' 重置' : '')).join('\n');
+      });
+      const text = blocks.length
+        ? blocks.join('\n') + '\n\n（其他厂商可在插件设置里填写 API Key 启用：DeepSeek / Kimi / OpenRouter / MiniMax，Key 仅发送到对应厂商官方域名）'
+        : '暂无配额数据：GLM 零密钥日志源无观测，其他厂商未配置 Key。可在插件设置里填写 DeepSeek / Kimi / OpenRouter / MiniMax 的 API Key 启用聚合查询。';
+      return { structuredContent: j, content: [{ type: 'text', text }] };
+    }).catch((e) => ({ isError: true, content: [{ type: 'text', text: '配额查询失败：' + ((e && e.message) || e + '').slice(0, 200) }] }));
   }
   if (name === 'open_full_panel') {
     return ensureServe().then((r) => ({ structuredContent: r, content: [{ type: 'text', text: r.url + (r.started ? '（已启动）' : '（已在运行）') }] }));

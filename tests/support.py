@@ -20,7 +20,8 @@ SCHEMA = """
         cache_creation_input_tokens INTEGER, computed_total_tokens INTEGER,
         duration_ms INTEGER, time_to_first_token_ms INTEGER,
         status TEXT, error_code TEXT, error_message TEXT,
-        retry_count INTEGER DEFAULT 0, cancelled_by_user INTEGER DEFAULT 0
+        retry_count INTEGER DEFAULT 0, cancelled_by_user INTEGER DEFAULT 0,
+        turn_id TEXT
     );
     CREATE TABLE tool_usage (
         session_id TEXT, tool_name TEXT, status TEXT, duration_ms INTEGER
@@ -54,15 +55,16 @@ class SynthDb:
         self.conn.execute("INSERT INTO session VALUES (?, ?, ?, 1000, 1000)", (sid, title, directory))
 
     def usage(self, rid, sid, started, status="completed", model="Model-A", provider="account:plan",
-              inn=100, out=10, reasoning=5, cache=80, dur=30000, ttft=800, retry=0, source="main_turn"):
+              inn=100, out=10, reasoning=5, cache=80, dur=30000, ttft=800, retry=0, source="main_turn",
+              turn=None):
         self.conn.execute(
             "INSERT INTO model_usage (id, session_id, started_at, model_id, provider_id, query_source,"
             " input_tokens, output_tokens, reasoning_tokens, cache_read_input_tokens,"
             " cache_creation_input_tokens, computed_total_tokens, duration_ms, time_to_first_token_ms,"
-            " status, error_code, error_message, retry_count)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'E_TEST', 'synthetic error', ?)",
+            " status, error_code, error_message, retry_count, turn_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'E_TEST', 'synthetic error', ?, ?)",
             (rid, sid, started, model, provider, source, inn, out, reasoning, cache,
-             inn + out + reasoning, dur, ttft, status, retry))
+             inn + out + reasoning, dur, ttft, status, retry, turn))
 
     def tool(self, sid, name, status="completed", dur=20):
         self.conn.execute("INSERT INTO tool_usage VALUES (?, ?, ?, ?)", (sid, name, status, dur))
