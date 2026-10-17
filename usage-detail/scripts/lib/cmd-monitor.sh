@@ -182,8 +182,8 @@ cmd_statusline() {
 const os = require('node:os'), path = require('node:path'), fs = require('node:fs');
 const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
 const { DatabaseSync } = require('node:sqlite');
-let prices = { models: {}, usdCny: null };
-try { const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-prices.json'), 'utf8')); prices.models = v.models || {}; prices.usdCny = v.usdCny; } catch (e) {}
+let prices = { models: {}, usdCny: null, currency: 'CNY' };
+try { const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-prices.json'), 'utf8')); prices.models = v.models || {}; prices.usdCny = v.usdCny; prices.currency = v.currency || 'CNY'; } catch (e) {}
 let budget = { daily: 0, monthly: 0 };
 try { budget = { ...budget, ...JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-budget.json'), 'utf8')) }; } catch (e) {}
 const rate = Number(process.env.ZCODE_USAGE_USD_CNY) || Number(prices.usdCny) || 7.2;
@@ -193,17 +193,29 @@ const q = (sql, ...a) => db.prepare(sql).all(...a);
 const tok = q("SELECT COALESCE(SUM(input_tokens+output_tokens+reasoning_tokens),0) AS v FROM model_usage WHERE started_at >= ?", t0)[0].v;
 const burn = q("SELECT COALESCE(SUM(input_tokens+output_tokens+reasoning_tokens),0) AS v FROM model_usage WHERE started_at >= ?", now - 3600e3)[0].v;
 let cost = 0;
+// 模型名归一匹配：精确 → 小写 → 遍历小写（与面板 rowCost/priceOf 同口径）；
+// 真实库存在 GLM-5.3-Flash 等大小写形态，直查会 miss 导致折算恒 0、预算告警失效
+const P = prices.models;
+const priceOf = (n) => {
+  n = String(n || '');
+  let p = P[n] || P[n.toLowerCase()];
+  if (!p) { const l = n.toLowerCase(); for (const k in P) { if (k.toLowerCase() === l) { p = P[k]; break; } } }
+  return p;
+};
 for (const r of q("SELECT input_tokens, output_tokens, reasoning_tokens, cache_read_input_tokens, model_id FROM model_usage WHERE started_at >= ?", t0)) {
-  const p = prices.models[r.model_id];
+  const p = priceOf(r.model_id);
   if (!p || !p.in) continue;
   const inBillable = Math.max(0, (r.input_tokens || 0) - (r.cache_read_input_tokens || 0));
   cost += (inBillable * p.in + (r.output_tokens || 0) * p.out + (r.cache_read_input_tokens || 0) * (p.cache || 0)) / 1e6;
 }
 const f = (n) => n >= 1e8 ? (n / 1e8).toFixed(2) + '亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + '万' : String(Math.round(n));
 const parts = ['今日 ' + f(tok) + ' tok'];
-if (cost > 0) parts.push('¥' + (cost * rate).toFixed(2));
+// 价格表已是 CNY 牌价时直接使用；仅 USD 价目（models.dev 同步）才乘汇率折算——
+// 否则 CNY 价 × usdCny 重复换算，金额虚高一个汇率倍数
+const kRate = String(prices.currency).toUpperCase() === 'USD' ? rate : 1;
+if (cost > 0) parts.push('¥' + (cost * kRate).toFixed(2));
 if (burn > 0) parts.push('近1h ' + f(burn / 60) + ' tok/min');
-if (budget.daily > 0 && cost > 0) parts.push('日预算 ' + Math.min(999, Math.round(cost * rate / budget.daily * 100)) + '%');
+if (budget.daily > 0 && cost > 0) parts.push('日预算 ' + Math.min(999, Math.round(cost * kRate / budget.daily * 100)) + '%');
 console.log(parts.join(' · '));
 JS
 }

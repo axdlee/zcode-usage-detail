@@ -13,7 +13,6 @@ import { DatabaseSync } from 'node:sqlite';
 const DB = process.env.ZCODE_USAGE_DB || path.join(os.homedir(), '.zcode/cli/db/db.sqlite');
 const USER_PRICE = process.env.ZCODE_USAGE_PRICES || path.join(os.homedir(), '.zcode/usage-prices.json');
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
-const PANEL_HTML = path.join(HERE, '..', 'ui', 'panel.html');
 const DEFAULT_LIMIT = process.env.ZCODE_USAGE_LIMIT && Number(process.env.ZCODE_USAGE_LIMIT)
   ? Math.max(1, Math.min(20000, Number(process.env.ZCODE_USAGE_LIMIT)))
   : -1; // 默认全部
@@ -328,7 +327,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.21.2' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.21.3' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -507,10 +506,14 @@ function writeSwitchesCfg(b) {
     const v = b.turnstats === 'off' ? { enabled: false } : { enabled: true, mode: b.turnstats };
     atomicWrite(TURNSTATS_FILE, JSON.stringify(v) + '\n');
   }
+  // alerts 单文件承载两个开关：侧栏开关逐个提交单字段，必须读旧值合并再写，
+  // 否则切「预算告警」会抹掉「权限提醒」（与 serve.mjs writeSwitches 同口径）
   const patch = {};
   if (typeof b.budgetAlerts === 'boolean') patch.budget = b.budgetAlerts;
   if (typeof b.permissionAlerts === 'boolean') patch.permission = b.permissionAlerts;
-  if (Object.keys(patch).length) atomicWrite(ALERTS_CFG, JSON.stringify(patch) + '\n');
+  if (Object.keys(patch).length) {
+    atomicWrite(ALERTS_CFG, JSON.stringify(Object.assign({}, readJsonCfg(ALERTS_CFG, {}), patch)) + '\n');
+  }
   return readSwitchesCfg();
 }
 

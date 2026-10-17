@@ -80,6 +80,31 @@ class CostFormulaTest(unittest.TestCase):
         cost_sql = (PLUGIN / "scripts" / "lib" / "cmd-cost.sh").read_text()
         self.assertIn("max(m.input_tokens - m.cache_read_input_tokens, 0)", cost_sql, "CLI cost SQL 未扣减缓存命中")
 
+    def test_statusline_case_insensitive_price_and_currency(self):
+        # statusline 两处历史缺陷：1) 模型名直查价格表，真实库 GLM-5.3-Flash 与小写键
+        # glm-5.3-flash 大小写不合 → 折算恒 0、预算告警失效；2) CNY 价表仍乘 usdCny 汇率
+        # → 金额虚高一个汇率倍数。statusline 写死读 $HOME/.zcode/usage-prices.json，需 HOME 隔离。
+        import time
+        from support import IsoHome
+        home = IsoHome(self.tmp / "home")
+        home.zcode_path("usage-prices.json").write_text(json.dumps({
+            "currency": "CNY", "usdCny": 6.8,
+            "models": {"glm-5.3-flash": {"in": 1, "out": 2, "cache": 0.5}}}))
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO model_usage (id, session_id, started_at, model_id, provider_id, query_source,"
+            " input_tokens, output_tokens, reasoning_tokens, cache_read_input_tokens, status) VALUES"
+            " ('r-today','s1',?, 'GLM-5.3-Flash','account:plan','main_turn',2000000,100000,0,1600000,'completed')",
+            (int(time.time() * 1000),))
+        conn.commit()
+        conn.close()
+        env = {**self.env, "HOME": str(home.root)}
+        r = subprocess.run(["bash", str(USAGE_SH), "statusline"], text=True, capture_output=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # 手算：miss 0.4M×1 + 生成 0.1M×2 + 缓存 1.6M×0.5 = 1.4 CNY，不再乘 6.8
+        self.assertIn("¥1.40", r.stdout, f"金额应为 1.40（大小写匹配 + CNY 不乘汇率），实际：{r.stdout.strip()}")
+        self.assertNotIn("9.52", r.stdout, "出现 9.52 = 1.4×6.8，CNY 价表被重复换算")
+
 
 if __name__ == "__main__":
     unittest.main()

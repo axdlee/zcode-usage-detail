@@ -214,6 +214,33 @@ class ServerPanelTest(unittest.TestCase):
         self.assertEqual(got2["prices"]["usdCny"], 7.35)
         self.assertIs(got2["prices"]["autoSync"], False)
 
+    def test_13b_switches_single_field_merge(self):
+        # 侧栏开关逐个提交单字段：alerts 文件承载两个开关，后写不得抹掉先写（回归护栏）
+        def call_set(switches, rid):
+            return json.dumps({"jsonrpc": "2.0", "id": rid, "method": "tools/call",
+                               "params": {"name": "usage_settings_set",
+                                          "arguments": {"switches": switches}}})
+        msgs = self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            call_set({"budgetAlerts": False}, 2),
+            call_set({"permissionAlerts": True}, 3),
+            call_set({"turnstats": "notify"}, 4),
+            json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                        "params": {"name": "usage_settings_get", "arguments": {}}}),
+        ])
+        by_id = {m.get("id"): m for m in msgs if m.get("id")}
+        sw = by_id[5]["result"]["structuredContent"]["switches"]
+        self.assertIs(sw["budgetAlerts"], False)      # 第二次提交未抹掉预算告警设置
+        self.assertIs(sw["permissionAlerts"], True)   # 权限提醒已开启
+        self.assertEqual(sw["turnstats"], "notify")   # turnstats 文件独立生效
+        # 还原，避免污染同文件后续用例
+        self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            call_set({"budgetAlerts": True, "permissionAlerts": False, "turnstats": "off"}, 2),
+        ])
+
     def test_15_settings_get_slim_and_query(self):
         # 全量价格表（模拟 sync 后数千条）：宿主 structuredContent 有 64KiB 上限，
         # settings_get 缺省只返回当前用量相关 + GLM 内置；query 按名搜索全量。
