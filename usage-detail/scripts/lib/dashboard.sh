@@ -1115,25 +1115,64 @@ function __usageBoot(D) {
     });
     var W = 600, H = 96, maxIn = 1;
     rs.forEach(function (r) { if (N(r[4]) > maxIn) maxIn = N(r[4]); });
-    var pts = [], dots = [];
+    // 上下文窗口上限（官方口径）：GLM-5.3 系 1M（docs.z.ai / docs.bigmodel.cn，2026-10 核实）。
+    // 按会话内请求最多的模型取窗口；未知模型不画参考线，只显示峰值。
+    var CTX_1M = 1048576;
+    var modelCount = {};
+    rs.forEach(function (r) { modelCount[r[2]] = (modelCount[r[2]] || 0) + 1; });
+    var domModel = -1, domN = -1;
+    for (var mk in modelCount) { if (modelCount[mk] > domN) { domN = modelCount[mk]; domModel = +mk; } }
+    var domName = String(MD[domModel] || '').toLowerCase();
+    var ctxLimit = /glm-5\.3/.test(domName) ? CTX_1M : 0;
+    // 主会话点连线（子代理是独立上下文，只画散点，避免主线假性跳变）；压缩事件画竖线标记
+    var pts = [], dots = [], subDots = [];
     rs.forEach(function (r, i) {
       var x = rs.length > 1 ? i / (rs.length - 1) * (W - 8) + 4 : W / 2;
       var y = H - 8 - (H - 16) * N(r[4]) / maxIn;
-      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
       var d = new Date(r[1]);
       var tt = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
       var st = r[8] === 0 ? '完成' : r[8] === 1 ? '失败' : r[8] === 2 ? '已取消' : '进行中';
-      dots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.4 : 3.4) + '" fill="var(--viz-series-1)" fill-opacity="0.85"><title>' + esc(tt) + ' · 输入 ' + fmt(N(r[4])) + ' tok · 生成 ' + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + (r[9] === 1 ? ' · 子代理' : '') + '</title></circle>');
+      var tip = '<title>' + esc(tt) + ' · 输入 ' + fmt(N(r[4])) + ' tok · 生成 ' + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + (r[9] === 1 ? ' · 子代理' : '') + '</title>';
+      if (r[9] === 1) { subDots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.2 : 3.2) + '" fill="var(--viz-series-2)" fill-opacity="0.9">' + tip + '</circle>'); return; }
+      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+      dots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.4 : 3.4) + '" fill="var(--viz-series-1)" fill-opacity="0.85">' + tip + '</circle>');
     });
-    var startT = fullTs(rs.length ? rs[0][1] : 0), endT = fullTs(o.last);
+    // 压缩事件：按时间对齐到最近的请求位置，虚线竖线标注
+    var cmpMarks = '';
+    (cm ? (cm.ts || []) : []).forEach(function (tstr) {
+      var tms = new Date(new Date().getFullYear() + '-' + tstr).getTime(); // tstr 形如 MM-DD HH:MM
+      if (!isFinite(tms)) return;
+      var best = -1, bestD = Infinity;
+      rs.forEach(function (r, i) { var dd = Math.abs(r[1] - tms); if (dd < bestD) { bestD = dd; best = i; } });
+      if (best < 0 || bestD > 30 * 60e3) return;
+      var x = rs.length > 1 ? best / (rs.length - 1) * (W - 8) + 4 : W / 2;
+      cmpMarks += '<line x1="' + x.toFixed(1) + '" y1="4" x2="' + x.toFixed(1) + '" y2="' + (H - 4) + '" stroke="var(--yellow)" stroke-width="1" stroke-dasharray="3 3" opacity=".9"><title>压缩事件 ' + esc(tstr) + '</title></line>';
+    });
+    var limitLine = '';
+    if (ctxLimit && maxIn > ctxLimit * 0.3) {
+      var ly = H - 8 - (H - 16) * Math.min(1, ctxLimit / maxIn);
+      limitLine = '<line x1="0" y1="' + ly.toFixed(1) + '" x2="' + W + '" y2="' + ly.toFixed(1) + '" stroke="var(--red)" stroke-width="1" stroke-dasharray="5 4" opacity=".8"><title>模型上下文窗口 ' + fmt(ctxLimit) + ' tok</title></line>';
+    }
+    var areaPath = pts.length > 1
+      ? '<path d="M' + pts[0].split(',').join(' ') + pts.slice(1).map(function (p) { return ' L' + p.split(',').join(' '); }).join('') + ' L' + (W - 4) + ' ' + (H - 8) + ' L4 ' + (H - 8) + ' Z" fill="url(#udwl)" stroke="none"/>'
+      : '';
     var curve = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="上下文水位曲线">' +
-      '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/>' + dots.join('') + '</svg>';
+      '<defs><linearGradient id="udwl" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="var(--viz-series-1)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--viz-series-1)" stop-opacity="0.04"/></linearGradient></defs>' +
+      areaPath + limitLine + cmpMarks +
+      (pts.length > 1 ? '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/>' : '') +
+      dots.join('') + subDots.join('') + '</svg>';
+    var startT = fullTs(rs.length ? rs[0][1] : 0), endT = fullTs(o.last);
     // 起止时间直接标在水位曲线两端上方
     var curveWrap = '<div style="position:relative">' +
       '<span class="text-small text-muted" style="position:absolute;left:0;top:0">' + esc(startT) + '</span>' +
       '<span class="text-small text-muted" style="position:absolute;right:0;top:0;text-align:right">' + esc(endT) + '</span>' +
       '<div style="padding-top:16px">' + curve + '</div></div>';
-    var curveHead = '<div class="ud-kv-l" style="margin:2px 0 2px">按请求输入 token 近似 · 峰值 ' + fmt(maxIn) + ' · 悬停看点明细</div>';
+    var hasSub = subReq > 0;
+    var curveHead = '<div class="ud-kv-l" style="margin:2px 0 2px">按请求输入 token 近似 · 峰值 ' + fmt(maxIn) +
+      (ctxLimit ? ' · 占 ' + esc(MD[domModel]) + ' 窗口 ' + Math.round(maxIn / ctxLimit * 100) + '%（上限 ' + fmt(ctxLimit) + '）' : '') +
+      ' · 悬停看点明细' + (hasSub ? ' · <span style="color:var(--viz-series-2)">●</span> 子代理为独立上下文（散点）' : '') +
+      (cm ? ' · <span style="color:var(--yellow)">┆</span> 压缩事件' : '') + '</div>';
     var toolDonut = (toolsMap[o.g] || []).length
       ? donut((toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6).map(function (t) {
           return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + ' 次调用' + (t[3] ? ' · 累计 ' + fmtI(t[3]) + ' ms' : '') };
