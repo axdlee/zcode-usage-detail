@@ -195,6 +195,12 @@ cmd_export() {
         ;;
       json)
         out="${out:-zcode-usage-export.json}"
+        # 全新环境表还不存在：导出空数据而不是让 SQL 崩
+        if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
+          printf '{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"total":0,"covered":0,"rows":[]}\n' > "$out"
+          echo "已导出 JSON（空库）：$out"
+          return
+        fi
         # turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
         turn_expr="NULL"
         [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"

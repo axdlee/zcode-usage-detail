@@ -13,6 +13,10 @@ resolve_session() {
       *) echo "未知会话参数：${1}（可用 --session ID 或 --directory DIR）" >&2; exit 1 ;;
     esac
   done
+  # 全新环境表还不存在（ZCode 尚未写入）：没有任何会话可定位，明确报错而不是让 SQL 崩
+  if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
+    echo "未找到可用于定位会话的模型请求（数据库尚未初始化，先在 ZCode 里跑一轮对话）${directory:+（目录：${directory}）}" >&2; exit 1
+  fi
   if [[ -n "$requested" ]]; then
     SESSION_ID="$requested"
     SESSION_MODE='显式指定会话'
