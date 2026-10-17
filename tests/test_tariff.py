@@ -30,6 +30,12 @@ class TariffTest(unittest.TestCase):
             self.assertEqual([h for h in tiers[0]["hours"]], [[9, 12], [14, 18]])  # 工作日高峰
             self.assertEqual(tiers[0]["mult"], 1.0)  # 高峰为基准价
             self.assertEqual(tiers[1]["mult"], 0.5)  # 空闲半价
+            # 2026 年国务院办公厅节假日安排（国办通知，2025-11-04 发布）
+            self.assertIn("2026-02-18", t["holidays"])  # 春节（周三放假 → 空闲价）
+            self.assertIn("2026-10-07", t["holidays"])  # 国庆末尾
+            self.assertEqual(len(t["holidays"]), 33)
+            self.assertIn("2026-02-14", t["workdays"])  # 春节调休上班的周六 → 按工作日分时
+            self.assertNotIn("2026-10-17", t["holidays"])  # 普通周末不属于节假日
 
     def test_pinned_protects_official_entries_in_sync(self):
         src = (PLUGIN / "scripts" / "lib" / "cmd-cost.sh").read_text()

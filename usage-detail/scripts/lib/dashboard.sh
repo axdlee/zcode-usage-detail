@@ -513,14 +513,31 @@ function __usageBoot(D) {
     if (!p) { for (var k in PMODELS) { if (k.toLowerCase() === name.toLowerCase()) { p = PMODELS[k]; break; } } }
     return p || null;
   }
+  // tz 口径的本地日期串（YYYY-MM-DD）：节假日/调休集合按此匹配
+  function tariffDayStr(loc, useUTC) {
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return (useUTC ? loc.getUTCFullYear() : loc.getFullYear()) + '-' + p2((useUTC ? loc.getUTCMonth() : loc.getMonth()) + 1) + '-' + p2(useUTC ? loc.getUTCDate() : loc.getDate());
+  }
+  // 中国官方节假日判定：holidays 全天低谷价；workdays（调休上班的周末）按正常分时档
+  // 返回 'holiday' | 'workday' | null
+  function tariffSpecial(t, loc, useUTC) {
+    if (!t.holidays && !t.workdays) return null;
+    var ds = tariffDayStr(loc, useUTC);
+    if (t.workdays && t.workdays.indexOf(ds) >= 0) return 'workday';
+    if (t.holidays && t.holidays.indexOf(ds) >= 0) return 'holiday';
+    return null;
+  }
   function tierMult(ts, t) {
     if (!t || !t.tiers) return 1;
     var d = new Date(ts);
     var off = typeof t.tz === 'number' ? t.tz * 3600e3 : 0;
-    var loc = off ? new Date(ts + off) : d; // 时区平移后按目标时区取小时/星期
-    var h = off ? loc.getUTCHours() : d.getHours();
-    if (t.weekend != null) { // 周末统一倍率（如 DeepSeek 周末全天按空闲价）
-      var dow = off ? loc.getUTCDay() : d.getDay();
+    var loc = off ? new Date(ts + off) : d; // 时区平移后按目标时区取小时/星期/日期
+    var useUTC = !!off;
+    var h = useUTC ? loc.getUTCHours() : d.getHours();
+    var sp = tariffSpecial(t, loc, useUTC);
+    if (sp === 'holiday') return t.weekend != null ? t.weekend : 1; // 法定节假日全天按空闲价
+    if (t.weekend != null && sp !== 'workday') { // 周末统一倍率（调休上班的周末除外）
+      var dow = useUTC ? loc.getUTCDay() : d.getDay();
       if (dow === 0 || dow === 6) return t.weekend;
     }
     for (var i = 0; i < t.tiers.length; i++) {
@@ -539,9 +556,12 @@ function __usageBoot(D) {
     var d = new Date(now);
     var off = typeof t.tz === 'number' ? t.tz * 3600e3 : 0;
     var loc = off ? new Date(now + off) : d;
-    var h = off ? loc.getUTCHours() : d.getHours();
-    if (t.weekend != null) {
-      var dow = off ? loc.getUTCDay() : d.getDay();
+    var useUTC = !!off;
+    var h = useUTC ? loc.getUTCHours() : d.getHours();
+    var sp = tariffSpecial(t, loc, useUTC);
+    if (sp === 'holiday') return { name: '节假日价', mult: t.weekend != null ? t.weekend : 1, until: null };
+    if (t.weekend != null && sp !== 'workday') {
+      var dow = useUTC ? loc.getUTCDay() : d.getDay();
       if (dow === 0 || dow === 6) return { name: '周末价', mult: t.weekend, until: null };
     }
     var best = null;
@@ -781,6 +801,7 @@ function __usageBoot(D) {
       if (ct.until != null) val += ' · 至 ' + ct.until + ':00';
       var sub = pick.name;
       if (ct.name === '周末价') sub += ' · 周末全天空闲价';
+      if (ct.name === '节假日价') sub += ' · 法定节假日全天空闲价';
       items.push(row('当前时段', val, 'gold', sub));
     })();
     if (peak) items.push(row('峰值日', peak.slice(5), 'purple', fmt(peakV) + ' tok'));
