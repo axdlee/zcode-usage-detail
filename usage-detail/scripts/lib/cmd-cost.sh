@@ -18,10 +18,11 @@ cmd_cost() {
                   FROM n, json_each(n.j2,'\$.models') je)
        SELECT m.model_id AS 模型,
               count(*) AS 请求数,
-              round(sum(m.input_tokens)/1000000.0*p.pin, 2) AS 输入成本,
+              -- input_tokens 已包含缓存命中：未命中段按牌价 in、命中段按 cache，不重复计费
+              round(sum(max(m.input_tokens - m.cache_read_input_tokens, 0))/1000000.0*p.pin, 2) AS 输入成本,
               round(sum(m.output_tokens+m.reasoning_tokens)/1000000.0*p.pout, 2) AS 生成成本,
               round(sum(m.cache_read_input_tokens)/1000000.0*p.pcache, 2) AS 缓存读成本,
-              round(sum(m.input_tokens)/1000000.0*p.pin
+              round(sum(max(m.input_tokens - m.cache_read_input_tokens, 0))/1000000.0*p.pin
                   + sum(m.output_tokens+m.reasoning_tokens)/1000000.0*p.pout
                   + sum(m.cache_read_input_tokens)/1000000.0*p.pcache, 2) AS 合计,
               (SELECT cur FROM n) AS 币种

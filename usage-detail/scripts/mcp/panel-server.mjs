@@ -328,7 +328,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.21.1' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.21.2' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -339,7 +339,8 @@ function getPanelHtml() {
   return new Promise((resolve, reject) => {
     if (dashCache.html && Date.now() - dashCache.at < 60000) return resolve(dashCache.html);
     const gen = (limitEnv) => new Promise((res2, rej2) => {
-      const tmp = path.join(os.tmpdir(), 'usage-detail-panel-' + process.pid + '.html');
+      // 唯一临时名：并发 resources/read 会同时起多个 gen，固定 pid 名会互相 unlink/读错文件
+      const tmp = path.join(os.tmpdir(), 'usage-detail-panel-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.html');
       execFile('bash', [USAGE_SH, 'dashboard', tmp], { timeout: 120000, env: { ...process.env, ZCODE_USAGE_LIMIT: limitEnv } }, (err) => {
         if (err) return rej2(new Error('生成仪表盘失败：' + (err.message || err)));
         try {

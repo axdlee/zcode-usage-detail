@@ -210,7 +210,7 @@ notify/inject 需重开会话生效（hook 配置按会话快照）；侧栏实�
 - 数据源是 ZCode 客户端自动写入的本地 SQLite（`~/.zcode/cli/db/db.sqlite` 的 `model_usage` 表），本插件只做**只读**查询
 - 不联网、不上传、不写库；仪表盘数据在生成时内嵌，仅存在于你自己机器上的一个 HTML 文件
 - 仪表盘默认内嵌最近 3000 条请求，`/usage-ui <条数>` 可调整（1–20000；超过约 8000 条可能超出会话内嵌渲染的体积限制，全量历史请用 `export json`）
-- token 口径：输入列含缓存命中（缓存读单独列出），生成 = 输出 + 思考
+- token 口径：输入列含缓存命中（缓存读单独列出），生成 = 输出 + 思考；成本按「未命中输入 × 牌价 in + 缓存命中 × 牌价 cache + 生成 × 牌价 out」计价（命中段不重复计费，含分时费率模型按各请求发生时刻取档）
 - **套餐配额余量**（5 小时池 / 周额度）由服务端计量，不在本地库中：`/usage quota` 优先零密钥解析客户端日志里的额度观测；因账号/套餐类型而异，部分观测（如 5 小时池）可能为空，此时请以 ZCode 的 **Usage Stats → Coding Plan** 为准，或配置 API 凭据启用监控接口
 - **多厂商配额（全部可选，默认关闭）**：仅在插件设置里填写对应厂商 API Key 后，才会向该厂商**官方域名**发起只读查询——DeepSeek `api.deepseek.com`、Kimi `api.kimi.com`、OpenRouter `openrouter.ai`、MiniMax `api.minimaxi.com`；Key 保存在 `~/.zcode/usage-vendors.json`（权限 0600），不出现在日志与导出中；GLM 配额查询不发送任何凭据（解析本地客户端日志）。不填 Key 即零外联
 

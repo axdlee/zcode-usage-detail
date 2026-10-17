@@ -602,7 +602,10 @@ function __usageBoot(D) {
   function rowCost(r) {
     var p = priceOf(r[2]);
     if (!p) return null;
-    var base = N(r[4]) / 1e6 * N(p.in) + N(r[5]) / 1e6 * N(p.out) + N(r[6]) / 1e6 * N(p.cache);
+    // input_tokens 已包含缓存命中（computed_total = input+output+reasoning 可证）：
+    // 未命中部分按牌价 in、命中部分按 cache，缓存段不能重复计费
+    var miss = Math.max(0, N(r[4]) - N(r[6]));
+    var base = miss / 1e6 * N(p.in) + N(r[5]) / 1e6 * N(p.out) + N(r[6]) / 1e6 * N(p.cache);
     return base * tierMult(r[1], p.tariff);
   }
   function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : N(mb) + ' MB'; }

@@ -396,7 +396,10 @@ function budgetWatchTick() {
     if (r[1] >= t0.getTime()) {
       tok += t;
       const pj = PR[String(D.models[r[2]] || '').toLowerCase()];
-      if (pj && Number(pj.in) >= 0) cost += (nn(r[4]) * nn(pj.in) + nn(r[5]) * nn(pj.out) + nn(r[6]) * nn(pj.cache)) / 1e6;
+      if (pj && Number(pj.in) >= 0) {
+        const miss = Math.max(0, nn(r[4]) - nn(r[6])); // input 含缓存命中，命中段按 cache 价（与前端 rowCost 同口径）
+        cost += (miss * nn(pj.in) + nn(r[5]) * nn(pj.out) + nn(r[6]) * nn(pj.cache)) / 1e6;
+      }
     } else base += t;
   }
   const daily = nn(budget.daily);
