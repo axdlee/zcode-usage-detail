@@ -21,7 +21,7 @@ try {
   } catch (e) {}
   const msg = tool ? `正在等待你批准：${tool}` : 'Agent 正在等待你的批准';
   // 统一经 notify.mjs 分发：macOS / Windows / Linux，失败静默
-  spawn(process.execPath, [path.join(HERE_NOTIFY, 'notify.mjs'), 'ZCode 用量', '需要你的确认', msg],
+  spawn(process.execPath, [path.join(HERE_NOTIFY, "notify.mjs"), "ZCode 用量", "需要你的确认", msg, "zcode"],
     { detached: true, stdio: 'ignore' }).unref();
 } catch (e) {}
 process.exit(0);
