@@ -207,9 +207,9 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data FROM part WHERE session_id = ?)
          AND json_extract(data,'$.tool') IN ('Read','Edit','Write')
          AND json_extract(data,'$.state.input.file_path') IS NOT NULL
        GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files,
-    (SELECT COALESCE(json_group_array(json_array(g.agent, g.started_at, g.duration_ms, g.tok)),'[]') FROM (
+    (SELECT COALESCE(json_group_array(json_array(g.agent, g.started_at, g.duration_ms, g.tok, g.sid)),'[]') FROM (
        SELECT COALESCE(${AGENT_EXPR},'-') AS agent, mu.started_at AS started_at, mu.duration_ms AS duration_ms,
-              mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok
+              mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok, mu.session_id AS sid
        FROM model_usage mu LEFT JOIN session ch ON ch.id = mu.session_id
        WHERE COALESCE(${PARENT_EXPR}, mu.session_id) = ? AND mu.query_source = 'subagent'
        ORDER BY mu.started_at LIMIT 500) g) AS fleet`;
@@ -285,7 +285,7 @@ function dataJSON(limit) {
   const dirs = q(`SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')`).trim() || '[]';
   let dirsList = [];
   try { dirsList = JSON.parse(dirs); } catch (e) {}
-  return q(META_SQL(pfText, limit, diskJSON(), JSON.stringify({ providerNames: providerNames(), projectMap: projectMap(dirsList), userLang: readLangPref() })));
+  return q(META_SQL(pfText, limit, diskJSON(), JSON.stringify({ providerNames: providerNames(), projectMap: projectMap(dirsList), userLang: readLangPref(), budgetDaily: readBudget().daily, budgetMonthly: readBudget().monthly })));
 }
 
 function liveJSON() {

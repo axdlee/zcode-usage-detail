@@ -366,7 +366,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.27.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.28.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -503,9 +503,9 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data FROM part WHERE session_id = ?)
          AND json_extract(data,'$.tool') IN ('Read','Edit','Write')
          AND json_extract(data,'$.state.input.file_path') IS NOT NULL
        GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files,
-    (SELECT COALESCE(json_group_array(json_array(g.agent, g.started_at, g.duration_ms, g.tok)),'[]') FROM (
+    (SELECT COALESCE(json_group_array(json_array(g.agent, g.started_at, g.duration_ms, g.tok, g.sid)),'[]') FROM (
        SELECT COALESCE(${agentExpr()},'-') AS agent, mu.started_at AS started_at, mu.duration_ms AS duration_ms,
-              mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok
+              mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok, mu.session_id AS sid
        FROM model_usage mu LEFT JOIN session ch ON ch.id = mu.session_id
        WHERE COALESCE(${parentExpr()}, mu.session_id) = ? AND mu.query_source = 'subagent'
        ORDER BY mu.started_at LIMIT 500) g) AS fleet`;
