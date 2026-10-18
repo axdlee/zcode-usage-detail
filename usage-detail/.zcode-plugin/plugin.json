@@ -1,6 +1,6 @@
 {
   "name": "usage-detail",
-  "version": "0.23.4",
+  "version": "0.23.5",
   "description": "Per-request usage analytics for ZCode: live dashboard & side-panel with token/cost/cache breakdown, 5h windows, budget alerts, vendor quotas. Read-only, zero model overhead, zh/en.",
   "author": {
     "name": "axdlee",
