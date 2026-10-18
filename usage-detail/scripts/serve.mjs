@@ -74,6 +74,7 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
     'providerNames', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."providerNames"'),
     'projectMap', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."projectMap"'),
     'budgetDaily', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."budgetDaily"'),
+    'userLang', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."userLang"'),
     'budgetMonthly', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."budgetMonthly"'),
     'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
@@ -178,6 +179,17 @@ function writeVendorKeys(keys) {
   return readVendorMask();
 }
 function budgetPath() { return path.join(os.homedir(), '.zcode', 'usage-budget.json'); }
+// 界面语言持久层（usage-lang.json）：跨面板（本地面板/侧栏/生成页）权威的显式选择，''=跟随系统
+const LANG_FILE = path.join(os.homedir(), '.zcode', 'usage-lang.json');
+function readLangPref() {
+  try {
+    const v = String(JSON.parse(stripBom(fs.readFileSync(LANG_FILE, 'utf8'))).language || '');
+    return v === 'zh' || v === 'en' ? v : '';
+  } catch (e) { return ''; }
+}
+function writeLangPref(v) {
+  atomicWrite(LANG_FILE, JSON.stringify({ language: v === 'zh' || v === 'en' ? v : '' }) + '\n');
+}
 function readBudget() {
   try { return JSON.parse(stripBom(fs.readFileSync(budgetPath(), 'utf8'))); } catch (e) { return { daily: 0, monthly: 0 }; }
 }
@@ -233,7 +245,7 @@ function dataJSON(limit) {
   // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table。
   // 注意消费方按字符串处理（res.end(dataJSON())），必须 stringify
   if (q("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
-    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, ctxMix: [], sessionAgents: [], prices: {}, total: 0, covered: 0, rows: [] });
+    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, userLang: readLangPref(), ctxMix: [], sessionAgents: [], prices: {}, total: 0, covered: 0, rows: [] });
   }
   // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
   const pp = pricePath();
@@ -241,7 +253,7 @@ function dataJSON(limit) {
   const dirs = q(`SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')`).trim() || '[]';
   let dirsList = [];
   try { dirsList = JSON.parse(dirs); } catch (e) {}
-  return q(META_SQL(pfText, limit, diskJSON(), JSON.stringify({ providerNames: providerNames(), projectMap: projectMap(dirsList) })));
+  return q(META_SQL(pfText, limit, diskJSON(), JSON.stringify({ providerNames: providerNames(), projectMap: projectMap(dirsList), userLang: readLangPref() })));
 }
 
 function liveJSON() {
@@ -346,7 +358,7 @@ function renderFragment(limit, forServe) {
   // 导出报告（forServe=false）必须保留内嵌 DATA——自包含快照脱离本机后无 API 可拉，
   // 否则 boot 的 fetch 失败、整页只剩静态骨架（曾因无条件替换导致报告导出空数据）。
   if (forServe !== false) {
-    html = html.replace(/^const DATA =\n.*$/m, "const DATA = null;\nwindow.__USAGE_DATA_URL__ = '/api/data';\nwindow.__USAGE_SERVE__ = true;");
+    html = html.replace(/^const DATA =\n.*$/m, "const DATA = null;\nwindow.__USAGE_DATA_URL__ = '/api/data';\nwindow.__USAGE_SERVE__ = true;\nwindow.__USAGE_LANG__ = " + JSON.stringify(readLangPref()) + ";");
     if (html.indexOf('__USAGE_DATA_URL__') < 0) throw new Error('dashboard 生成结果异常');
   // 服务态附加：刷新按钮 + 自动刷新开关（挂机监控；页签 hash 在 reload 后保留）+ 实时燃烧率角标（5s 轻轮询）
   html += `<script>
@@ -578,6 +590,12 @@ const server = http.createServer(async function (req, res) {
       writeBudget(b);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true }));
+    } else if (req.method === 'POST' && u.pathname === '/api/lang') {
+      const b = await readBody(req);
+      writeLangPref(b && b.language);
+      frag.html = null; // 片段缓存失效：下次页面生成烧入新语言
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, language: readLangPref() }));
     } else if (req.method === 'GET' && u.pathname === '/api/switches') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(readSwitches()));

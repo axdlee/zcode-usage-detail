@@ -68,9 +68,11 @@ cmd_dashboard() {
     # 只取显式语言（system=跟随系统时留空，前端回退 navigator.language）；严格校验格式防注入
     ZLOC=$(node -e "try{const s=JSON.parse(require('fs').readFileSync(require('path').join(process.env.HOME||'', '.zcode', 'v2', 'setting.json'),'utf8'));const p=String(s.localePreference||'');process.stdout.write(p&&p!=='system'?p:'')}catch(e){process.stdout.write('')}" 2>/dev/null || echo "")
     [[ "$ZLOC" =~ ^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$ ]] || ZLOC=''
+    # 用户显式语言选择（usage-lang.json，由本地面板/侧栏设置写入）：跨面板权威，优先于 localStorage
+    ULANG=$(node -e "try{const b=JSON.parse(require('fs').readFileSync(require('path').join(process.env.HOME||'', '.zcode', 'usage-lang.json'),'utf8'));const v=String(b.language||'');process.stdout.write(v==='zh'||v==='en'?v:'')}catch(e){process.stdout.write('')}" 2>/dev/null || echo "")
     # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
     if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
-      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"zcodeLocale":"","ctxMix":[],"sessionAgents":[],"prices":{},"total":0,"covered":0,"rows":[]}'
+      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"zcodeLocale":"","userLang":"","ctxMix":[],"sessionAgents":[],"prices":{},"total":0,"covered":0,"rows":[]}'
     else
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
@@ -103,6 +105,7 @@ cmd_dashboard() {
         'budgetDaily', $BUDGET_D,
         'budgetMonthly', $BUDGET_M,
         'zcodeLocale', '$ZLOC',
+        'userLang', '$ULANG',
         'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
@@ -590,6 +593,7 @@ var I18N_EN = {
   '预付额度使用情况': "Prepaid credit usage",
   'Token Plan 窗口用量': "Token Plan window usage",
   '重新打开面板后生效': "Reopen the panel to apply",
+  '已保存，重新打开面板后生效': "Saved. Reopen the panel to apply",
   '保存中…': "Saving…",
   '已保存': "Saved",
   '保存 Key': "Save Keys",
@@ -688,7 +692,7 @@ var I18N_EN = {
   "月预算 ¥": "Monthly ¥",
   "保存预算": "Save Budget",
   "通知（macOS 系统通知，全部本地计算、零模型开销）": "Notifications (macOS system notifications, all local, zero model cost)",
-  "切换后本地面板立即生效；侧栏面板重新打开后生效": "Applies immediately in the local panel; reopen the side panel to apply",
+  "语言选择保存到本地文件，全面板共享：本地面板与生成页立即生效；侧栏面板重新打开后生效": "Saved to a local file shared by all panels: applies immediately in the local panel and generated pages; reopen the side panel to apply",
   "每轮用量统计": "Per-turn Usage Stats",
   "每轮回合结束弹通知显示本轮速率 / 缓存率 / 耗时（不进入对话上下文）。选「关」时统计仍显示在侧栏面板顶部横幅": "A notification with rate / cache / duration pops when each turn ends (never sent to the model). When off, stats still show in the side panel top banner",
   "关": "Off",
@@ -753,8 +757,15 @@ try {
   // 语言判定：手动选择(localStorage) > 侧栏/本地跟随 ZCode 界面语言(localePreference) > 浏览器/WebView 语言
   // serve 浏览器模式恒跟随浏览器（独立服务的访客以浏览器语言为准）；localePreference=system 留空同回退
   I18N_LANG = (function () {
-    var pref = localStorage.getItem('ud-lang');
-    if (pref) return pref;
+    // 判定链：本 origin 显式选择(localStorage) > 跨面板权威文件(userLang，随 DATA 注入)
+    // > ZCode 界面语言(localePreference，serve 浏览器模式跳过) > 浏览器/WebView 语言
+    var pref = '';
+    try { pref = String(localStorage.getItem('ud-lang') || ''); } catch (e) {}
+    if (pref === 'zh' || pref === 'en') return pref;
+    var ul = '';
+    // __USAGE_LANG__：serve 初始页服务端同步注入（判定时 /api/data 尚未返回）；其余模式读 DATA.userLang
+    try { ul = String(window.__USAGE_LANG__ || (typeof DATA === 'object' && DATA && DATA.userLang) || ''); } catch (e) {}
+    if (ul === 'zh' || ul === 'en') return ul;
     var zl = '';
     try { zl = String((typeof DATA === 'object' && DATA && DATA.zcodeLocale) || ''); } catch (e) {}
     var zc = zl ? (zl.toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en') : '';
@@ -2490,6 +2501,12 @@ function __usageBoot(D) {
   function renderMgr() {
     var body = $('ud-mgr-body');
     var p = mgrState.prices, b = mgrState.budget || {}, sw = mgrState.switches || {};
+    // 语言回显：文件权威值（D.userLang）优先，localStorage 是本 origin 的旧显式选择
+    var langPref = (function () {
+      var ul = ''; try { ul = String(window.__USAGE_LANG__ || (typeof DATA === 'object' && DATA && DATA.userLang) || ''); } catch (e) {}
+      if (ul === 'zh' || ul === 'en') return ul;
+      try { return localStorage.getItem('ud-lang') || ''; } catch (e) { return ''; }
+    })();
     var models = Object.keys(p.models || {});
     var used = {};
     frows(false).forEach(function (r) { used[String(MD[r[2]] || '').toLowerCase()] = 1; });
@@ -2517,7 +2534,7 @@ function __usageBoot(D) {
       '<button type="button" class="btn" id="ud-mgr-bsave" style="margin:0;padding:2px 10px;font-size:12px">' + tr('保存预算') + '</button>' +
       '</div>' +
       '<div class="ud-mgr-h">' + tr('通知（macOS 系统通知，全部本地计算、零模型开销）') + '</div>' +
-      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">界面语言 / Language</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + tr('切换后本地面板立即生效；侧栏面板重新打开后生效') + '</div></div>' +
+      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">界面语言 / Language</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + tr('语言选择保存到本地文件，全面板共享：本地面板与生成页立即生效；侧栏面板重新打开后生效') + '</div></div>' +
       '<select class="form-select form-select-sm" id="ud-mgr-lang" style="width:auto;flex:none">' +
       '<option value=""' + (langPref === '' ? ' selected' : '') + '>跟随系统 / Auto</option>' +
       '<option value="zh"' + (langPref === 'zh' ? ' selected' : '') + '>中文</option>' +
@@ -2591,17 +2608,25 @@ function __usageBoot(D) {
     $('ud-sw-turnstats').addEventListener('change', function () { postSwitch({ turnstats: this.value }); });
     // 界面语言：localStorage 持久化（'' = 跟随系统）；serve 模式整页 reload 即时生效，
     // 侧栏/file 模式 boot 不可重入，提示重开面板生效
-    var langPref = '';
-    try { langPref = localStorage.getItem('ud-lang') || ''; } catch (e) {}
     $('ud-mgr-lang').addEventListener('change', function () {
-      var v = this.value;
-      try { localStorage.setItem('ud-lang', v); } catch (e) {}
-      if (window.__USAGE_SERVE__) location.reload();
-      else {
+      var v = this.value; // '' 跟随系统 / zh / en
+      if (window.__USAGE_SERVE__) {
+        // 本地面板：文件与 localStorage 同步写，reload 后判定链拿到一致的新值
+        try { localStorage.setItem('ud-lang', v); } catch (e) {}
+        postJSON('/api/lang', { language: v }).catch(function () {}).then(function () { location.reload(); });
+      } else if (window.zcode && typeof window.zcode.callTool === 'function') {
+        // 侧栏：持久化到文件（跨面板权威，重开面板后 resources/read 重新生成即生效）；
+        // 清本 WebView 的 localStorage 残留，防旧选择压制新文件值
+        try { localStorage.removeItem('ud-lang'); } catch (e) {}
+        settingsCall({ language: v }).catch(function () {});
         var tip = document.createElement('span');
         tip.className = 'ud-tag';
-        tip.textContent = I18N_LANG === 'en' ? 'Reopen the panel to apply' : tr('重新打开面板后生效');
+        tip.textContent = tr('已保存，重新打开面板后生效');
         this.replaceWith(tip);
+      } else {
+        // 生成页（file://）：localStorage 同源持久，直接刷新生效
+        try { localStorage.setItem('ud-lang', v); } catch (e) {}
+        location.reload();
       }
     });
     // 厂商配额 Key：只提交有输入的项；已配置项保持输入框为空即不变更

@@ -356,7 +356,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.24.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.24.1' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -469,6 +469,18 @@ const PRICES_FILE = process.env.ZCODE_USAGE_PRICES || path.join(os.homedir(), '.
 const BUDGET_FILE = path.join(os.homedir(), '.zcode', 'usage-budget.json');
 const TURNSTATS_FILE = path.join(os.homedir(), '.zcode', 'usage-turnstats.json');
 const ALERTS_CFG = path.join(os.homedir(), '.zcode', 'usage-alerts.json');
+// 界面语言持久层（usage-lang.json）：跨面板权威的显式选择，''=跟随系统；
+// 侧栏 WebView 的 localStorage 不随面板重开保留，显式语言必须落文件才能保持
+const LANG_FILE = path.join(os.homedir(), '.zcode', 'usage-lang.json');
+function readLangCfg() {
+  try {
+    const v = String(JSON.parse(stripBom(fs.readFileSync(LANG_FILE, 'utf8'))).language || '');
+    return v === 'zh' || v === 'en' ? v : '';
+  } catch (e) { return ''; }
+}
+function writeLangCfg(v) {
+  atomicWrite(LANG_FILE, JSON.stringify({ language: v === 'zh' || v === 'en' ? v : '' }) + '\n');
+}
 
 function atomicWrite(file, data, mode) {
   // 原子写 + Windows 兜底：rename 到被占用（杀毒/并发读）的目标会 EPERM——短重试后直写保功能
@@ -645,6 +657,7 @@ const TOOLS = [
         priceRemove: { type: 'string', description: '要删除的模型名' },
         budget: { type: 'object', description: '{daily,monthly}' },
         switches: { type: 'object', description: '{turnstats:off|notify|inject, budgetAlerts:bool, permissionAlerts:bool}' },
+        language: { type: 'string', description: "界面语言覆盖：'' 跟随系统 / 'zh' / 'en'；写入 usage-lang.json 并失效面板缓存" },
         vendorKeys: { type: 'object', description: '{deepseek?,kimi?,openrouter?,minimax?}：API Key，空串清除' },
       },
       additionalProperties: false,
@@ -781,7 +794,7 @@ function handleToolCall(name, args) {
   }
   if (name === 'usage_settings_get') {
     return {
-      structuredContent: { prices: slimPrices(args && args.query), budget: readBudgetCfg(), switches: readSwitchesCfg(), vendors: readVendorMask() },
+      structuredContent: { prices: slimPrices(args && args.query), budget: readBudgetCfg(), switches: readSwitchesCfg(), vendors: readVendorMask(), language: readLangCfg() },
       content: [{ type: 'text', text: '配置已读取' }],
     };
   }
@@ -821,6 +834,11 @@ function handleToolCall(name, args) {
     if (args && args.budget) writeBudgetCfg(args.budget);
     if (args && args.switches) saved.switches = writeSwitchesCfg(args.switches);
     if (args && args.vendorKeys) saved.vendors = writeVendorKeys(args.vendorKeys);
+    if (args && args.language !== undefined) {
+      writeLangCfg(args.language);
+      saved.language = readLangCfg();
+      dashCache = { at: 0, html: null }; // 面板 HTML 缓存失效：重开面板立即按新语言重生成
+    }
     // 附带保存后的瘦身价格表：面板保存成功直接软刷新（MCP App 沙箱内禁止 location.reload）
     if (args && (args.price || args.priceRemove || args.priceGeneral || args.vendorKeys)) saved.prices = slimPrices('');
     return {
