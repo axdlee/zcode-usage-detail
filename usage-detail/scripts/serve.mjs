@@ -348,8 +348,8 @@ function renderFragment(limit) {
     clearInterval(t);
     var b = document.createElement('button');
     b.type = 'button'; b.className = 'btn'; b.style.margin = '0'; b.style.fontSize = '12px';
-    b.textContent = '刷新数据';
-    b.addEventListener('click', function () { b.disabled = true; b.textContent = '刷新中…'; location.reload(); });
+    b.textContent = tr('刷新数据');
+    b.addEventListener('click', function () { b.disabled = true; b.textContent = tr('刷新中…'); location.reload(); });
     c.appendChild(b);
     // 自动刷新：60s 整页刷新（保留页签 hash；开关状态记忆在 localStorage）
     var auto = document.createElement('button');
@@ -375,7 +375,7 @@ function renderFragment(limit) {
     c.appendChild(badge);
     function tick() {
       fetch('/api/live').then(function (r) { return r.json(); }).then(function (j) {
-        badge.textContent = '● 实时 · 燃烧率 ' + Number(j.window.rateH || 0).toLocaleString('zh-CN') + ' token/h · 近 5h ' + Number(j.window.tok || 0).toLocaleString('zh-CN') + ' token · 今日 ' + Number(j.today.req || 0).toLocaleString('zh-CN') + ' 次';
+        badge.textContent = '● ' + tr('实时') + ' · ' + tr('燃烧率') + ' ' + Number(j.window.rateH || 0).toLocaleString('zh-CN') + ' token/h · ' + tr('近 5h') + ' ' + Number(j.window.tok || 0).toLocaleString('zh-CN') + ' tok · ' + tr('今日') + ' ' + Number(j.today.req || 0).toLocaleString('zh-CN') + ' ' + tr('次') + '';
       }).catch(function () {});
     }
     tick();

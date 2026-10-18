@@ -444,10 +444,154 @@ UD_DATA_HEAD
       printf '%s\n' "$META"
       cat <<'UD_TAIL'
 ;
-// ===== i18n 基础设施：中文原文为 key 的字典 + t() 查表（缺失回退中文原文）=====
+// ===== i18n 基础设施：中文原文为 key 的字典 + tr() 查表（缺失回退中文原文）=====
 // 语言判定优先级：localStorage 显式选择 > 系统语言（zh 开头为中文，其余英文）。
 // v1 覆盖高频可见文案（页签/筛选/KPI/洞察标签/列头/按钮/空态）；长句口径说明暂中文，逐步补全。
 var I18N_EN = {
+  '亿': "B",
+  '万': "0K",
+  '会话用量 · ': "Session usage · ",
+  '最近请求：': "Last request: ",
+  '暂无请求': "No requests",
+  ' · 会话信息': " · Session info",
+  '定位：': "Scope: ",
+  '会话 ID：': "Session ID: ",
+  '完成': "Done",
+  '失败': "Failed",
+  '已取消': "Cancelled",
+  '进行中': "Running",
+  '系统': "System",
+  'GLM Coding Plan 个人版': "GLM Coding Plan Personal",
+  'GLM Coding Plan 入门版': "GLM Coding Plan Starter",
+  '官方账号': "Official account",
+  '自定义接入': "Custom (BYOK)",
+  '节假日价': "Holiday price",
+  '周末价': "Weekend price",
+  '高峰': "Peak",
+  '空闲': "Off-peak",
+  '标准': "Standard",
+  '完成 ': "Done ",
+  ' · 进行中 ': " · running ",
+  '缓存命中率 ': "Cache hit ",
+  '本地快照 ': "Local snapshot ",
+  ' · 已加载 ': " · loaded ",
+  ' 条': " rows",
+  '，统计仅含已加载记录': ", stats cover loaded rows only",
+  '查看失败 / 取消（': "View failed/cancelled (",
+  ' 个模型': " models",
+  '日均 ': "Daily avg ",
+  ' · 覆盖 ': " · over ",
+  ' 天': " days",
+  '缓存读 ': "Cache read ",
+  ' · 缓存写 ': " · cache write ",
+  '含子代理请求 ': "incl. subagent ",
+  ' 次': " reqs",
+  '合计 ': "Total ",
+  '数据截至 ': "Data as of ",
+  ' · 已加载最近 ': " · loaded last ",
+  ' 条 · 仅统计本机': " rows · local only",
+  '前日 ': "Day before ",
+  '昨日 ': "Yesterday ",
+  '月预算 ': "Monthly budget ",
+  '达 80% / 100% 时系统提醒': "system alert at 80% / 100%",
+  '最长 ': "max ",
+  ' · 至 ': " · until ",
+  ' · 周末全天空闲价': " · weekend off-peak all day",
+  ' · 法定节假日全天空闲价': " · public-holiday off-peak all day",
+  '读 ': "read ",
+  '主会话 / 子代理': "Main / Subagent",
+  ' 点': ":00",
+  '数据体量': "Data Footprint",
+  '导出 ': "Export ",
+  ' · 库 ': " · db ",
+  '未定价 ': "unpriced ",
+  '今日折算 / 日预算': "Today spent / daily budget",
+  '本月折算 / 月预算': "Month spent / monthly budget",
+  '浪费取证': "Waste forensics",
+  ' 次失败/取消': " failed/cancelled",
+  '展开全部 ': "Expand all ",
+  ' 项': " items",
+  '累计 ': "total ",
+  ' 次请求 · ': " reqs · ",
+  ' tok · 缓存 ': " tok · cache ",
+  ' 次 · ': " reqs · ",
+  '% · 缓存 ': "% · cache ",
+  ' 次调用': " calls",
+  ' · 均 ': " · avg ",
+  ' · 失败 ': " · failed ",
+  '调用': "calls",
+  '峰值 ': "peak ",
+  ' 点 · ': ":00 · ",
+  ' 次请求': " reqs",
+  '日一二三四五六': "SMTWTFS",
+  ' 年 ': " ",
+  ' 月': "M",
+  ' 当周 · ': "week of · ",
+  ' 天，': " days, ",
+  '压缩 ': "compact ",
+  ' 次 · 压缩前水位最高 ': " reqs · pre-compact peak ",
+  '无压缩记录': "No compaction records",
+  '上下文压缩': "Context Compaction",
+  '切换模型 → ': "Model switch → ",
+  ' · 第 ': " · round ",
+  ' 轮': "",
+  ' · 输入 ': " · in ",
+  ' tok · 生成 ': " tok · out ",
+  ' · 子代理': " · subagent",
+  ' · 占 ': " · ",
+  ' 窗口 ': " of window ",
+  '%（上限 ': "% (limit ",
+  ' · 悬停看点明细': " · hover for request details",
+  ' · 累计 ': " · total ",
+  '请求 / 缓存率': "Requests / cache %",
+  '平均输出速率': "Avg output speed",
+  ' tok/s（加权）': " tok/s (weighted)",
+  '（未知目录）': "(unknown directory)",
+  ' · 含 ': " · ",
+  ' 个目录': " directories",
+  ' · 预计全窗 ': " · projected full window ",
+  ' ms · 首字占比 ': " ms · TTFT share ",
+  ' · 以下为 provider 上报的原始用量': " · raw provider-reported usage below",
+  '(无)': "(none)",
+  '错误: ': "Error: ",
+  '首字': "TTFT",
+  '成本': "Cost",
+  '加载更多（已显示 ': "Load more (shown ",
+  ' · 缓存读 ': " · cache read ",
+  '当前指标合计：请求数 ': "Current metric total: requests ",
+  ' · 生成 ': " · out ",
+  '会话：': "Session: ",
+  '日期：': "Date: ",
+  '项目：': "Project: ",
+  '全部来源': "All providers",
+  '全部模型': "All models",
+  '同步中…': "Syncing…",
+  '同步失败': "Sync failed",
+  '已配置 · 输入新值更换': "Configured · enter a new value to replace",
+  '未配置': "Not configured",
+  '权限等待提醒': "Permission-wait reminder",
+  'Agent 弹出批准请求时通知你——挂机跑长任务不漏确认': "Notifies you when the agent waits for approval — never miss one on long unattended runs",
+  '预算 / 燃烧告警': "Budget / burn alerts",
+  '日折算成本达预算 80% / 100% 时提醒；今日用量超近 7 天日均 50% 也会提示': "macOS alert at 80% / 100% of the daily budget; also when today exceeds 1.5× the 7-day daily average",
+  '官方账户余额': "Official account balance",
+  '5 小时 / 周窗口用量': "5-hour / weekly window usage",
+  '预付额度使用情况': "Prepaid credit usage",
+  'Token Plan 窗口用量': "Token Plan window usage",
+  '重新打开面板后生效': "Reopen the panel to apply",
+  '保存中…': "Saving…",
+  '已保存': "Saved",
+  '保存 Key': "Save Keys",
+  '启动中…': "Starting…",
+  '已启动（浏览器将自动打开）': "Started (browser will open)",
+  '打开本地面板': "Open local panel",
+  '准备中…': "Preparing…",
+  '当前环境不支持导出': "Export not supported here",
+  '已交浏览器下载': "Sent to browser download",
+  '导出失败（需本地面板）': "Export failed (local panel only)",
+  '高峰 1× · 18:00 后转半价': "Peak 1× · half price after 18:00",
+  '非高峰 0.5× · 工作日 14:00–18:00 为高峰': "Off-peak 0.5× · workday 14:00–18:00 is peak",
+  '配额': "Quota",
+  ' 重置': " reset",
   '总览': 'Overview', '每日趋势': 'Daily Trend', '会话排行': 'Sessions', '模型效率': 'Model Efficiency',
   '项目用量': 'Projects', '请求明细': 'Requests', '失败请求': 'Failures',
   '来源': 'Provider', '模型': 'Model', '今天': 'Today', '昨天': 'Yesterday', '近 7 天': '7 Days', '近 30 天': '30 Days', '全部': 'All',
@@ -476,14 +620,104 @@ var I18N_EN = {
   '点击表头排序；点击任意请求行可展开该请求的完整信息。': 'Click headers to sort; click any request row to expand its full details.',
   '● 完成': '● Done', '● 失败': '● Failed', '● 已取消': '● Cancelled', '● 进行中': '● Running', '● 未知': '● Unknown',
   '主会话': 'Main', '子代理': 'Subagent', '其他': 'Other',
-  '本轮用量': 'This Turn', '更新': 'updated', '截至': 'as of', '缓存': 'cache',
-  '搜索会话 / 模型 / 来源…': 'Search sessions / models / providers…'
+  '本轮用量': 'This Turn', '更新': 'updated', '截至': 'as of', '缓存': 'cache', '实时': 'Live', '燃烧率': 'burn rate', '近 5h': 'last 5h', '今日': 'today',
+  '搜索会话 / 模型 / 来源…': 'Search sessions / models / providers…',
+  '事件时间线': "Event Timeline",
+  '项目目录': "Project directory",
+  '来源：': "Provider: ",
+  '模型占比（按 token）': "By Model (tokens)",
+  '使用工具（调用次数占比）': "Tool Usage (by calls)",
+  '查看该会话请求日志 →': "View session request log →",
+  '时段分布': 'Hourly Distribution', '小时': 'Hour', '每日': 'Day', '每周': 'Week', '月历': 'Month',
+  '近 7 天，每天按 0–23 时切分；着色深浅按该小时 token 用量，悬停查看明细。': 'Last 7 days split into 0–23h slots; darker means more tokens in that hour. Hover for details.',
+  '每日自动同步模型价': 'Auto-sync model prices daily',
+  '共 N 个事件': 'N events in total',
+  '按请求输入 token 近似 · 峰值 ': 'Approx. per-request input tokens · peak ',
+  '压缩事件 ': 'Compact event ',
+  '压缩事件': 'Compact events',
+  '当前环境不支持面板内编辑。两种方式：': 'In-panel editing is not available here. Two options:',
+  '打开本地面板编辑（推荐，同样的界面）': 'Open the local panel editor (recommended, same UI)',
+  '直接编辑': 'Edit',
+  '（字段 in / out / cache，每百万 token）': ' directly (fields in / out / cache, per million tokens)',
+  '或运行': 'or run',
+  "成本单价（元 / 每百万 token）": "Model unit prices (CNY / million tokens)",
+  "GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。默认列出当前用量相关模型，搜索可查全量；修改保存后按新价重算。": "GLM 5.3 prices are from z.ai official; others from models.dev (USD x 7.2). Models in current usage are listed by default, search for all. Recalculated at the new price after saving.",
+  "搜索模型…": "Search models…",
+  "模型": "Model",
+  "输入": "In",
+  "输出": "Out",
+  "缓存读": "Cache Read",
+  "窗口": "Context",
+  "上下文窗口 token 数，留空自动检测": "Context window tokens; leave blank to auto-detect",
+  "新增模型价：": "Add model price: ",
+  "模型名（与请求记录一致）": "Model name (must match request records)",
+  "添加": "Add",
+  "通用": "General",
+  "USD→CNY 汇率": "USD→CNY rate",
+  "保存通用": "Save General",
+  "预算（折算金额，超 80% 黄色进度、100% 红色）": "Budget (converted amount; yellow past 80%, red at 100%)",
+  "日预算 ¥": "Daily ¥",
+  "月预算 ¥": "Monthly ¥",
+  "保存预算": "Save Budget",
+  "通知（macOS 系统通知，全部本地计算、零模型开销）": "Notifications (macOS system notifications, all local, zero model cost)",
+  "切换后本地面板立即生效；侧栏面板重新打开后生效": "Applies immediately in the local panel; reopen the side panel to apply",
+  "每轮用量统计": "Per-turn Usage Stats",
+  "每轮回合结束弹通知显示本轮速率 / 缓存率 / 耗时（不进入对话上下文）。选「关」时统计仍显示在侧栏面板顶部横幅": "A notification with rate / cache / duration pops when each turn ends (never sent to the model). When off, stats still show in the side panel top banner",
+  "关": "Off",
+  "系统通知（推荐）": "System notification (recommended)",
+  "对话内统计行（约 0.3k token/轮）": "In-conversation stats line (~0.3k tokens/turn)",
+  "厂商配额（可选）": "Vendor quotas (optional)",
+  "以下 Key 仅发送到对应厂商官方域名做只读查询，保存在本地": "Keys below are sent only to the corresponding vendor official domain for read-only queries and stored locally in",
+  "在总览页聚合显示各厂商套餐 / 额度用量。GLM 无需配置（自动读客户端日志）；": "Aggregates vendor plan / quota usage on the Overview tab. GLM needs no setup (reads client logs automatically); ",
+  "（权限 0600）": " (permission 0600).",
+  "权限提醒与每轮统计依赖会话钩子，修改后重开会话生效；预算告警立即生效。": "Permission alerts and per-turn stats rely on session hooks: reopen a session to apply. Budget alerts apply immediately.",
+  "当前用量": "in use",
+  "上下文窗口 token 数，留空按模型自动检测（水印曲线用）": "Context window tokens; blank = auto-detect per model (watermark curve)",
+  "保存": "Save",
+  "删除": "Del",
+  "删除该模型价": "Delete this price",
+  "已配置": "Configured",
+  "设置": "Settings",
+  "价格 · 预算 · 通知 · 厂商配额（全部本地存储）": "Prices · Budget · Notifications · Vendor quotas (all stored locally)",
+  "时": ":00",
+  "行=日期，列=0-23 时": "rows = dates, columns = 0-23h",
+  "近 7 天小时热力图": "Last-7-days hourly heatmap",
+  "活跃热力图": "Activity Heatmap",
+  "活跃热力图（每周 token）": "Activity heatmap (weekly tokens)",
+  "活跃热力图（每日 token）": "Activity heatmap (daily tokens)",
+  "共 N 周": "N weeks in total",
+  "共 N 天，M 天有用量": "N days, M with usage",
+  "缓存读 token": "Cache-read tokens",
+  "计费窗口（近似）": "Billing windows (approx.)",
+  "相邻请求间隔 ≥5h 切分": "new window after >=5h idle",
+  "按模型对比效率与成本：平均输出速率（生成 token / 生成耗时）、平均首字延迟、失败率、每 1k token 折算成本。随上方全局筛选联动；点击模型名只看该模型。": "Compares model efficiency and cost: avg output speed (output tokens / generation time), avg TTFT, fail rate, cost per 1k tokens. Follows the global filters above; click a model name to focus it.",
+  "输入 token": "Input tokens",
+  "生成 token": "Output tokens",
+  "合计": "Total",
+  "成本 / 1k tok": "Cost / 1k tok",
+  "近似口径：按相邻请求间隔 ≥5h 开新窗，官方窗口起点在服务端，仅作节奏参考。": "Approximation: a new window opens after >=5h between requests; the official window start is server-side. For pacing reference only.",
+  "子代理 ×": "Subagent ×",
+  "厂商配额": "Vendor Quotas",
+  "积分时段": "Off-peak windows",
+  "已用 ": "Used ",
+  "合计 ": "Total ",
+  "按项目目录聚合（ccusage project / CCMeter 项目卡片的本地版）：点击项目行可跳到会话排行并只看该项目；点击表头排序。": "Aggregated by project directory (local take on ccusage project / CCMeter project cards): click a project row to jump to Sessions filtered to it; click headers to sort.",
+  "全部状态": "All statuses",
+  "上一页": "Prev",
+  "下一页": "Next",
+  "共 ": "Total ",
+  " 条": " rows",
+  "活跃": "Active",
+  "点击只看该项目的会话": "Click to show only this project's sessions",
+  "已选": "Selected",
+  "跳转到页": "Go to page",
+  '启动失败：请在终端运行 usage.sh serve': 'Failed to start: run "usage.sh serve" in a terminal'
 };
 var I18N_LANG = 'zh';
 try {
   I18N_LANG = localStorage.getItem('ud-lang') || ((navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
 } catch (e) { I18N_LANG = (navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
-function t(s) { return I18N_LANG === 'en' && I18N_EN[s] ? I18N_EN[s] : s; }
+function tr(s) { return I18N_LANG === 'en' && I18N_EN[s] ? I18N_EN[s] : s; }
 // 静态 HTML 区的 DOM 文本翻译：boot 前对精确匹配的文本节点与 placeholder/title 属性做一次替换
 (function () {
   if (I18N_LANG !== 'en') return;
@@ -538,24 +772,35 @@ function __usageBoot(D) {
   var $ = function (id) { return document.getElementById(id); };
   var N = function (v) { return v == null ? 0 : v; };
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-  function fmt(n) { n = N(n); if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿'; if (n >= 1e4) return (n / 1e4).toFixed(1) + '万'; return String(Math.round(n)); }
+  function fmt(n) {
+    n = N(n);
+    if (I18N_LANG === 'en') { // 英文数字单位：K/M/B（万/亿 仅中文语境）
+      if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return String(Math.round(n));
+    }
+    if (n >= 1e8) return (n / 1e8).toFixed(2) + tr('亿');
+    if (n >= 1e4) return (n / 1e4).toFixed(1) + tr('万');
+    return String(Math.round(n));
+  }
   function fmtI(n) { return N(n).toLocaleString('zh-CN'); }
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
   function dayKey(ts) { var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function fullTs(ts) { var d = new Date(ts); return dayKey(ts) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 
   if (D.session) {
-    $('ud-session-title').textContent = '会话用量 · ' + D.session.title;
-    $('ud-session-last').textContent = '最近请求：' + (D.session.latest == null ? '暂无请求' : fullTs(D.session.latest)) + ' · 会话信息';
-    $('ud-session-selection').textContent = '定位：' + D.session.selection;
-    $('ud-session-info').textContent = '会话 ID：' + D.session.id + '\n项目目录：' + (D.session.directory || '–')
+    $('ud-session-title').textContent = tr('会话用量 · ') + D.session.title;
+    $('ud-session-last').textContent = tr('最近请求：') + (D.session.latest == null ? tr('暂无请求') : fullTs(D.session.latest)) + tr(' · 会话信息');
+    $('ud-session-selection').textContent = tr('定位：') + D.session.selection;
+    $('ud-session-info').textContent = tr('会话 ID：') + D.session.id + '\n项目目录：' + (D.session.directory || '–')
       + '\n创建：' + (D.session.created == null ? '–' : fullTs(D.session.created))
       + '\n仅统计该 session_id 的记录。';
   }
 
-  var STAT = [t('完成'), t('失败'), t('已取消'), t('进行中')];
+  var STAT = [tr('完成'), tr('失败'), tr('已取消'), tr('进行中')];
   var SCOLOR = ['var(--green)', 'var(--red)', 'var(--yellow)', 'var(--blue)'];
-  var QT = [t('主会话'), t('子代理'), t('系统')];
+  var QT = [tr('主会话'), tr('子代理'), tr('系统')];
   // tok/s：生成 = 输出+思考；生成耗时 ≈ 总耗时 - 首字（首字缺失按总耗时近似）
   function tpsOf(r) {
     var gen = Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11])));
@@ -583,7 +828,7 @@ function __usageBoot(D) {
       var x1 = CX + R1 * Math.cos(a1), y1 = CY + R1 * Math.sin(a1);
       var xi = CX + R0 * Math.cos(a1), yi = CY + R0 * Math.sin(a1);
       var xj = CX + R0 * Math.cos(a0), yj = CY + R0 * Math.sin(a0);
-      var tipTxt = it.tip || (it.name + ' · ' + fmtI(it.value) + '（' + Math.round(frac * 100) + '%）');
+      var tipTxt = it.tip || (it.name + ' · ' + fmtI(it.value) + ' (' + Math.round(frac * 100) + '%)');
       if (frac >= 0.999) {
         paths += '<circle cx="' + CX + '" cy="' + CY + '" r="' + ((R1 + R0) / 2) + '" fill="none" stroke="' + color + '" stroke-width="' + (R1 - R0) + '"><title>' + esc(tipTxt) + '</title></circle>';
       } else {
@@ -607,13 +852,13 @@ function __usageBoot(D) {
   function pvColor(p) { var k = pvOrder.indexOf(p); return 'var(--viz-series-' + ((k % 6) + 1) + ')'; }
   // 官方套餐 provider id → 官方中文名（GLM Coding Plan 档位命名见 bigmodel.cn/glm-coding）；未知 id 与自定义来源保留原名
   var PV_CN = {
-    'bigmodel-individual-coding-plan': 'GLM Coding Plan 个人版',
+    'bigmodel-individual-coding-plan': tr('GLM Coding Plan 个人版'),
     'bigmodel-coding-plan': 'GLM Coding Plan',
     'bigmodel-lite-coding-plan': 'GLM Coding Plan Lite',
     'bigmodel-pro-coding-plan': 'GLM Coding Plan Pro',
     'bigmodel-max-coding-plan': 'GLM Coding Plan Max',
-    'bigmodel-start-plan': 'GLM Coding Plan 入门版',
-    'zai-start-plan': 'GLM Coding Plan 入门版'
+    'bigmodel-start-plan': tr('GLM Coding Plan 入门版'),
+    'zai-start-plan': tr('GLM Coding Plan 入门版')
   };
   function pvLabel(p) {
     var raw = String(PV[p] || '?');
@@ -624,7 +869,7 @@ function __usageBoot(D) {
     // BYOK 自定义接入（如 new-provider）：用 provider_config.json 里的 providerName 显示
     return esc(PVNAME[raw] || raw);
   }
-  function pvTag(p) { return /^account:/.test(String(PV[p] || '')) ? '官方账号' : '自定义接入'; }
+  function pvTag(p) { return /^account:/.test(String(PV[p] || '')) ? tr('官方账号') : tr('自定义接入'); }
 
   function priceOf(mi) {
     if (!PMODELS) return null;
@@ -679,10 +924,10 @@ function __usageBoot(D) {
     var useUTC = !!off;
     var h = useUTC ? loc.getUTCHours() : d.getHours();
     var sp = tariffSpecial(t, loc, useUTC);
-    if (sp === 'holiday') return { name: '节假日价', mult: t.weekend != null ? t.weekend : 1, until: null };
+    if (sp === 'holiday') return { name: tr('节假日价'), mult: t.weekend != null ? t.weekend : 1, until: null };
     if (t.weekend != null && sp !== 'workday') {
       var dow = useUTC ? loc.getUTCDay() : d.getDay();
-      if (dow === 0 || dow === 6) return { name: '周末价', mult: t.weekend, until: null };
+      if (dow === 0 || dow === 6) return { name: tr('周末价'), mult: t.weekend, until: null };
     }
     var best = null;
     for (var i = 0; i < t.tiers.length; i++) {
@@ -691,13 +936,13 @@ function __usageBoot(D) {
       for (var j = 0; j < ws.length; j++) {
         var b = ws[j][0], e = ws[j][1];
         if (b <= e ? (h >= b && h < e) : (h >= b || h < e)) {
-          best = { name: tier.name || (tier.mult > 1 ? '高峰' : '空闲'), mult: tier.mult == null ? 1 : tier.mult, until: e < b || e > 24 ? null : e };
+          best = { name: tier.name || (tier.mult > 1 ? tr('高峰') : tr('空闲')), mult: tier.mult == null ? 1 : tier.mult, until: e < b || e > 24 ? null : e };
           break;
         }
       }
       if (best) break;
     }
-    return best || { name: '标准', mult: 1, until: null };
+    return best || { name: tr('标准'), mult: 1, until: null };
   }
   function rowCost(r) {
     var p = priceOf(r[2]);
@@ -800,17 +1045,17 @@ function __usageBoot(D) {
     var a = agg(rows), states = [0, 0, 0, 0];
     rows.forEach(function (r) { states[r[8]]++; });
     $('ud-k1').textContent = fmtI(a.req);
-    $('ud-k1c').textContent = '完成 ' + fmtI(states[0]) + (states[3] ? ' · 进行中 ' + fmtI(states[3]) : '');
+    $('ud-k1c').textContent = tr('完成 ') + fmtI(states[0]) + (states[3] ? tr(' · 进行中 ') + fmtI(states[3]) : '');
     $('ud-k2').textContent = fmt(a.inn);
     $('ud-k3').textContent = fmt(a.out);
     $('ud-k4').textContent = fmt(a.ca);
-    $('ud-k4c').textContent = '缓存命中率 ' + (a.inn ? Math.round(a.ca / a.inn * 100) + '%' : '–');
-    $('ud-meta').textContent = '本地快照 ' + (D.gen || '') + ' · 已加载 ' + fmtI(D.covered) + ' / ' + fmtI(D.total) + ' 条'
-      + (D.covered < D.total ? '，统计仅含已加载记录' : '');
+    $('ud-k4c').textContent = tr('缓存命中率 ') + (a.inn ? Math.round(a.ca / a.inn * 100) + '%' : '–');
+    $('ud-meta').textContent = tr('本地快照 ') + (D.gen || '') + tr(' · 已加载 ') + fmtI(D.covered) + ' / ' + fmtI(D.total) + tr(' 条')
+      + (D.covered < D.total ? tr('，统计仅含已加载记录') : '');
     var failures = states[1] + states[2];
     $('ud-failures').hidden = failures === 0;
-    $('ud-failures').textContent = '查看失败 / 取消（' + fmtI(failures) + '）';
-    $('ud-request-count').textContent = fmtI(rows.length) + ' 条';
+    $('ud-failures').textContent = tr('查看失败 / 取消（') + fmtI(failures) + '）';
+    $('ud-request-count').textContent = fmtI(rows.length) + tr(' 条');
 
     var groups = {}, models = {};
     rows.forEach(function (r) {
@@ -819,7 +1064,7 @@ function __usageBoot(D) {
       g.req++; g.inn += N(r[4]); g.out += N(r[5]); g.ca += N(r[6]);
       models[r[2]] = true;
     });
-    $('ud-model-count').textContent = Object.keys(models).length + ' 个模型';
+    $('ud-model-count').textContent = Object.keys(models).length + tr(' 个模型');
     var list = Object.keys(groups).map(function (key) { return groups[key]; })
       .sort(function (a, b) { return (b.inn + b.out) - (a.inn + a.out); });
     $('ud-session-models').innerHTML = list.length ? list.map(function (g) {
@@ -850,11 +1095,11 @@ function __usageBoot(D) {
     anim('ud-k2', a.inn, fmt);
     anim('ud-k3', a.out, fmt);
     anim('ud-k4', a.sess, fmtI);
-    $('ud-k1c').textContent = '日均 ' + fmt(a.req / dcount) + ' · 覆盖 ' + dcount + ' 天';
-    $('ud-k2c').textContent = '缓存读 ' + fmt(a.ca) + ' · 缓存写 ' + fmt(a.ccw);
-    $('ud-k3c').textContent = '输出 + 思考 token';
-    $('ud-k4c').textContent = a.sub ? '含子代理请求 ' + fmtI(a.sub) + ' 次' : '合计 ' + fmt(a.tok) + ' token';
-    $('ud-meta').textContent = '数据截至 ' + (D.gen || '') + ' · 已加载最近 ' + fmtI(D.covered) + ' / ' + fmtI(D.total) + ' 条 · 仅统计本机';
+    $('ud-k1c').textContent = tr('日均 ') + fmt(a.req / dcount) + tr(' · 覆盖 ') + dcount + tr(' 天');
+    $('ud-k2c').textContent = tr('缓存读 ') + fmt(a.ca) + tr(' · 缓存写 ') + fmt(a.ccw);
+    $('ud-k3c').textContent = tr('输出 + 思考 token');
+    $('ud-k4c').textContent = a.sub ? tr('含子代理请求 ') + fmtI(a.sub) + tr(' 次') : tr('合计 ') + fmt(a.tok) + ' token';
+    $('ud-meta').textContent = tr('数据截至 ') + (D.gen || '') + tr(' · 已加载最近 ') + fmtI(D.covered) + ' / ' + fmtI(D.total) + tr(' 条 · 仅统计本机');
   }
 
   function renderInsights(rows) {
@@ -902,8 +1147,8 @@ function __usageBoot(D) {
           else if (pct <= -10) badge = '<span class="ud-badge down">↓ ' + Math.abs(pct) + '%</span>';
           else badge = '<span class="ud-badge flat">→ 平稳</span>';
         }
-        var rngLabel = { today: '今日用量', yday: '昨日用量', '7': '近 7 天用量', '30': '近 30 天用量', all: '累计用量' }[st.rng] || '今日用量';
-        var prevLabel = st.rng === 'yday' ? '前日 ' : '昨日 ';
+        var rngLabel = { today: tr('今日用量'), yday: tr('昨日用量'), '7': tr('近 7 天用量'), '30': tr('近 30 天用量'), all: tr('累计用量') }[st.rng] || tr('今日用量');
+        var prevLabel = st.rng === 'yday' ? tr('前日 ') : tr('昨日 ');
         items.push(row(rngLabel, fmt(today) + ' tok ' + badge, 'gold',
           (yestC > 0 && (st.rng === 'today' || st.rng === 'yday') ? prevLabel + fmtCost(yestC) : '')));
       }
@@ -920,11 +1165,11 @@ function __usageBoot(D) {
       if (!hasCost || c <= 0) return;
       var pct = Math.min(999, Math.round(c / bd * 100));
       var color = pct >= 100 ? 'red' : pct >= 80 ? 'gold' : 'green';
-      var sub = N(D.budgetMonthly) > 0 ? '月预算 ' + CURSYM + N(D.budgetMonthly).toFixed(0) : '达 80% / 100% 时系统提醒';
-      items.push(row('今日预算', CURSYM + (c >= 100 ? Math.round(c) : c.toFixed(2)) + ' / ' + CURSYM + bd.toFixed(0) + ' · ' + pct + '%', color, sub));
+      var sub = N(D.budgetMonthly) > 0 ? tr('月预算 ') + CURSYM + N(D.budgetMonthly).toFixed(0) : tr('达 80% / 100% 时系统提醒');
+      items.push(row(tr('今日预算'), CURSYM + (c >= 100 ? Math.round(c) : c.toFixed(2)) + ' / ' + CURSYM + bd.toFixed(0) + ' · ' + pct + '%', color, sub));
     })();
-    items.push(row('活跃天数', days.length + ' 天', 'blue'));
-    items.push(row('连续活跃', cur + ' 天', 'blue', '最长 ' + longest));
+    items.push(row(tr('活跃天数'), days.length + tr(' 天'), 'blue'));
+    items.push(row(tr('连续活跃'), cur + tr(' 天'), 'blue', tr('最长 ') + longest));
     // 燃烧率常驻前排（现在进行时的指标，ccusage burn rate / claude-monitor 标配）；
     // 节奏标记借鉴 coding-usage-bar：当前速率折算日耗 vs 近 7 天日均 → 放缓/平稳/加速。
     // 同样用全量 R：时间筛选成「今天」时近 7 天基准会失真
@@ -940,9 +1185,9 @@ function __usageBoot(D) {
           if (d7.length >= 2) {
             var avg7 = d7.reduce(function (a, k) { return a + perDay7[k]; }, 0) / d7.length;
             var ratio = avg7 > 0 ? (r1h * 24) / avg7 : 0;
-            pace = ratio < 0.5 ? '节奏：放缓' : ratio <= 1.5 ? '节奏：平稳' : '节奏：加速';
+            pace = ratio < 0.5 ? tr('节奏：放缓') : ratio <= 1.5 ? tr('节奏：平稳') : tr('节奏：加速');
           }
-          items.push(row('近 1h 燃烧率', fmtI(perMin) + ' tok/min', 'red', pace));
+          items.push(row(tr('近 1h 燃烧率'), fmtI(perMin) + ' tok/min', 'red', pace));
         }
     })();
     // 分时计价当前档：按系统当前时间判定（有 tariff 配置的模型才显示，取筛选内用量最大的一个为代表）
@@ -958,30 +1203,30 @@ function __usageBoot(D) {
       var ct = curTier(pick.p.tariff, Date.now());
       if (!ct) return;
       var val = ct.name + (ct.mult === 1 ? '' : ' ' + ct.mult + '×');
-      if (ct.until != null) val += ' · 至 ' + ct.until + ':00';
+      if (ct.until != null) val += tr(' · 至 ') + ct.until + ':00';
       var sub = pick.name;
-      if (ct.name === '周末价') sub += ' · 周末全天空闲价';
-      if (ct.name === '节假日价') sub += ' · 法定节假日全天空闲价';
-      items.push(row('当前时段', val, 'gold', sub));
+      if (ct.name === tr('周末价')) sub += tr(' · 周末全天空闲价');
+      if (ct.name === tr('节假日价')) sub += tr(' · 法定节假日全天空闲价');
+      items.push(row(tr('当前时段'), val, 'gold', sub));
     })();
-    if (peak) items.push(row('峰值日', peak.slice(5), 'purple', fmt(peakV) + ' tok'));
-    items.push(row('缓存命中率', hit + '%', 'green', '读 ' + fmt(a.ca)));
-    if (a.ca + a.ccw > 0) items.push(row('缓存量（读+写）', fmt(a.ca + a.ccw), 'green'));
-    if (D.todos && D.todos[1] > 0) items.push(row('任务完成', N(D.todos[0]) + '/' + D.todos[1], 'green', Math.round(N(D.todos[0]) / D.todos[1] * 100) + '%'));
-    if (D.stability) items.push(row('重试 / 取消', fmtI(D.stability[0]) + ' / ' + fmtI(D.stability[1]), 'yellow'));
-    if (a.req) items.push(row('平均耗时', (a.dur / a.req / 1000).toFixed(1) + ' s', 'blue'));
-    if (a.sub) items.push(row('主会话 / 子代理', fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub), 'purple'));
+    if (peak) items.push(row(tr('峰值日'), peak.slice(5), 'purple', fmt(peakV) + ' tok'));
+    items.push(row(tr('缓存命中率'), hit + '%', 'green', tr('读 ') + fmt(a.ca)));
+    if (a.ca + a.ccw > 0) items.push(row(tr('缓存量（读+写）'), fmt(a.ca + a.ccw), 'green'));
+    if (D.todos && D.todos[1] > 0) items.push(row(tr('任务完成'), N(D.todos[0]) + '/' + D.todos[1], 'green', Math.round(N(D.todos[0]) / D.todos[1] * 100) + '%'));
+    if (D.stability) items.push(row(tr('重试 / 取消'), fmtI(D.stability[0]) + ' / ' + fmtI(D.stability[1]), 'yellow'));
+    if (a.req) items.push(row(tr('平均耗时'), (a.dur / a.req / 1000).toFixed(1) + ' s', 'blue'));
+    if (a.sub) items.push(row(tr('主会话 / 子代理'), fmtI(a.req - a.sub) + ' / ' + fmtI(a.sub), 'purple'));
     if (D.hours) {
       var pk = -1, pv2 = -1;
       for (var hh = 0; hh < 24; hh++) { var kk2 = (hh < 10 ? '0' : '') + hh; var c2 = N(D.hours[kk2]); if (c2 > pv2) { pv2 = c2; pk = hh; } }
-      if (pk >= 0) items.push(row('峰值时段', pk + ' 点', 'blue', fmtI(pv2) + ' 次'));
+      if (pk >= 0) items.push(row(tr('峰值时段'), pk + tr(' 点'), 'blue', fmtI(pv2) + tr(' 次')));
     }
-    if (D.disk && D.disk.logs) items.push(row('数据体量', fmtMB(D.disk.logs), 'gray', '导出 ' + fmtMB(D.disk.rollout) + ' · 库 ' + fmtMB(D.disk.db)));
+    if (D.disk && D.disk.logs) items.push(row(tr('数据体量'), fmtMB(D.disk.logs), 'gray', tr('导出 ') + fmtMB(D.disk.rollout) + tr(' · 库 ') + fmtMB(D.disk.db)));
     var totalCost = 0, anyCost = false, unpricedTok = 0;
     rows.forEach(function (r) { var c = rowCost(r); if (c != null) { totalCost += c; anyCost = true; } else unpricedTok += N(r[4]) + N(r[5]); });
     if (anyCost || unpricedTok > 0) { // 全部未定价也要给提示，不能整行消失
       var aTok = a.inn + a.out;
-      items.push(row('折算成本（API 牌价）', anyCost ? fmtCost(totalCost) : '–', 'gold', unpricedTok > 0 && aTok ? '未定价 ' + Math.round(unpricedTok / aTok * 100) + '%' : ''));
+      items.push(row(tr('折算成本（API 牌价）'), anyCost ? fmtCost(totalCost) : '–', 'gold', unpricedTok > 0 && aTok ? tr('未定价 ') + Math.round(unpricedTok / aTok * 100) + '%' : ''));
     }
     // 本地预算：整宽行 + 进度条（日 / 30 天）
     if (st.budget && (N(st.budget.daily) > 0 || N(st.budget.monthly) > 0)) {
@@ -996,14 +1241,14 @@ function __usageBoot(D) {
           '<span class="ud-budget-bar' + (pd >= 100 ? ' ud-over' : '') + '"><i style="width:' + Math.min(100, pd) + '%"></i></span>' +
           '<span class="fv">' + v + '<span class="fs">/ ' + fmtCost(tot) + ' · ' + pd + '%</span></span></div>';
       }
-      if (bd > 0) items.push(budgetRow('今日折算 / 日预算', fmtCost(dayCost), bd, Math.min(100, Math.round(dayCost / bd * 100))));
-      if (bm > 0) items.push(budgetRow('本月折算 / 月预算', fmtCost(mCost), bm, Math.min(100, Math.round(mCost / bm * 100))));
+      if (bd > 0) items.push(budgetRow(tr('今日折算 / 日预算'), fmtCost(dayCost), bd, Math.min(100, Math.round(dayCost / bd * 100))));
+      if (bm > 0) items.push(budgetRow(tr('本月折算 / 月预算'), fmtCost(mCost), bm, Math.min(100, Math.round(mCost / bm * 100))));
     }
     // 浪费取证：失败/取消请求白耗的 token
     (function () {
       var wReq = 0, wTok = 0;
       rows.forEach(function (r) { if (r[8] === 1 || r[8] === 2) { wReq++; wTok += N(r[4]) + N(r[5]); } });
-      if (wReq > 0) items.push(row('浪费取证', fmt(wTok) + ' tok', 'red', fmtI(wReq) + ' 次失败/取消'));
+      if (wReq > 0) items.push(row(tr('浪费取证'), fmt(wTok) + ' tok', 'red', fmtI(wReq) + tr(' 次失败/取消')));
     })();
     var host = $('ud-insights');
     host.innerHTML = items.join('');
@@ -1012,7 +1257,7 @@ function __usageBoot(D) {
     var more = $('ud-insights-more');
     more.hidden = items.length <= 6;
     if (items.length > 6) {
-      more.innerHTML = '<button type="button" class="btn">' + (insightsOpen ? '收起洞察' : '展开全部 ' + items.length + ' 项') + '</button>';
+      more.innerHTML = '<button type="button" class="btn">' + (insightsOpen ? tr('收起洞察') : tr('展开全部 ') + items.length + tr(' 项')) + '</button>';
     }
   }
 
@@ -1028,18 +1273,18 @@ function __usageBoot(D) {
     var out = '';
     var ttft = 0, tn = 0, genTok = 0, genMs = 0;
     rows.forEach(function (r) { var t = N(r[11]); if (t > 0) { ttft += t; tn++; } var d = N(r[7]) - t; if (d > 0) { genMs += d; genTok += N(r[5]); } });
-    if (tn) out += hrow('平均首字', (ttft / tn / 1000).toFixed(2) + ' s', 'yellow', '首个 token 延迟');
-    if (genMs > 0) out += hrow('生成速率', fmtI(Math.round(genTok / (genMs / 1000))) + ' tok/s', 'blue');
+    if (tn) out += hrow(tr('平均首字'), (ttft / tn / 1000).toFixed(2) + ' s', 'yellow', tr('首个 token 延迟'));
+    if (genMs > 0) out += hrow(tr('生成速率'), fmtI(Math.round(genTok / (genMs / 1000))) + ' tok/s', 'blue');
     if (D.stability && a) {
       var errPct = a.req ? Math.round(D.stability[2] / a.req * 1000) / 10 : 0;
-      out += hrow('错误率', errPct + '%', 'red', '失败 / 全部');
+      out += hrow(tr('错误率'), errPct + '%', 'red', tr('失败 / 全部'));
     }
     var peakCtx = 0;
     (D.compactions || []).forEach(function (c) { if (N(c[2]) > peakCtx) peakCtx = N(c[2]); });
-    if (peakCtx > 0) out += hrow('峰值上下文', fmt(peakCtx), 'purple', '压缩前最高');
+    if (peakCtx > 0) out += hrow(tr('峰值上下文'), fmt(peakCtx), 'purple', tr('压缩前最高'));
     var toolMs = 0, toolC = 0;
     (D.sessionTools || []).forEach(function (t) { toolC += N(t[2]); toolMs += N(t[3]); });
-    if (toolC) out += hrow('工具调用', fmtI(toolC) + ' 次', 'gray', '累计 ' + fmtDur(toolMs));
+    if (toolC) out += hrow(tr('工具调用'), fmtI(toolC) + tr(' 次'), 'gray', tr('累计 ') + fmtDur(toolMs));
     host.innerHTML = out;
   }
 
@@ -1050,12 +1295,12 @@ function __usageBoot(D) {
     var act = per.filter(function (x) { return x.req > 0; }).sort(function (a, b) { return b.tok - a.tok; });
     if (!act.length) { $('ud-pv-stack').innerHTML = '<p class="text-muted">当前筛选下暂无数据</p>'; $('ud-pv-rows').innerHTML = ''; return; }
     $('ud-pv-stack').innerHTML = donut(act.slice(0, 6).map(function (x) {
-      return { name: pvLabel(x.i), value: x.tok, color: pvColor(x.i), tip: pvLabel(x.i) + ' · ' + fmtI(x.req) + ' 次请求 · ' + fmt(x.tok) + ' tok · 缓存 ' + (x.inn ? Math.round(x.ca / x.inn * 100) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') };
+      return { name: pvLabel(x.i), value: x.tok, color: pvColor(x.i), tip: pvLabel(x.i) + ' · ' + fmtI(x.req) + tr(' 次请求 · ') + fmt(x.tok) + tr(' tok · 缓存 ') + (x.inn ? Math.round(x.ca / x.inn * 100) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') };
     }), 'token');
     $('ud-pv-rows').innerHTML = act.map(function (x) {
       return '<div class="text-small" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">' +
         '<span><span class="ud-dot" style="background:' + pvColor(x.i) + '"></span>' + pvLabel(x.i) + '<span class="ud-tag">' + pvTag(x.i) + '</span></span>' +
-        '<span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + (tot ? (x.tok / tot * 100).toFixed(1) : 0) + '% · 缓存 ' + (x.inn ? Math.round(x.ca / x.inn * 100) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') + '</span></div>';
+        '<span class="tabular-nums text-muted">' + fmtI(x.req) + tr(' 次 · ') + fmt(x.tok) + ' token · ' + (tot ? (x.tok / tot * 100).toFixed(1) : 0) + tr('% · 缓存 ') + (x.inn ? Math.round(x.ca / x.inn * 100) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') + '</span></div>';
     }).join('');
   }
 
@@ -1069,10 +1314,10 @@ function __usageBoot(D) {
       .sort(function (a, b) { return b.tok - a.tok; }).slice(0, 8);
     var tot = list.reduce(function (a, x) { return a + x.tok; }, 0);
     $('ud-model-bars').innerHTML = list.length ? donut(list.slice(0, 6).map(function (x) {
-      return { name: String(MD[x.m]), value: x.tok, tip: MD[x.m] + ' · ' + fmtI(x.req) + ' 次请求 · ' + fmt(x.tok) + ' tok · 缓存 ' + x.hit + '%' };
+      return { name: String(MD[x.m]), value: x.tok, tip: MD[x.m] + ' · ' + fmtI(x.req) + tr(' 次请求 · ') + fmt(x.tok) + tr(' tok · 缓存 ') + x.hit + '%' };
     }), 'token') + list.map(function (x) {
       var p = tot ? Math.round(x.tok / tot * 100) : 0;
-      return '<div class="text-small" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>' + esc(MD[x.m]) + '</span><span class="tabular-nums text-muted">' + fmtI(x.req) + ' 次 · ' + fmt(x.tok) + ' token · ' + p + '% · 缓存 ' + x.hit + '%</span></div>';
+      return '<div class="text-small" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>' + esc(MD[x.m]) + '</span><span class="tabular-nums text-muted">' + fmtI(x.req) + tr(' 次 · ') + fmt(x.tok) + ' token · ' + p + tr('% · 缓存 ') + x.hit + '%</span></div>';
     }).join('') : '<p class="text-muted">当前筛选下暂无数据</p>';
   }
 
@@ -1119,15 +1364,15 @@ function __usageBoot(D) {
       var last = vals[6];
       return '<svg width="' + W + '" height="' + Hh + '" style="display:block" role="img" aria-label="近 7 天趋势"><polyline points="' + pts + '" fill="none" stroke="var(--ud-accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity=".85"/><circle cx="' + W + '" cy="' + (Hh - 2 - (Hh - 5) * last / mx).toFixed(1) + '" r="2.2" fill="var(--ud-accent)"/></svg>';
     }
-    $('ud-top-sessions').innerHTML = list.length ? '<div class="table-responsive"><table class="table table-sm" style="min-width:520px;margin:0"><thead><tr><th>' + t('会话') + '</th><th class="text-end">' + t('请求数') + '</th><th class="text-end">' + t('token 合计') + '</th><th>' + t('近 7 天') + '</th><th class="text-end">' + t('最后活动') + '</th></tr></thead><tbody>' +
+    $('ud-top-sessions').innerHTML = list.length ? '<div class="table-responsive"><table class="table table-sm" style="min-width:520px;margin:0"><thead><tr><th>' + tr('会话') + '</th><th class="text-end">' + tr('请求数') + '</th><th class="text-end">' + tr('token 合计') + '</th><th>' + tr('近 7 天') + '</th><th class="text-end">' + tr('最后活动') + '</th></tr></thead><tbody>' +
       list.map(function (o) {
         return '<tr class="ud-click" data-sg="' + o.g + '" title="点击查看会话详情"><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td>' + spark(o.g) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="text-muted">当前筛选下暂无数据</p>';
     var donutEl = $('ud-tools-donut');
     if (donutEl) {
       donutEl.innerHTML = donut((D.tools || []).slice(0, 6).map(function (t) {
-        return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + ' 次调用' + (t[3] ? ' · 均 ' + fmtI(t[3]) + ' ms' : '') + (t[2] ? ' · 失败 ' + t[2] : '') };
-      }), '调用');
+        return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + tr(' 次调用') + (t[3] ? tr(' · 均 ') + fmtI(t[3]) + ' ms' : '') + (t[2] ? tr(' · 失败 ') + t[2] : '') };
+      }), tr('调用'));
     }
     Array.prototype.forEach.call($('ud-top-sessions').querySelectorAll('tr.ud-click'), function (tr) {
       tr.addEventListener('click', function () {
@@ -1169,12 +1414,12 @@ function __usageBoot(D) {
       var bh = Math.round((Hh - 20) * arr[i3] / max);
       var x = 2 + i3 * cw;
       var cr = innArr[i3] ? Math.round(caArr[i3] / innArr[i3] * 100) + '%' : '–';
-      out += '<rect x="' + x + '" y="' + (Hh - 18 - bh) + '" width="' + bw + '" height="' + bh + '" rx="2" fill="var(--viz-series-1)"' + (i3 === peak ? '' : ' fill-opacity="0.45"') + '><title>' + i3 + ':00–' + i3 + ':59 · ' + fmtI(reqArr[i3]) + ' 次请求 · ' + fmt(tokArr[i3]) + ' tok · 缓存 ' + cr + '</title></rect>';
+      out += '<rect x="' + x + '" y="' + (Hh - 18 - bh) + '" width="' + bw + '" height="' + bh + '" rx="2" fill="var(--viz-series-1)"' + (i3 === peak ? '' : ' fill-opacity="0.45"') + '><title>' + i3 + ':00–' + i3 + ':59 · ' + fmtI(reqArr[i3]) + tr(' 次请求 · ') + fmt(tokArr[i3]) + tr(' tok · 缓存 ') + cr + '</title></rect>';
       if (i3 % 3 === 0) out += '<text x="' + (x + bw / 2) + '" y="' + (Hh - 4) + '" text-anchor="middle" font-size="10" fill="var(--muted-foreground)">' + i3 + '</text>';
     }
     host.innerHTML = '<svg width="' + (cw * 24) + '" height="' + Hh + '" role="img" aria-label="24 小时用量分布"><desc>峰值 ' + peak + ' 点</desc>' + out + '</svg>';
     var note = $('ud-hours-note');
-    if (note) note.textContent = hourMetric === 'tok' ? '峰值 ' + peak + ' 点 · ' + fmt(arr[peak]) + ' tok' : '峰值 ' + peak + ' 点 · ' + fmtI(arr[peak]) + ' 次请求';
+    if (note) note.textContent = hourMetric === 'tok' ? tr('峰值 ') + peak + tr(' 点 · ') + fmt(arr[peak]) + ' tok' : tr('峰值 ') + peak + tr(' 点 · ') + fmtI(arr[peak]) + tr(' 次请求');
   }
   function wireHoursToggle() {
     var wrap = $('ud-hours-toggle');
@@ -1239,18 +1484,18 @@ function __usageBoot(D) {
       var CW = Math.max(4, Math.min(16, Math.floor((w - LX - 4 - 24 * CG) / 24))); // 格宽随容器自适应（380px 侧栏也能放下，宽屏封顶 16）
       var W4 = LX + 24 * (CW + CG) + 4, H4 = TY + 7 * (CW + CG) + 6;
       var out4 = '';
-      [0, 6, 12, 18].forEach(function (hh) { out4 += '<text x="' + (LX + hh * (CW + CG)) + '" y="13" font-size="10" fill="var(--muted-foreground)">' + hh + '时</text>'; });
+      [0, 6, 12, 18].forEach(function (hh) { out4 += '<text x="' + (LX + hh * (CW + CG)) + '" y="13" font-size="10" fill="var(--muted-foreground)">' + hh + tr('时') + '</text>'; });
       cells7.forEach(function (c, di) {
-        var lbl = c.k.slice(5) + ' ' + '日一二三四五六'[new Date(c.k + 'T00:00:00').getDay()];
+        var lbl = c.k.slice(5) + ' ' + tr('日一二三四五六')[new Date(c.k + 'T00:00:00').getDay()];
         out4 += '<text x="2" y="' + (TY + di * (CW + CG) + 12.5) + '" font-size="10" fill="var(--muted-foreground)">' + lbl + '</text>';
         for (var hh = 0; hh < 24; hh++) {
           var x = c.h[hh];
           out4 += rect(LX + hh * (CW + CG), TY + di * (CW + CG), CW, CW, shade(x.tok, hq),
-            c.k + ' ' + (hh < 10 ? '0' : '') + hh + ':00 · ' + fmtI(x.req) + ' 次请求 · ' + fmt(x.tok) + ' token');
+            c.k + ' ' + (hh < 10 ? '0' : '') + hh + ':00 · ' + fmtI(x.req) + tr(' 次请求 · ') + fmt(x.tok) + ' token');
         }
       });
-      host.innerHTML = '<svg width="' + W4 + '" height="' + H4 + '" role="img" aria-label="近 7 天小时热力图"><desc>行=日期，列=0-23 时</desc>' + out4 + '</svg>' +
-        '<div class="text-muted text-small" style="margin-top:6px">近 7 天，每天按 0–23 时切分；着色深浅按该小时 token 用量，悬停查看明细。</div>';
+      host.innerHTML = '<svg width="' + W4 + '" height="' + H4 + '" role="img" aria-label="' + tr('近 7 天小时热力图') + '"><desc>' + tr('行=日期，列=0-23 时') + '</desc>' + out4 + '</svg>' +
+        '<div class="text-muted text-small" style="margin-top:6px">' + tr('近 7 天，每天按 0–23 时切分；着色深浅按该小时 token 用量，悬停查看明细。') + '</div>';
       heatLastW = w;
       return;
     }
@@ -1264,7 +1509,7 @@ function __usageBoot(D) {
         var m0 = new Date(endD.getFullYear(), endD.getMonth() - mi, 1);
         var dim = new Date(m0.getFullYear(), m0.getMonth() + 1, 0).getDate();
         var lead = (new Date(m0.getFullYear(), m0.getMonth(), 1).getDay() + 6) % 7;
-        var g = '<div style="min-width:212px"><div class="text-small text-muted" style="margin:2px 0 4px">' + (m0.getFullYear() + ' 年 ' + (m0.getMonth() + 1) + ' 月') + '</div><div style="display:grid;grid-template-columns:repeat(7,26px);gap:3px">';
+        var g = '<div style="min-width:212px"><div class="text-small text-muted" style="margin:2px 0 4px">' + (m0.getFullYear() + tr(' 年 ') + (m0.getMonth() + 1) + tr(' 月')) + '</div><div style="display:grid;grid-template-columns:repeat(7,26px);gap:3px">';
         '一二三四五六'.split('').forEach(function (w) { g += '<div class="text-muted" style="font-size:10px;text-align:center">' + w + '</div>'; });
         for (var e = 0; e < lead; e++) g += '<div></div>';
         for (var dd = 1; dd <= dim; dd++) {
@@ -1272,7 +1517,7 @@ function __usageBoot(D) {
           var c = cells.find(function (x) { return x.k === mk; });
           var vv = c ? c.v : 0;
           var st2 = shade(vv, qs3);
-          g += '<div class="ud-mcal-day" data-tip="' + mk + ' · ' + fmtI(c ? c.req : 0) + ' 次请求 · ' + fmt(vv) + ' token" style="width:26px;height:22px;border-radius:3px;background:' + st2.fill + ';opacity:' + (st2.op ? st2.op.replace(' fill-opacity="', '').replace('"', '') : (vv > 0 ? 1 : 0.35)) + ';font-size:9px;line-height:22px;text-align:center;color:var(--muted-foreground)">' + dd + '</div>';
+          g += '<div class="ud-mcal-day" data-tip="' + mk + ' · ' + fmtI(c ? c.req : 0) + tr(' 次请求 · ') + fmt(vv) + ' token" style="width:26px;height:22px;border-radius:3px;background:' + st2.fill + ';opacity:' + (st2.op ? st2.op.replace(' fill-opacity="', '').replace('"', '') : (vv > 0 ? 1 : 0.35)) + ';font-size:9px;line-height:22px;text-align:center;color:var(--muted-foreground)">' + dd + '</div>';
         }
         g += '</div></div>';
         mHtml += g;
@@ -1299,9 +1544,9 @@ function __usageBoot(D) {
         var x0 = L + i * (cw + gap);
         var mk = x.k.slice(0, 7);
         if (mk !== lastM) { lastM = mk; out += '<text x="' + x0 + '" y="' + (T + ch + 16) + '" font-size="10" fill="var(--muted-foreground)">' + Number(x.k.slice(5, 7)) + '月</text>'; }
-        out += rect(x0, T, cw, ch, shade(x.v, wq), x.k + ' 当周 · ' + fmtI(x.req) + ' 次请求 · ' + fmt(x.v) + ' token');
+        out += rect(x0, T, cw, ch, shade(x.v, wq), x.k + tr(' 当周 · ') + fmtI(x.req) + tr(' 次请求 · ') + fmt(x.v) + ' token');
       });
-      host.innerHTML = '<svg width="' + W2 + '" height="' + H2 + '" role="img" aria-label="活跃热力图（每周 token）"><desc>共 ' + weeks.length + ' 周</desc>' + out + '</svg>';
+      host.innerHTML = '<svg width="' + W2 + '" height="' + H2 + '" role="img" aria-label="' + tr('活跃热力图（每周 token）') + '"><desc>' + tr('共 N 周').replace('N', weeks.length) + '</desc>' + out + '</svg>';
       heatLastW = w;
       return;
     }
@@ -1329,9 +1574,9 @@ function __usageBoot(D) {
           out += '<text x="' + x + '" y="' + (T + 7 * (ch + gap) + 16) + '" font-size="10" fill="var(--muted-foreground)">' + Number(c.k.slice(5, 7)) + '月</text>';
         }
       }
-      out += rect(x, y, cw, ch, shade(c.v, dq), c.k + ' · ' + fmtI(c.req) + ' 次请求 · ' + fmt(c.v) + ' token');
+      out += rect(x, y, cw, ch, shade(c.v, dq), c.k + ' · ' + fmtI(c.req) + tr(' 次请求 · ') + fmt(c.v) + ' token');
     });
-    host.innerHTML = '<svg width="' + W2 + '" height="' + H2 + '" role="img" aria-label="活跃热力图（每日 token）"><desc>共 ' + cells.length + ' 天，' + dv.length + ' 天有用量</desc>' + out + '</svg>';
+    host.innerHTML = '<svg width="' + W2 + '" height="' + H2 + '" role="img" aria-label="' + tr('活跃热力图（每日 token）') + '"><desc>' + tr('共 N 天，M 天有用量').replace('N', cells.length).replace('M', dv.length) + '</desc>' + out + '</svg>';
     heatLastW = w;
   }
 
@@ -1345,33 +1590,33 @@ function __usageBoot(D) {
       pv2[r[3]] = (pv2[r[3]] || 0) + 1;
     });
     var mix = donut(Object.keys(mm).sort(function (a, b) { return mm[b] - mm[a]; }).map(function (k) {
-      return { name: k, value: mm[k], tip: k + ' · ' + fmt(mm[k]) + ' tok（' + Math.round(mm[k] / (mtot() || 1) * 100) + '%）' };
+      return { name: k, value: mm[k], tip: k + ' · ' + fmt(mm[k]) + ' tok (' + Math.round(mm[k] / (mtot() || 1) * 100) + '%)' };
     }), 'token');
     function mtot() { var t = 0; for (var k2 in mm) t += mm[k2]; return t; }
     var pvm = Object.keys(pv2).map(function (k) { return '<span class="text-small text-muted">' + pvLabel(k) + ' ×' + pv2[k] + '</span>'; }).join(' · ');
     var tl = (toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6)
       .map(function (t) { return '<span class="text-small text-muted">' + esc(String(t[0]).replace(/^mcp__/, '')) + ' ×' + fmtI(t[1]) + '</span>'; }).join(' · ');
     var cm = cmpMap[o.g];
-    var cmpHtml = cm ? '压缩 ' + cm.cnt + ' 次 · 压缩前水位最高 ' + fmt(cm.pre) + ' token' : '无压缩记录';
+    var cmpHtml = cm ? tr('压缩 ') + cm.cnt + tr(' 次 · 压缩前水位最高 ') + fmt(cm.pre) + ' token' : tr('无压缩记录');
     // 事件时间线：压缩事件（META 带时间）+ 模型切换（相邻请求模型变化推导），按时间归并
     var events = [];
-    (cm ? cm.ts : []).forEach(function (t) { events.push({ t: t, label: '上下文压缩' }); });
+    (cm ? cm.ts : []).forEach(function (t) { events.push({ t: t, label: tr('上下文压缩') }); });
     var prevM = -1;
     rs.forEach(function (r) {
       if (prevM !== -1 && r[2] !== prevM) {
         var d = new Date(r[1]);
-        events.push({ t: pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()), label: '切换模型 → ' + (MD[r[2]] || '?') });
+        events.push({ t: pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()), label: tr('切换模型 → ') + (MD[r[2]] || '?') });
       }
       prevM = r[2];
     });
     events.sort(function (a, b) { return a.t < b.t ? -1 : a.t > b.t ? 1 : 0; });
     var tl8 = events.length
-      ? '<div class="ud-sec"><div class="ud-kv-l">事件时间线</div><div class="ud-timeline">' +
+      ? '<div class="ud-sec"><div class="ud-kv-l">' + tr('事件时间线') + '</div><div class="ud-timeline">' +
         events.slice(-12).map(function (e) {
-          var cls = e.label.indexOf('压缩') >= 0 ? 'ud-tl-c' : 'ud-tl-m';
+          var cls = e.label.indexOf(tr('压缩')) >= 0 ? 'ud-tl-c' : 'ud-tl-m';
           return '<div class="ud-tl-item"><span class="ud-tl-dot ' + cls + '"></span><span class="ud-tl-t">' + esc(e.t) + '</span><span class="ud-tl-x">' + esc(e.label) + '</span></div>';
         }).join('') +
-        (events.length > 12 ? '<div class="ud-tl-item"><span class="ud-tl-dot ud-tl-more"></span><span class="ud-tl-t">…</span><span class="ud-tl-x text-muted">共 ' + events.length + ' 个事件</span></div>' : '') +
+        (events.length > 12 ? '<div class="ud-tl-item"><span class="ud-tl-dot ud-tl-more"></span><span class="ud-tl-t">…</span><span class="ud-tl-x text-muted">' + tr('共 N 个事件').replace('N', events.length) + '</span></div>' : '') +
         '</div></div>'
       : '';
     // 主会话 / 子代理拆分（rows r[9]：0 主会话 1 子代理 2 系统）
@@ -1406,15 +1651,15 @@ function __usageBoot(D) {
       var x = rs.length > 1 ? i / (rs.length - 1) * (W - 8) + 4 : W / 2;
       var y = H - 8 - (H - 16) * N(r[4]) / maxIn;
       var tid = r[14] == null ? '' : String(r[14]);
-      var turnLabel = tid && turnNo[tid] != null ? ' · 第 ' + turnNo[tid] + ' 轮' : '';
+      var turnLabel = tid && turnNo[tid] != null ? tr(' · 第 ') + turnNo[tid] + tr(' 轮') : '';
       if (prevTurn != null && tid && tid !== prevTurn) {
         turnSeps.push('<line x1="' + x.toFixed(1) + '" y1="4" x2="' + x.toFixed(1) + '" y2="' + (H - 4) + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="2 4" opacity=".8"><title>新一轮请求</title></line>');
       }
       prevTurn = tid || prevTurn;
       var d = new Date(r[1]);
       var tt = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-      var st = r[8] === 0 ? '完成' : r[8] === 1 ? '失败' : r[8] === 2 ? '已取消' : '进行中';
-      var tip = '<title>' + esc(tt) + ' · 输入 ' + fmt(N(r[4])) + ' tok · 生成 ' + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + turnLabel + (r[9] === 1 ? ' · 子代理' : '') + '</title>';
+      var st = r[8] === 0 ? tr('完成') : r[8] === 1 ? tr('失败') : r[8] === 2 ? tr('已取消') : tr('进行中');
+      var tip = '<title>' + esc(tt) + tr(' · 输入 ') + fmt(N(r[4])) + tr(' tok · 生成 ') + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + turnLabel + (r[9] === 1 ? tr(' · 子代理') : '') + '</title>';
       if (r[9] === 1) { subDots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.2 : 3.2) + '" fill="var(--viz-series-2)" fill-opacity="0.9">' + tip + '</circle>'); return; }
       pts.push(x.toFixed(1) + ',' + y.toFixed(1));
       dots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.4 : 3.4) + '" fill="var(--viz-series-1)" fill-opacity="0.85">' + tip + '</circle>');
@@ -1428,7 +1673,7 @@ function __usageBoot(D) {
       rs.forEach(function (r, i) { var dd = Math.abs(r[1] - tms); if (dd < bestD) { bestD = dd; best = i; } });
       if (best < 0 || bestD > 30 * 60e3) return;
       var x = rs.length > 1 ? best / (rs.length - 1) * (W - 8) + 4 : W / 2;
-      cmpMarks += '<line x1="' + x.toFixed(1) + '" y1="4" x2="' + x.toFixed(1) + '" y2="' + (H - 4) + '" stroke="var(--yellow)" stroke-width="1" stroke-dasharray="3 3" opacity=".9"><title>压缩事件 ' + esc(tstr) + '</title></line>';
+      cmpMarks += '<line x1="' + x.toFixed(1) + '" y1="4" x2="' + x.toFixed(1) + '" y2="' + (H - 4) + '" stroke="var(--yellow)" stroke-width="1" stroke-dasharray="3 3" opacity=".9"><title>' + tr('压缩事件 ') + esc(tstr) + '</title></line>';
     });
     var limitLine = '';
     if (ctxLimit && maxIn > ctxLimit * 0.3) {
@@ -1451,45 +1696,45 @@ function __usageBoot(D) {
       '<span class="text-small text-muted" style="position:absolute;right:0;top:0;text-align:right">' + esc(endT) + '</span>' +
       '<div style="padding-top:16px">' + curve + '</div></div>';
     var hasSub = subReq > 0;
-    var curveHead = '<div class="ud-kv-l" style="margin:2px 0 2px">按请求输入 token 近似 · 峰值 ' + fmt(maxIn) +
-      (ctxLimit ? ' · 占 ' + esc(MD[domModel]) + ' 窗口 ' + Math.round(maxIn / ctxLimit * 100) + '%（上限 ' + fmt(ctxLimit) + '）' : '') +
-      ' · 悬停看点明细' + (hasSub ? ' · <span style="color:var(--viz-series-2)">●</span> 子代理为独立上下文（散点）' : '') +
-      (cm ? ' · <span style="color:var(--yellow)">┆</span> 压缩事件' : '') + '</div>';
+    var curveHead = '<div class="ud-kv-l" style="margin:2px 0 2px">' + tr('按请求输入 token 近似 · 峰值 ') + fmt(maxIn) +
+      (ctxLimit ? tr(' · 占 ') + esc(MD[domModel]) + tr(' 窗口 ') + Math.round(maxIn / ctxLimit * 100) + tr('%（上限 ') + fmt(ctxLimit) + '）' : '') +
+      tr(' · 悬停看点明细') + (hasSub ? ' · <span style="color:var(--viz-series-2)">●</span> 子代理为独立上下文（散点）' : '') +
+      (cm ? ' · <span style="color:var(--yellow)">┆</span> ' + tr('压缩事件') : '') + '</div>';
     var toolDonut = (toolsMap[o.g] || []).length
       ? donut((toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6).map(function (t) {
-          return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + ' 次调用' + (t[3] ? ' · 累计 ' + fmtI(t[3]) + ' ms' : '') };
-        }), '调用')
+          return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + tr(' 次调用') + (t[3] ? tr(' · 累计 ') + fmtI(t[3]) + ' ms' : '') };
+        }), tr('调用'))
       : '<span class="text-muted text-small">无工具调用</span>';
     function kv(l, v) { return '<div><div class="ud-kv-l">' + l + '</div><div class="ud-kv-v">' + v + '</div></div>'; }
     // 主/子代理 token 拆分条（双色堆叠，悬停看明细；rows r[9]：0 主会话 1 子代理）
     var tot2 = mainTok + subTok;
     var subBar = tot2 > 0
       ? '<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin:6px 0 6px;max-width:460px">' +
-        (mainTok > 0 ? '<div data-tip="主会话 · ' + fmtI(mainReq) + ' 次 · ' + fmt(mainTok) + ' tok（' + Math.round(mainTok / tot2 * 100) + '%）" style="width:' + (mainTok / tot2 * 100) + '%;background:var(--viz-series-1)"></div>' : '') +
-        (subTok > 0 ? '<div data-tip="子代理 · ' + fmtI(subReq) + ' 次 · ' + fmt(subTok) + ' tok（' + Math.round(subTok / tot2 * 100) + '%）" style="width:' + (subTok / tot2 * 100) + '%;background:var(--viz-series-3)"></div>' : '') +
+        (mainTok > 0 ? '<div data-tip="' + tr('主会话') + ' · ' + fmtI(mainReq) + tr(' 次 · ') + fmt(mainTok) + ' tok (' + Math.round(mainTok / tot2 * 100) + '%)" style="width:' + (mainTok / tot2 * 100) + '%;background:var(--viz-series-1)"></div>' : '') +
+        (subTok > 0 ? '<div data-tip="' + tr('子代理') + ' · ' + fmtI(subReq) + tr(' 次 · ') + fmt(subTok) + ' tok (' + Math.round(subTok / tot2 * 100) + '%)" style="width:' + (subTok / tot2 * 100) + '%;background:var(--viz-series-3)"></div>' : '') +
         '</div><div class="text-small text-muted">' +
         (mainReq ? '<span style="color:var(--viz-series-1)">■</span> 主会话 ' + fmt(mainTok) + ' tok × ' + fmtI(mainReq) : '') +
         (subReq ? (mainReq ? '　' : '') + '<span style="color:var(--viz-series-3)">■</span> 子代理 ' + fmt(subTok) + ' tok × ' + fmtI(subReq) : '') + '</div>'
       : '';
-    return '<div class="ud-sec"><div class="ud-kv-l">项目目录</div><div class="ud-kv-v" style="word-break:break-all">' + dir + '</div>' +
+    return '<div class="ud-sec"><div class="ud-kv-l">' + tr('项目目录') + '</div><div class="ud-kv-v" style="word-break:break-all">' + dir + '</div>' +
       (subReq ? subBar : '') +
-      (pvm ? '<div class="text-small text-muted" style="margin-top:4px">来源：' + pvm + '</div>' : '') + '</div>' +
+      (pvm ? '<div class="text-small text-muted" style="margin-top:4px">' + tr('来源：') + '' + pvm + '</div>' : '') + '</div>' +
       '<div class="ud-kv">' +
-      kv('请求 / 缓存率', fmtI(o.req) + ' 次 · ' + o.rate + '%') +
+      kv(tr('请求 / 缓存率'), fmtI(o.req) + tr(' 次 · ') + o.rate + '%') +
       (function () {
         var gen = 0, ms = 0;
         rs.forEach(function (r) { gen += N(r[5]); ms += Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11]))); });
-        return ms > 0 ? kv('平均输出速率', tpsHtml(Math.round(gen / ms * 1000)) + ' tok/s（加权）') : '';
+        return ms > 0 ? kv(tr('平均输出速率'), tpsHtml(Math.round(gen / ms * 1000)) + tr(' tok/s（加权）')) : '';
       })() +
-      (subReq ? kv('主会话 / 子代理', fmtI(mainReq) + ' 次 · ' + fmt(mainTok) + ' tok <span class="text-muted">/</span> ' + fmtI(subReq) + ' 次 · ' + fmt(subTok) + ' tok') : '') +
-      kv('上下文压缩', cmpHtml) +
-      (costOn && o.hasCost ? kv('折算成本', fmtCost(o.cost)) : '') +
+      (subReq ? kv(tr('主会话 / 子代理'), fmtI(mainReq) + tr(' 次 · ') + fmt(mainTok) + ' tok <span class="text-muted">/</span> ' + fmtI(subReq) + tr(' 次 · ') + fmt(subTok) + ' tok') : '') +
+      kv(tr('上下文压缩'), cmpHtml) +
+      (costOn && o.hasCost ? kv(tr('折算成本'), fmtCost(o.cost)) : '') +
       '</div>' +
       '<div class="ud-grid3" style="margin-top:14px">' +
-      '<div><div class="ud-kv-l">模型占比（按 token）</div>' + mix +
-      '<button type="button" class="btn ud-sess-logs" data-sg="' + o.g + '" style="margin:8px 0 0;padding:2px 10px;font-size:12px">查看该会话请求日志 →</button></div>' +
-      '<div><div class="ud-kv-l">使用工具（调用次数占比）</div>' + toolDonut + '</div>' +
-      '<div>' + (tl8 || '<div class="ud-kv-l">事件时间线</div><span class="text-muted text-small">无压缩 / 模型切换事件</span>') + '</div>' +
+      '<div><div class="ud-kv-l">' + tr('模型占比（按 token）') + '</div>' + mix +
+      '<button type="button" class="btn ud-sess-logs" data-sg="' + o.g + '" style="margin:8px 0 0;padding:2px 10px;font-size:12px">' + tr('查看该会话请求日志 →') + '</button></div>' +
+      '<div><div class="ud-kv-l">' + tr('使用工具（调用次数占比）') + '</div>' + toolDonut + '</div>' +
+      '<div>' + (tl8 || '<div class="ud-kv-l">' + tr('事件时间线') + '</div><span class="text-muted text-small">无压缩 / 模型切换事件</span>') + '</div>' +
       '</div>' +
       '<div class="ud-sec" style="margin-top:14px">' + curveHead + curveWrap + '</div>';
   }
@@ -1514,7 +1759,7 @@ function __usageBoot(D) {
       o.per1k = o.hasCost && o.tot > 0 ? o.cost / (o.tot / 1000) : null;
       return o;
     }).sort(function (a, b) { return b.tot - a.tot; });
-    headEl.innerHTML = '<tr><th>模型</th><th class="text-end">请求数</th><th class="text-end">平均 tok/s</th><th class="text-end">平均首字</th><th class="text-end">失败率</th><th class="text-end">平均产出</th><th class="text-end">输入 token</th><th class="text-end">生成 token</th><th class="text-end">合计</th><th class="text-end">缓存率</th>' + (costOn ? '<th class="text-end">折算成本</th><th class="text-end">成本 / 1k tok</th>' : '') + '</tr>';
+    headEl.innerHTML = '<tr><th>' + tr('模型') + '</th><th class="text-end">' + tr('请求数') + '</th><th class="text-end">' + tr('平均 tok/s') + '</th><th class="text-end">' + tr('平均首字') + '</th><th class="text-end">' + tr('失败率') + '</th><th class="text-end">' + tr('平均产出') + '</th><th class="text-end">' + tr('输入 token') + '</th><th class="text-end">' + tr('生成 token') + '</th><th class="text-end">' + tr('合计') + '</th><th class="text-end">' + tr('缓存率') + '</th>' + (costOn ? '<th class="text-end">' + tr('折算成本') + '</th><th class="text-end">' + tr('成本 / 1k tok') + '</th>' : '') + '</tr>';
     bodyEl.innerHTML = list.length ? list.map(function (o) {
       var avgOut = o.req ? o.out / o.req : null;
       return '<tr><td class="ud-flink" data-k="m" data-v="' + o.m + '" title="点击只看该模型">' + esc(MD[o.m]) + '</td>' +
@@ -1542,7 +1787,7 @@ function __usageBoot(D) {
   }
   function healthBadge(h) {
     var c = h >= 90 ? 'var(--green)' : h >= 70 ? 'var(--yellow)' : 'var(--red)';
-    return '<span data-tip="健康分 ' + h + '／100：失败率×60 + 取消率×25 + 重试率（封顶 15）加权扣分" style="color:' + c + ';font-weight:600">' + h + '</span>';
+    return '<span data-tip="健康分 ' + h + tr('／100：失败率×60 + 取消率×25 + 重试率（封顶 15）加权扣分" style="color:') + c + ';font-weight:600">' + h + '</span>';
   }
   // 项目用量：按会话目录聚合（ccusage project / CCMeter 项目卡片的本地版）
   function renderProjects(rows) {
@@ -1550,7 +1795,7 @@ function __usageBoot(D) {
     if (!headEl || !bodyEl) return;
     var per = {};
     rows.forEach(function (r) {
-      var dir = projKey(SD[r[0]] || '（未知目录）');
+      var dir = projKey(SD[r[0]] || tr('（未知目录）'));
       var o = per[dir] || (per[dir] = { req: 0, inn: 0, out: 0, cost: 0, hasCost: false, last: 0, sess: {}, dirs: {}, tok: 0 });
       o.req++; o.inn += N(r[4]); o.out += N(r[5]); o.tok = o.inn + o.out;
       if (r[1] > o.last) o.last = r[1];
@@ -1564,7 +1809,7 @@ function __usageBoot(D) {
     rows.forEach(function (r) {
       var k = dayKey(r[1]);
       if (days7.indexOf(k) < 0) return;
-      var dir = projKey(SD[r[0]] || '（未知目录）');
+      var dir = projKey(SD[r[0]] || tr('（未知目录）'));
       var o = sp[dir] || (sp[dir] = {});
       o[k] = (o[k] || 0) + N(r[4]) + N(r[5]);
     });
@@ -1579,13 +1824,13 @@ function __usageBoot(D) {
     }
     var list = Object.keys(per).map(function (d) { var o = per[d]; o.dir = d; return o; })
       .sort(function (a, b) { return b.tok - a.tok; });
-    headEl.innerHTML = '<tr><th>项目</th><th class="text-end">会话数</th><th class="text-end">请求数</th><th class="text-end">token 合计</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '<th>近 7 天</th><th class="text-end">最后活动</th></tr>';
+    headEl.innerHTML = '<tr><th>' + tr('项目') + '</th><th class="text-end">' + tr('会话数') + '</th><th class="text-end">' + tr('请求数') + '</th><th class="text-end">' + tr('token 合计') + '</th>' + (costOn ? '<th class="text-end">' + tr('折算成本') + '</th>' : '') + '<th>' + tr('近 7 天') + '</th><th class="text-end">' + tr('最后活动') + '</th></tr>';
     bodyEl.innerHTML = list.length ? list.map(function (o) {
       var base = baseName(o.dir);
       var sel = st.proj === o.dir;
       var dirs = Object.keys(o.dirs).filter(Boolean);
-      var dirNote = dirs.length > 1 ? ' · 含 ' + dirs.length + ' 个目录' : '';
-      return '<tr class="ud-click" data-proj="' + esc(o.dir) + '" title="点击只看该项目的会话\n' + esc(dirs.join('\n')) + '"><td class="text-nowrap">' + esc(base) + (sel ? ' <span class="ud-tag">已选</span>' : '') + '<div class="ud-kv-l" style="margin-top:1px">' + esc(o.dir) + (dirs.length > 1 ? ' <span class="ud-tag">' + dirNote + '</span>' : '') + '</div></td>' +
+      var dirNote = dirs.length > 1 ? tr(' · 含 ') + dirs.length + tr(' 个目录') : '';
+      return '<tr class="ud-click" data-proj="' + esc(o.dir) + '" title="' + tr('点击只看该项目的会话') + '\n' + esc(dirs.join('\n')) + '"><td class="text-nowrap">' + esc(base) + (sel ? ' <span class="ud-tag">' + tr('已选') + '</span>' : '') + '<div class="ud-kv-l" style="margin-top:1px">' + esc(o.dir) + (dirs.length > 1 ? ' <span class="ud-tag">' + dirNote + '</span>' : '') + '</div></td>' +
         '<td class="text-end tabular-nums">' + fmtI(Object.keys(o.sess).length) + '</td>' +
         '<td class="text-end tabular-nums">' + fmtI(o.req) + '</td>' +
         '<td class="text-end tabular-nums">' + tokCell(o.tok) + '</td>' +
@@ -1631,13 +1876,13 @@ function __usageBoot(D) {
       if (isActive && w.end > w.start) {
         var elapsedMin = Math.max(1, (w.end - w.start) / 60e3);
         var projected = Math.round(w.tok / elapsedMin * 300);
-        proj = ' · 预计全窗 ' + fmt(projected) + ' tok';
+        proj = tr(' · 预计全窗 ') + fmt(projected) + ' tok';
       }
       return '<div class="ud-win' + (isActive ? ' ud-win-active' : '') + '">' +
-        '<div class="ud-win-t">' + fullTs(w.start).slice(5, -3) + ' – ' + pad(new Date(w.end).getHours()) + ':' + pad(new Date(w.end).getMinutes()) + (isActive ? ' <span class="ud-tag" style="color:var(--ud-accent)">活跃' + proj + '</span>' : '') + '</div>' +
+        '<div class="ud-win-t">' + fullTs(w.start).slice(5, -3) + ' – ' + pad(new Date(w.end).getHours()) + ':' + pad(new Date(w.end).getMinutes()) + (isActive ? ' <span class="ud-tag" style="color:var(--ud-accent)">' + tr('活跃') + proj + '</span>' : '') + '</div>' +
         '<div class="ud-win-bar"><i style="width:' + pct + '%"></i></div>' +
-        '<div class="ud-win-v tabular-nums">' + fmt(w.tok) + ' <span class="fs">' + fmtI(w.req) + ' 次</span></div></div>';
-    }).join('') + '</div><p class="ud-kv-l" style="margin-top:6px">近似口径：按相邻请求间隔 ≥5h 开新窗，官方窗口起点在服务端，仅作节奏参考。</p>';
+        '<div class="ud-win-v tabular-nums">' + fmt(w.tok) + ' <span class="fs">' + fmtI(w.req) + tr(' 次') + '</span></div></div>';
+    }).join('') + '</div><p class="ud-kv-l" style="margin-top:6px">' + tr('近似口径：按相邻请求间隔 ≥5h 开新窗，官方窗口起点在服务端，仅作节奏参考。') + '</p>';
   }
 
   function renderSessions(rows) {
@@ -1646,12 +1891,12 @@ function __usageBoot(D) {
       .sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
     var hasCmp = (D.compactions || []).length > 0;
     var cols = [
-      { h: t('会话'), k: null }, { h: t('请求数'), k: 1, end: 1 }, { h: t('输入 token'), k: 2, end: 1 },
-      { h: t('生成 token'), k: 3, end: 1 }, { h: t('token 合计'), k: 4, end: 1 },
-      { h: t('缓存率'), k: 7, end: 1 }, { h: t('健康'), k: 8, end: 1 },
-      hasCmp ? { h: t('压缩'), k: null, end: 1 } : null,
-      costOn ? { h: t('折算成本'), k: 6, end: 1 } : null,
-      { h: t('最后活动'), k: 5, end: 1 }
+      { h: tr('会话'), k: null }, { h: tr('请求数'), k: 1, end: 1 }, { h: tr('输入 token'), k: 2, end: 1 },
+      { h: tr('生成 token'), k: 3, end: 1 }, { h: tr('token 合计'), k: 4, end: 1 },
+      { h: tr('缓存率'), k: 7, end: 1 }, { h: tr('健康'), k: 8, end: 1 },
+      hasCmp ? { h: tr('压缩'), k: null, end: 1 } : null,
+      costOn ? { h: tr('折算成本'), k: 6, end: 1 } : null,
+      { h: tr('最后活动'), k: 5, end: 1 }
     ].filter(Boolean);
     var span = cols.length;
     $('ud-sessions-head').innerHTML = '<tr>' + cols.map(function (c) {
@@ -1661,7 +1906,7 @@ function __usageBoot(D) {
     var shown = list.slice(0, 30);
     var body = '';
     shown.forEach(function (o) {
-      body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">子代理 ×' + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.inn) + '</td><td class="text-end tabular-nums">' + tokCell(o.out) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td><td class="text-end">' + healthBadge(o.health) + '</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + ' 次' : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
+      body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">' + tr('子代理 ×') + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.inn) + '</td><td class="text-end tabular-nums">' + tokCell(o.out) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td><td class="text-end">' + healthBadge(o.health) + '</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + tr(' 次') : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       if (o.g === sessExp) body += '<tr class="ud-exp"><td colspan="' + span + '">' + sessionDetailHTML(o) + '</td></tr>';
     });
     $('ud-sessions-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
@@ -1699,8 +1944,8 @@ function __usageBoot(D) {
     // 列里已有的信息不再重复；展开区只放增量：生成耗时拆解、首字占比、（serve）provider 原始用量
     var genMs = fmtI(Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11]))));
     var ttftpct = r[11] != null && r[7] ? Math.round(r[11] / r[7] * 100) + '%' : '–';
-    return '<div class="text-small text-muted" style="line-height:1.9">生成耗时 ' + genMs + ' ms · 首字占比 ' + ttftpct +
-      (window.__USAGE_SERVE__ ? ' · 以下为 provider 上报的原始用量' : '') + '</div>' +
+    return '<div class="text-small text-muted" style="line-height:1.9">生成耗时 ' + genMs + tr(' ms · 首字占比 ') + ttftpct +
+      (window.__USAGE_SERVE__ ? tr(' · 以下为 provider 上报的原始用量') : '') + '</div>' +
       (window.__USAGE_SERVE__ ? '<div class="ud-sec" id="ud-reqraw"><div class="ud-kv-l">正在拉取 provider 上报的原始用量…</div></div>' : '');
   }
   function fillRawUsage(id) {
@@ -1708,11 +1953,11 @@ function __usageBoot(D) {
     if (!el) return;
     fetch('/api/request?id=' + encodeURIComponent(id)).then(function (x) { return x.json(); }).then(function (j) {
       if (j.error) { el.innerHTML = '<div class="ud-kv-l">原始用量：' + esc(j.error) + '</div>'; return; }
-      var usage = '(无)';
+      var usage = tr('(无)');
       try { usage = j.raw_usage_json ? JSON.stringify(JSON.parse(j.raw_usage_json), null, 1) : usage; } catch (e) { usage = j.raw_usage_json || usage; }
       var extra = [];
       if (j.finish_reason) extra.push('finish_reason: ' + j.finish_reason);
-      if (j.error_code || j.error_message) extra.push('错误: ' + (j.error_code || '') + ' ' + (j.error_message || ''));
+      if (j.error_code || j.error_message) extra.push(tr('错误: ') + (j.error_code || '') + ' ' + (j.error_message || ''));
       if (j.agent) extra.push('agent: ' + j.agent);
       el.innerHTML = '<div class="ud-kv-l">provider 上报的原始用量</div><pre class="ud-raw">' + esc(usage) + '</pre>' + (extra.length ? '<div class="text-small text-muted">' + esc(extra.join(' · ')) + '</div>' : '');
     }).catch(function (e) { el.innerHTML = '<div class="ud-kv-l">拉取失败：' + esc(String(e)) + '</div>'; });
@@ -1733,14 +1978,14 @@ function __usageBoot(D) {
     var list = rows.filter(function (r) { return detailStat === -2 ? (r[8] === 1 || r[8] === 2) : (detailStat < 0 || r[8] === detailStat); })
       .sort(function (a, b) { return (ACC[sortD.k](a) - ACC[sortD.k](b)) * sortD.d; });
     var cols = [
-      { h: '时间', k: 0 }, { h: '会话', k: null }, { h: '模型', k: null }, { h: '来源', k: null }, { h: '类型', k: null },
-      { h: '输入', k: 4, end: 1 }, { h: '缓存读', k: 6, end: 1 }, { h: '缓存写', k: 10, end: 1 },
-      { h: '生成', k: 5, end: 1 }, { h: '合计', k: 12, end: 1 }, { h: '耗时', k: 7, end: 1 }, { h: '首字', k: 11, end: 1 },
+      { h: tr('时间'), k: 0 }, { h: tr('会话'), k: null }, { h: tr('模型'), k: null }, { h: tr('来源'), k: null }, { h: tr('类型'), k: null },
+      { h: tr('输入'), k: 4, end: 1 }, { h: tr('缓存读'), k: 6, end: 1 }, { h: tr('缓存写'), k: 10, end: 1 },
+      { h: tr('生成'), k: 5, end: 1 }, { h: tr('合计'), k: 12, end: 1 }, { h: tr('耗时'), k: 7, end: 1 }, { h: tr('首字'), k: 11, end: 1 },
       { h: 'tok/s', k: 14, end: 1 },
-      { h: '状态', k: null },
-      costOn ? { h: '成本', k: 13, end: 1 } : null
+      { h: tr('状态'), k: null },
+      costOn ? { h: tr('成本'), k: 13, end: 1 } : null
     ].filter(Boolean);
-    if (D.session) { cols = cols.filter(function (c) { return c.h !== '会话' && c.h !== '类型'; }); }
+    if (D.session) { cols = cols.filter(function (c) { return c.h !== tr('会话') && c.h !== tr('类型'); }); }
     var span = cols.length;
     $('ud-detail-head').innerHTML = '<tr>' + cols.map(function (c) {
       var arrow = sortD.k === c.k ? (sortD.d < 0 ? ' ↓' : ' ↑') : '';
@@ -1790,19 +2035,19 @@ function __usageBoot(D) {
       var more = $('ud-more');
       if (more) {
         if (sessShown >= list.length) { more.hidden = true; }
-        else { more.hidden = false; more.textContent = '加载更多（已显示 ' + sessShown + ' / ' + list.length + '）'; }
+        else { more.hidden = false; more.textContent = tr('加载更多（已显示 ') + sessShown + ' / ' + list.length + '）'; }
       }
     } else {
       var pageSel = '';
       if (totalPages > 1) {
-        pageSel = '<select class="form-select" id="ud-page-sel" aria-label="跳转到页" style="max-width:110px">';
+        pageSel = '<select class="form-select" id="ud-page-sel" aria-label="' + tr('跳转到页') + '" style="max-width:110px">';
         for (var pi = 1; pi <= totalPages; pi++) pageSel += '<option value="' + pi + '"' + (pi === page ? ' selected' : '') + '>' + pi + ' / ' + totalPages + '</option>';
         pageSel += '</select>';
       }
-      $('ud-pager').innerHTML = '<button type="button" class="btn" id="ud-prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
+      $('ud-pager').innerHTML = '<button type="button" class="btn" id="ud-prev"' + (page <= 1 ? ' disabled' : '') + '>' + tr('上一页') + '</button>' +
         pageSel +
-        '<span class="text-small text-muted tabular-nums">共 ' + fmtI(list.length) + ' 条</span>' +
-        '<button type="button" class="btn" id="ud-next"' + (page >= totalPages ? ' disabled' : '') + '>下一页</button>';
+        '<span class="text-small text-muted tabular-nums">' + tr('共 ') + fmtI(list.length) + tr(' 条') + '</span>' +
+        '<button type="button" class="btn" id="ud-next"' + (page >= totalPages ? ' disabled' : '') + '>' + tr('下一页') + '</button>';
       var prevBtn = $('ud-prev'), nextBtn = $('ud-next');
       if (prevBtn) prevBtn.addEventListener('click', function () { page--; detExp = -1; renderDetail(frows(false)); });
       if (nextBtn) nextBtn.addEventListener('click', function () { page++; detExp = -1; renderDetail(frows(false)); });
@@ -1914,7 +2159,7 @@ function __usageBoot(D) {
         var v = N((o1[p] || {})[curMetric]);
         if (!v) return;
         var bh = Math.round(ih * v / ymax);
-        var tip = days[0] + '\n' + pvLabel(p) + '\n请求 ' + fmtI((o1[p] || {}).req || 0) + ' · 输入 ' + fmt((o1[p] || {}).inn) + '\n生成 ' + fmt((o1[p] || {}).out) + ' · 缓存读 ' + fmt((o1[p] || {}).ca);
+        var tip = days[0] + '\n' + pvLabel(p) + '\n请求 ' + fmtI((o1[p] || {}).req || 0) + tr(' · 输入 ') + fmt((o1[p] || {}).inn) + '\n生成 ' + fmt((o1[p] || {}).out) + tr(' · 缓存读 ') + fmt((o1[p] || {}).ca);
         body += '<rect x="' + (P.l + (slot - bw) / 2) + '" y="' + (yBase1 - bh) + '" width="' + bw + '" height="' + Math.max(bh, 1) + '" fill="' + pvColor(p) + '" rx="2"><title>' + esc(tip) + '</title></rect>';
         yBase1 -= bh;
       });
@@ -1938,13 +2183,13 @@ function __usageBoot(D) {
       days.forEach(function (k, di) {
         var o = perDay[k] || {}, req = 0, inn = 0, out2 = 0, ca = 0;
         pvs.forEach(function (p) { var m = o[p] || {}; req += m.req || 0; inn += m.inn; out2 += m.out; ca += m.ca; });
-        var tip = k + '\n请求 ' + fmtI(req) + ' · 输入 ' + fmt(inn) + '\n生成 ' + fmt(out2) + ' · 缓存读 ' + fmt(ca);
+        var tip = k + '\n请求 ' + fmtI(req) + tr(' · 输入 ') + fmt(inn) + '\n生成 ' + fmt(out2) + tr(' · 缓存读 ') + fmt(ca);
         body += '<rect x="' + (P.l + di * slot) + '" y="' + P.t + '" width="' + slot + '" height="' + ih + '" fill="transparent"><title>' + esc(tip) + '</title></rect>';
       });
     }
     host.innerHTML = '<svg width="' + w + '" height="' + H + '" role="img" aria-label="每日用量趋势（按来源堆叠）"><desc>按天按来源堆叠展示 ' + days.length + ' 天数据</desc><defs>' + defs + '</defs>' + out + body + '</svg>';
     var total = agg(rows);
-    $('ud-trend-readout').textContent = '当前指标合计：请求数 ' + fmtI(total.req) + ' · 输入 ' + fmt(total.inn) + ' · 生成 ' + fmt(total.out) + ' · 缓存读 ' + fmt(total.ca);
+    $('ud-trend-readout').textContent = tr('当前指标合计：请求数 ') + fmtI(total.req) + tr(' · 输入 ') + fmt(total.inn) + tr(' · 生成 ') + fmt(total.out) + tr(' · 缓存读 ') + fmt(total.ca);
     // 每日明细表：与图表同口径，点击某天切换全站日期筛选（再点一次取消）
     var perDur = {};
     rows.forEach(function (r) { var k = dayKey(r[1]); perDur[k] = (perDur[k] || 0) + N(r[7]); });
@@ -1969,8 +2214,8 @@ function __usageBoot(D) {
       var hit2 = o.inn ? Math.round(o.ca / o.inn * 100) : 0;
       return '<tr><td class="text-nowrap">' + mk + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmt(o.inn) + '</td><td class="text-end tabular-nums">' + fmt(o.out) + '</td><td class="text-end tabular-nums">' + fmt(o.ca) + '</td><td class="text-end tabular-nums">' + hit2 + '%</td>' + (o.hasCost ? '<td class="text-end tabular-nums">' + fmtCost(o.cost) + '</td>' : '') + '</tr>';
     }).join('');
-    $('ud-daily-wrap').innerHTML = '<h3 style="margin-top:18px">' + t('每日明细') + '</h3><div class="table-responsive" style="max-height:420px;overflow:auto"><table class="table table-sm"><thead><tr><th>' + t('日期') + '</th><th class="text-end">' + t('请求') + '</th><th class="text-end">' + t('输入') + '</th><th class="text-end">' + t('生成') + '</th><th class="text-end">' + t('缓存读') + '</th><th class="text-end">' + t('缓存命中') + '</th><th class="text-end">' + t('生成速率') + '</th></tr></thead><tbody>' + dayRows.join('') + '</tbody></table></div>' +
-      '<h3 style="margin-top:18px">' + t('每月汇总') + '</h3><div class="table-responsive"><table class="table table-sm"><thead><tr><th>' + t('月份') + '</th><th class="text-end">' + t('请求') + '</th><th class="text-end">' + t('输入') + '</th><th class="text-end">' + t('生成') + '</th><th class="text-end">' + t('缓存读') + '</th><th class="text-end">' + t('缓存命中') + '</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '</tr></thead><tbody>' + mRows + '</tbody></table></div>';
+    $('ud-daily-wrap').innerHTML = '<h3 style="margin-top:18px">' + tr('每日明细') + '</h3><div class="table-responsive" style="max-height:420px;overflow:auto"><table class="table table-sm"><thead><tr><th>' + tr('日期') + '</th><th class="text-end">' + tr('请求') + '</th><th class="text-end">' + tr('输入') + '</th><th class="text-end">' + tr('生成') + '</th><th class="text-end">' + tr('缓存读') + '</th><th class="text-end">' + tr('缓存命中') + '</th><th class="text-end">' + tr('生成速率') + '</th></tr></thead><tbody>' + dayRows.join('') + '</tbody></table></div>' +
+      '<h3 style="margin-top:18px">' + tr('每月汇总') + '</h3><div class="table-responsive"><table class="table table-sm"><thead><tr><th>' + tr('月份') + '</th><th class="text-end">' + tr('请求') + '</th><th class="text-end">' + tr('输入') + '</th><th class="text-end">' + tr('生成') + '</th><th class="text-end">' + tr('缓存读') + '</th><th class="text-end">' + tr('缓存命中') + '</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '</tr></thead><tbody>' + mRows + '</tbody></table></div>';
     Array.prototype.forEach.call($('ud-daily-wrap').querySelectorAll('tr.ud-click'), function (tr) {
       tr.addEventListener('click', function () {
         var d = tr.getAttribute('data-day');
@@ -1995,19 +2240,19 @@ function __usageBoot(D) {
     var sf = $('ud-sess-filter');
     if (sf) {
       sf.hidden = st.s < 0;
-      if (st.s >= 0) sf.textContent = '会话：' + (TL[st.s] ? TL[st.s].slice(0, 24) : '#' + st.s) + ' ✕';
+      if (st.s >= 0) sf.textContent = tr('会话：') + (TL[st.s] ? TL[st.s].slice(0, 24) : '#' + st.s) + ' ✕';
     }
     var df = $('ud-day-filter');
     if (df) {
       df.hidden = !st.day;
-      if (st.day) df.textContent = '日期：' + st.day + ' ✕';
+      if (st.day) df.textContent = tr('日期：') + st.day + ' ✕';
     }
     var pf = $('ud-proj-filter');
     if (pf) {
       pf.hidden = !st.proj;
       if (st.proj) {
         var base = baseName(st.proj);
-        pf.textContent = '项目：' + base + ' ✕';
+        pf.textContent = tr('项目：') + base + ' ✕';
       }
     }
     var rows = frows(false);
@@ -2046,8 +2291,8 @@ function __usageBoot(D) {
   }
 
   // 全量仪表盘筛选控件
-  fillSelect($('ud-f-pv'), '全部来源', PV.map(function (p, i) { return { v: i, label: pvLabel(i) + '（' + pvTag(i) + '）' }; }));
-  fillSelect($('ud-f-model'), '全部模型', MD.map(function (m, i) { return { v: i, label: String(m) }; }));
+  fillSelect($('ud-f-pv'), tr('全部来源'), PV.map(function (p, i) { return { v: i, label: pvLabel(i) + ' (' + pvTag(i) + ')' }; }));
+  fillSelect($('ud-f-model'), tr('全部模型'), MD.map(function (m, i) { return { v: i, label: String(m) }; }));
   if (PRICE && Object.keys(PRICE).length) { $('ud-cost-wrap').hidden = false; }
   (function () {
     var sf = $('ud-sess-filter');
@@ -2103,15 +2348,15 @@ function __usageBoot(D) {
   $('ud-price-sync').addEventListener('click', function () {
     var btn = this;
     btn.disabled = true;
-    btn.textContent = '同步中…';
+    btn.textContent = tr('同步中…');
     if (window.__USAGE_SERVE__) {
       fetch('/api/sync-prices', { method: 'POST' }).then(function () { location.reload(); }).catch(function () {
-        btn.textContent = '同步失败'; btn.disabled = false;
+        btn.textContent = tr('同步失败'); btn.disabled = false;
       });
       return;
     }
     var zc = window.zcode || null;
-    var reset = function (t) { btn.textContent = t; setTimeout(function () { btn.textContent = '同步价格'; btn.disabled = false; }, 3000); };
+    var reset = function (t) { btn.textContent = t; setTimeout(function () { btn.textContent = tr('同步价格'); btn.disabled = false; }, 3000); };
     if (zc && typeof zc.callTool === 'function') {
       // 直调 App-only 同步工具（后台 execFile prices sync，约数秒），完成后按新价软刷新
       zc.callTool('usage_prices_sync', {}).then(function (r) {
@@ -2127,12 +2372,12 @@ function __usageBoot(D) {
   // ---- 价格 / 预算管理（serve 模式可编辑并即时重算；其他环境只读引导） ----
   var mgrState = { q: '', prices: null, budget: null, switches: null };
   function mgrRow(m, e, used) {
-    return '<tr data-m="' + esc(m) + '"><td class="text-nowrap">' + esc(m) + (used ? ' <span class="ud-tag">当前用量</span>' : '') + '</td>' +
+    return '<tr data-m="' + esc(m) + '"><td class="text-nowrap">' + esc(m) + (used ? ' <span class="ud-tag">' + tr('当前用量') + '</span>' : '') + '</td>' +
       '<td class="ud-mgr-t"><input data-k="in" value="' + e.in + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="out" value="' + e.out + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="cache" value="' + e.cache + '" inputmode="decimal"></td>' +
-      '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + (e.ctxOverride || '') + '" placeholder="' + (e.ctx ? String(e.ctx) : '自动') + '" title="上下文窗口 token 数，留空按模型自动检测（水印曲线用）" inputmode="numeric"></td>' +
-      '<td class="text-nowrap"><button type="button" class="btn ud-mgr-act ud-mgr-save" style="margin:0">保存</button> <button type="button" class="btn ud-mgr-act ud-mgr-del" style="margin:0" title="删除该模型价">删除</button></td></tr>';
+      '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + (e.ctxOverride || '') + '" placeholder="' + (e.ctx ? String(e.ctx) : tr('自动')) + '" title="' + tr('上下文窗口 token 数，留空按模型自动检测（水印曲线用）') + '" inputmode="numeric"></td>' +
+      '<td class="text-nowrap"><button type="button" class="btn ud-mgr-act ud-mgr-save" style="margin:0">' + tr('保存') + '</button> <button type="button" class="btn ud-mgr-act ud-mgr-del" style="margin:0" title="' + tr('删除该模型价') + '">' + tr('删除') + '</button></td></tr>';
   }
   function swRow(id, name, desc, on) {
     return '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + name + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + desc + '</div></div>' +
@@ -2140,8 +2385,8 @@ function __usageBoot(D) {
   }
   function vendorRow(id, name, desc) {
     var v = (mgrState.vendors || {})[id] || {};
-    return '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + name + (v.configured ? ' <span class="ud-tag">已配置</span>' : '') + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + desc + '</div></div>' +
-      '<input type="password" class="form-control form-control-sm" id="ud-vk-' + id + '" placeholder="' + (v.configured ? '已配置 · 输入新值更换' : '未配置') + '" style="width:190px" autocomplete="off" spellcheck="false"></div>';
+    return '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + name + (v.configured ? ' <span class="ud-tag">' + tr('已配置') + '</span>' : '') + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + desc + '</div></div>' +
+      '<input type="password" class="form-control form-control-sm" id="ud-vk-' + id + '" placeholder="' + (v.configured ? tr('已配置 · 输入新值更换') : tr('未配置')) + '" style="width:190px" autocomplete="off" spellcheck="false"></div>';
   }
   function renderMgr() {
     var body = $('ud-mgr-body');
@@ -2153,48 +2398,48 @@ function __usageBoot(D) {
     var list = (mgrState.q ? models.filter(function (m) { return m.indexOf(mgrState.q) >= 0; }) : hit).slice(0, 60);
     var tsMode = sw.turnstats || 'off';
     body.innerHTML =
-      '<div class="ud-mgr-h">成本单价（元 / 每百万 token）</div>' +
-      '<div class="ud-mgr-sub">GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。默认列出当前用量相关模型，搜索可查全量；修改保存后按新价重算。</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="搜索模型…" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + ' 个模型' + (p.modelsSlim && p.modelsTotal != null ? '（全量 ' + p.modelsTotal + '）' : '') + (list.length >= 60 ? '（仅显示前 60）' : '') + '</span></div>' +
-      '<div class="table-responsive" id="ud-mgr-wrap" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:10px"><table class="table table-sm" style="margin:0"><thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th title="上下文窗口 token 数，留空自动检测">窗口</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
+      '<div class="ud-mgr-h">' + tr('成本单价（元 / 每百万 token）') + '</div>' +
+      '<div class="ud-mgr-sub">' + tr('GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。默认列出当前用量相关模型，搜索可查全量；修改保存后按新价重算。') + '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="' + tr('搜索模型…') + '" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + tr(' 个模型') + (p.modelsSlim && p.modelsTotal != null ? tr('（全量 ') + p.modelsTotal + '）' : '') + (list.length >= 60 ? tr('（仅显示前 60）') : '') + '</span></div>' +
+      '<div class="table-responsive" id="ud-mgr-wrap" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:10px"><table class="table table-sm" style="margin:0"><thead><tr><th>' + tr('模型') + '</th><th>' + tr('输入') + '</th><th>' + tr('输出') + '</th><th>' + tr('缓存读') + '</th><th title="' + tr('上下文窗口 token 数，留空自动检测') + '">' + tr('窗口') + '</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
       list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
       '</tbody></table></div>' +
-      '<div class="ud-mgr-card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="text-small text-muted">新增模型价：</span><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="模型名（与请求记录一致）" style="width:230px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="输入" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="输出" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="缓存读" style="width:76px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">添加</button></div>' +
-      '<div class="ud-mgr-h">通用</div>' +
+      '<div class="ud-mgr-card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="text-small text-muted">' + tr('新增模型价：') + '</span><input class="form-control form-control-sm" id="ud-mgr-newname" placeholder="' + tr('模型名（与请求记录一致）') + '" style="width:230px"><input class="form-control form-control-sm" id="ud-mgr-newin" placeholder="' + tr('输入') + '" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newout" placeholder="' + tr('输出') + '" style="width:76px" inputmode="decimal"><input class="form-control form-control-sm" id="ud-mgr-newcache" placeholder="' + tr('缓存读') + '" style="width:76px" inputmode="decimal"><button type="button" class="btn" id="ud-mgr-add" style="margin:0;padding:2px 10px;font-size:12px">' + tr('添加') + '</button></div>' +
+      '<div class="ud-mgr-h">' + tr('通用') + '</div>' +
       '<div class="ud-mgr-card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
-      '<label class="text-small text-muted">USD→CNY 汇率<input class="form-control form-control-sm" id="ud-mgr-rate" value="' + (p.usdCny == null ? '' : p.usdCny) + '" placeholder="默认 7.2" style="width:90px;margin-left:4px" inputmode="decimal"></label>' +
-      '<label class="form-check form-switch text-small" style="margin:0">每日自动同步模型价<input type="checkbox" class="form-check-input" id="ud-sw-autosync"' + (p.autoSync !== false ? ' checked' : '') + ' style="margin-left:6px"></label>' +
-      '<button type="button" class="btn" id="ud-mgr-gsave" style="margin:0;padding:2px 10px;font-size:12px">保存通用</button>' +
+      '<label class="text-small text-muted">' + tr('USD→CNY 汇率') + '<input class="form-control form-control-sm" id="ud-mgr-rate" value="' + (p.usdCny == null ? '' : p.usdCny) + '" placeholder="默认 7.2" style="width:90px;margin-left:4px" inputmode="decimal"></label>' +
+      '<label class="form-check form-switch text-small" style="margin:0">' + tr('每日自动同步模型价') + '<input type="checkbox" class="form-check-input" id="ud-sw-autosync"' + (p.autoSync !== false ? ' checked' : '') + ' style="margin-left:6px"></label>' +
+      '<button type="button" class="btn" id="ud-mgr-gsave" style="margin:0;padding:2px 10px;font-size:12px">' + tr('保存通用') + '</button>' +
       '</div>' +
-      '<div class="ud-mgr-h">预算（折算金额，超 80% 黄色进度、100% 红色）</div>' +
+      '<div class="ud-mgr-h">' + tr('预算（折算金额，超 80% 黄色进度、100% 红色）') + '</div>' +
       '<div class="ud-mgr-card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
-      '<label class="text-small text-muted">日预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bd" value="' + (N(b.daily) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
-      '<label class="text-small text-muted">月预算 ¥<input class="form-control form-control-sm" id="ud-mgr-bm" value="' + (N(b.monthly) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
-      '<button type="button" class="btn" id="ud-mgr-bsave" style="margin:0;padding:2px 10px;font-size:12px">保存预算</button>' +
+      '<label class="text-small text-muted">' + tr('日预算 ¥') + '<input class="form-control form-control-sm" id="ud-mgr-bd" value="' + (N(b.daily) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
+      '<label class="text-small text-muted">' + tr('月预算 ¥') + '<input class="form-control form-control-sm" id="ud-mgr-bm" value="' + (N(b.monthly) || '') + '" style="width:100px;margin-left:4px" inputmode="decimal"></label>' +
+      '<button type="button" class="btn" id="ud-mgr-bsave" style="margin:0;padding:2px 10px;font-size:12px">' + tr('保存预算') + '</button>' +
       '</div>' +
-      '<div class="ud-mgr-h">通知（macOS 系统通知，全部本地计算、零模型开销）</div>' +
-      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">界面语言 / Language</div><div class="ud-mgr-sub" style="margin:1px 0 0">切换后本地面板立即生效；侧栏面板重新打开后生效</div></div>' +
+      '<div class="ud-mgr-h">' + tr('通知（macOS 系统通知，全部本地计算、零模型开销）') + '</div>' +
+      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">界面语言 / Language</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + tr('切换后本地面板立即生效；侧栏面板重新打开后生效') + '</div></div>' +
       '<select class="form-select form-select-sm" id="ud-mgr-lang" style="width:auto;flex:none">' +
       '<option value=""' + (langPref === '' ? ' selected' : '') + '>跟随系统 / Auto</option>' +
       '<option value="zh"' + (langPref === 'zh' ? ' selected' : '') + '>中文</option>' +
       '<option value="en"' + (langPref === 'en' ? ' selected' : '') + '>English</option>' +
       '</select></div>' +
-      swRow('ud-sw-permission', '权限等待提醒', 'Agent 弹出批准请求时通知你——挂机跑长任务不漏确认', sw.permissionAlerts === true) +
-      swRow('ud-sw-budget', '预算 / 燃烧告警', '日折算成本达预算 80% / 100% 时提醒；今日用量超近 7 天日均 50% 也会提示', sw.budgetAlerts !== false) +
-      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">每轮用量统计</div><div class="ud-mgr-sub" style="margin:1px 0 0">每轮回合结束弹通知显示本轮速率 / 缓存率 / 耗时（不进入对话上下文）。选「关」时统计仍显示在侧栏面板顶部横幅</div></div>' +
+      swRow('ud-sw-permission', tr('权限等待提醒'), tr('Agent 弹出批准请求时通知你——挂机跑长任务不漏确认'), sw.permissionAlerts === true) +
+      swRow('ud-sw-budget', tr('预算 / 燃烧告警'), tr('日折算成本达预算 80% / 100% 时提醒；今日用量超近 7 天日均 50% 也会提示'), sw.budgetAlerts !== false) +
+      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">' + tr('每轮用量统计') + '</div><div class="ud-mgr-sub" style="margin:1px 0 0">' + tr('每轮回合结束弹通知显示本轮速率 / 缓存率 / 耗时（不进入对话上下文）。选「关」时统计仍显示在侧栏面板顶部横幅') + '</div></div>' +
       '<select class="form-select form-select-sm" id="ud-sw-turnstats" style="width:auto;flex:none">' +
-      '<option value="off"' + (tsMode === 'off' ? ' selected' : '') + '>关</option>' +
-      '<option value="notify"' + (tsMode === 'notify' ? ' selected' : '') + '>系统通知（推荐）</option>' +
-      '<option value="inject"' + (tsMode === 'inject' ? ' selected' : '') + '>对话内统计行（约 0.3k token/轮）</option>' +
+      '<option value="off"' + (tsMode === 'off' ? ' selected' : '') + '>' + tr('关') + '</option>' +
+      '<option value="notify"' + (tsMode === 'notify' ? ' selected' : '') + '>' + tr('系统通知（推荐）') + '</option>' +
+      '<option value="inject"' + (tsMode === 'inject' ? ' selected' : '') + '>' + tr('对话内统计行（约 0.3k token/轮）') + '</option>' +
       '</select></div>' +
-      '<div class="ud-mgr-h">厂商配额（可选）</div>' +
-      '<div class="ud-mgr-sub" style="margin:-2px 0 6px">在总览页聚合显示各厂商套餐 / 额度用量。GLM 无需配置（自动读客户端日志）；以下 Key 仅发送到对应厂商官方域名做只读查询，保存在本地 <code>~/.zcode/usage-vendors.json</code>（权限 0600）。</div>' +
-      vendorRow('deepseek', 'DeepSeek', '官方账户余额') +
-      vendorRow('kimi', 'Kimi（Moonshot）', '5 小时 / 周窗口用量') +
-      vendorRow('openrouter', 'OpenRouter', '预付额度使用情况') +
-      vendorRow('minimax', 'MiniMax', 'Token Plan 窗口用量') +
-      '<button type="button" class="btn" id="ud-mgr-vsave" style="margin:6px 0 0;padding:2px 10px;font-size:12px">保存 Key</button>' +
-      '<div class="ud-mgr-sub" style="margin-top:8px">权限提醒与每轮统计依赖会话钩子，修改后重开会话生效；预算告警立即生效。</div>';
+      '<div class="ud-mgr-h">' + tr('厂商配额（可选）') + '</div>' +
+      '<div class="ud-mgr-sub" style="margin:-2px 0 6px">' + tr('在总览页聚合显示各厂商套餐 / 额度用量。GLM 无需配置（自动读客户端日志）；') + tr('以下 Key 仅发送到对应厂商官方域名做只读查询，保存在本地') + ' <code>~/.zcode/usage-vendors.json</code>' + tr('（权限 0600）') + '</div>' +
+      vendorRow('deepseek', 'DeepSeek', tr('官方账户余额')) +
+      vendorRow('kimi', 'Kimi（Moonshot）', tr('5 小时 / 周窗口用量')) +
+      vendorRow('openrouter', 'OpenRouter', tr('预付额度使用情况')) +
+      vendorRow('minimax', 'MiniMax', tr('Token Plan 窗口用量')) +
+      '<button type="button" class="btn" id="ud-mgr-vsave" style="margin:6px 0 0;padding:2px 10px;font-size:12px">' + tr('保存 Key') + '</button>' +
+      '<div class="ud-mgr-sub" style="margin-top:8px">' + tr('权限提醒与每轮统计依赖会话钩子，修改后重开会话生效；预算告警立即生效。') + '</div>';
     var qi = $('ud-mgr-q');
     var qTimer = null, qSeq = 0;
     qi.addEventListener('input', function () {
@@ -2256,7 +2501,7 @@ function __usageBoot(D) {
       else {
         var tip = document.createElement('span');
         tip.className = 'ud-tag';
-        tip.textContent = I18N_LANG === 'en' ? 'Reopen the panel to apply' : '重新打开面板后生效';
+        tip.textContent = I18N_LANG === 'en' ? 'Reopen the panel to apply' : tr('重新打开面板后生效');
         this.replaceWith(tip);
       }
     });
@@ -2269,18 +2514,18 @@ function __usageBoot(D) {
       });
       if (!Object.keys(keys).length) return;
       this.disabled = true;
-      this.textContent = '保存中…';
+      this.textContent = tr('保存中…');
       var btn = this;
       priceSave({ url: '/api/vendors/set', data: keys, tool: { vendorKeys: keys } }).then(function (sc) {
         if (sc && sc.vendors) mgrState.vendors = sc.vendors;
         renderMgr(); // 重建表单：清空已输入的 Key 明文，刷新「已配置」徽标
         var okEl = document.createElement('span');
         okEl.className = 'ud-tag';
-        okEl.textContent = '已保存';
+        okEl.textContent = tr('已保存');
         btn.replaceWith(okEl);
       }).catch(function () {
         btn.disabled = false;
-        btn.textContent = '保存 Key';
+        btn.textContent = tr('保存 Key');
       });
     });
   }
@@ -2367,25 +2612,25 @@ function __usageBoot(D) {
   });
   function openPanelFallback(body, zc) {
     body.innerHTML =
-      '<p class="text-small" style="margin:0 0 10px">当前环境不支持面板内编辑。两种方式：</p>' +
+      '<p class="text-small" style="margin:0 0 10px">' + tr('当前环境不支持面板内编辑。两种方式：') + '</p>' +
       '<ol class="text-small text-muted" style="margin:0 0 12px;padding-left:18px;line-height:1.9">' +
-      '<li>打开本地面板编辑（推荐，同样的界面）</li>' +
-      '<li>直接编辑 <code>~/.zcode/usage-prices.json</code>（字段 in / out / cache，每百万 token）</li></ol>' +
-      '<button type="button" class="btn" id="ud-mgr-open-serve" style="margin:0 8px 0 0;padding:3px 14px;font-size:12px">打开本地面板</button>' +
-      '<span class="text-small text-muted">或运行 <code>usage.sh serve</code></span>';
+      '<li>' + tr('打开本地面板编辑（推荐，同样的界面）') + '</li>' +
+      '<li>' + tr('直接编辑') + ' <code>~/.zcode/usage-prices.json</code>' + tr('（字段 in / out / cache，每百万 token）') + '</li></ol>' +
+      '<button type="button" class="btn" id="ud-mgr-open-serve" style="margin:0 8px 0 0;padding:3px 14px;font-size:12px">' + tr('打开本地面板') + '</button>' +
+      '<span class="text-small text-muted">' + tr('或运行') + ' <code>usage.sh serve</code></span>';
     var btn = $('ud-mgr-open-serve');
     btn.addEventListener('click', function () {
       btn.disabled = true;
-      btn.textContent = '启动中…';
+      btn.textContent = tr('启动中…');
       var call = (zc && typeof zc.callTool === 'function')
         ? Promise.resolve(zc.callTool('open_full_panel', {}))
         : Promise.reject(new Error('no-calltool'));
       call.then(function () {
-        btn.textContent = '已启动（浏览器将自动打开）';
+        btn.textContent = tr('已启动（浏览器将自动打开）');
       }).catch(function () {
         btn.disabled = false;
-        btn.textContent = '打开本地面板';
-        alert('启动失败：请在终端运行 usage.sh serve');
+        btn.textContent = tr('打开本地面板');
+        alert(tr('启动失败：请在终端运行 usage.sh serve'));
       });
     });
   }
@@ -2398,19 +2643,19 @@ function __usageBoot(D) {
     // 侧栏（MCP App）禁止页面级导航（宿主会报 App page stopped）：
     // 确保本地 serve 面板运行后，交系统浏览器下载报表（Content-Disposition 附件）。
     btn.disabled = true;
-    btn.textContent = '准备中…';
+    btn.textContent = tr('准备中…');
     var zc = window.zcode || null;
-    var done = function () { setTimeout(function () { btn.disabled = false; btn.textContent = '导出报表'; }, 2500); };
+    var done = function () { setTimeout(function () { btn.disabled = false; btn.textContent = tr('导出报表'); }, 2500); };
     var call = (zc && typeof zc.callTool === 'function')
       ? Promise.resolve(zc.callTool('open_full_panel', {}))
       : Promise.reject(new Error('no-calltool'));
     call.then(function (r) {
       var base = ((r && r.structuredContent && r.structuredContent.url) || 'http://127.0.0.1:7741').replace(/\/$/, '');
-      if (!(zc && typeof zc.openExternal === 'function')) { btn.textContent = '当前环境不支持导出'; return; }
+      if (!(zc && typeof zc.openExternal === 'function')) { btn.textContent = tr('当前环境不支持导出'); return; }
       zc.openExternal({ href: base + '/report.html' });
-      btn.textContent = '已交浏览器下载';
+      btn.textContent = tr('已交浏览器下载');
     }).catch(function () {
-      btn.textContent = '导出失败（需本地面板）';
+      btn.textContent = tr('导出失败（需本地面板）');
     }).then(done, done);
   });
   // 厂商配额卡（可选）：多厂商聚合，serve 走 /api/quota，侧栏经 callTool 直调 usage_quota。
@@ -2430,20 +2675,20 @@ function __usageBoot(D) {
       var host = $('ud-quota-card');
       if (!host) return;
       host.hidden = false;
-      var html = '<h3 style="margin-top:16px">厂商配额</h3><div class="card" style="padding:4px 14px 10px">';
+      var html = '<h3 style="margin-top:16px">' + tr('厂商配额') + '</h3><div class="card" style="padding:4px 14px 10px">';
       j.vendors.forEach(function (v) {
         html += '<div style="margin:10px 0 0"><div style="display:flex;justify-content:space-between;align-items:baseline" class="text-small"><span style="font-weight:600">' + esc(v.name || v.id) + '</span>' +
           (v.stale ? '<span class="ud-tag">观测滞后</span>' : (!v.ok ? '<span class="text-muted">不可用</span>' : '')) + '</div>';
         if (!v.ok && v.error) html += '<div class="text-muted" style="font-size:11px;margin-top:1px">' + esc(String(v.error).slice(0, 110)) + '</div>';
         if (v.id === 'glm' && v.ok) {
           var peak = glmPlanPeak(Date.now());
-          html += '<div style="display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;margin:4px 0 0" class="text-small"><span style="flex:none">积分时段</span><span class="text-muted" style="text-align:right">' +
-            (peak ? '高峰 1× · 18:00 后转半价' : '非高峰 0.5× · 工作日 14:00–18:00 为高峰') + '</span></div>';
+          html += '<div style="display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;margin:4px 0 0" class="text-small"><span style="flex:none">' + tr('积分时段') + '</span><span class="text-muted" style="text-align:right">' +
+            (peak ? tr('高峰 1× · 18:00 后转半价') : tr('非高峰 0.5× · 工作日 14:00–18:00 为高峰')) + '</span></div>';
         }
         (v.items || []).forEach(function (it) {
           if (it.pct != null) {
             var pct = Math.max(0, Math.min(100, Math.round(it.pct)));
-            html += '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between" class="text-small"><span>' + esc(it.label || '配额') + '</span><span class="tabular-nums text-muted">已用 ' + pct + '%' + (it.resets ? ' · ' + esc(String(it.resets)) + ' 重置' : '') + '</span></div>' +
+            html += '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between" class="text-small"><span>' + esc(it.label || tr('配额')) + '</span><span class="tabular-nums text-muted">' + tr('已用 ') + pct + '%' + (it.resets ? ' · ' + esc(String(it.resets)) + tr(' 重置') : '') + '</span></div>' +
               '<div class="ud-budget-bar' + (pct >= 80 ? ' ud-over' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
           } else if (it.text != null) {
             html += '<div style="display:flex;justify-content:space-between;margin:6px 0" class="text-small"><span>' + esc(it.label || '') + '</span><span class="tabular-nums text-muted">' + esc(String(it.text)) + '</span></div>';
@@ -2543,13 +2788,13 @@ function __usageBoot(D) {
       var t = N(r[11]); if (t > 0 && (ttft === 0 || t < ttft)) ttft = t;
     });
     if (!reqs) return '';
-    var parts = ['本轮用量'];
+    var parts = [tr('本轮用量')];
     if (genMs > 0) parts.push('⚡ ' + Math.round(gen / genMs * 1000) + ' tok/s');
-    parts.push(t('输入') + ' ' + fmt(miss + ca) + ' tok (' + t('缓存') + ' ' + (miss + ca ? Math.round(ca / (miss + ca) * 100) : 0) + '%)');
-    if (gen > 0) parts.push(t('生成') + ' ' + fmtI(gen) + ' tok');
-    parts.push(fmtI(reqs) + ' ' + t('次'));
+    parts.push(tr('输入') + ' ' + fmt(miss + ca) + ' tok (' + tr('缓存') + ' ' + (miss + ca ? Math.round(ca / (miss + ca) * 100) : 0) + '%)');
+    if (gen > 0) parts.push(tr('生成') + ' ' + fmtI(gen) + ' tok');
+    parts.push(fmtI(reqs) + ' ' + tr('次'));
     if (durMs > 0) parts.push(fmtDur(durMs));
-    return parts.join(' · ') + ' (' + t('截至') + ' ' + pad(new Date(lastTs).getHours()) + ':' + pad(new Date(lastTs).getMinutes()) + ')';
+    return parts.join(' · ') + ' (' + tr('截至') + ' ' + pad(new Date(lastTs).getHours()) + ':' + pad(new Date(lastTs).getMinutes()) + ')';
   };
   window.__usageBootDone = true;
 }
@@ -2563,6 +2808,24 @@ if (window.__USAGE_DATA_URL__) {
 (function () {
   var el = document.getElementById('ud-turn');
   if (!el) return;
+  // 实时横幅文本由 turn-stats.mjs 服务端生成（中文）；英文界面下按其固定格式重写
+  function enTurn(t) {
+    if (I18N_LANG !== 'en') return t;
+    var u = function (n) { return n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n)); };
+    return t
+      .replace(/^本轮用量：?/, 'This turn: ')
+      .replace(/（失败 (\d+)）/g, ' ($1 failed)')
+      .replace(/首字 /g, 'TTFT ')
+      .replace(/输入 /g, 'in ')
+      .replace(/生成 /g, 'out ')
+      .replace(/（缓存 /g, ' (cache ')
+      .replace(/）/g, ')')
+      .replace(/([\d.]+)亿/g, function (_, n) { return u(parseFloat(n) * 1e8); })
+      .replace(/([\d.]+)万/g, function (_, n) { return u(parseFloat(n) * 1e4); })
+      .replace(/ 次请求/g, ' reqs')
+      .replace(/本轮 ([\d.]+)s/g, 'wall $1s')
+      .replace(/会话累计 /g, 'session total ');
+  }
   function render(text) {
     text = String(text || '').trim();
     if (!text) {
@@ -2572,8 +2835,9 @@ if (window.__USAGE_DATA_URL__) {
     }
     var d = new Date();
     var p2 = function (n) { return n < 10 ? '0' + n : '' + n; };
+    text = enTurn(text);
     el.innerHTML = '<span>' + text.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }) +
-      '</span><span class="ud-turn-t">' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ' 更新</span>';
+      '</span><span class="ud-turn-t">' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ' ' + tr('更新') + '</span>';
     el.hidden = false;
   }
   var zc = window.zcode || null;
