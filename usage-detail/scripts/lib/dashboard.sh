@@ -227,7 +227,11 @@ cmd_dashboard() {
 #usage-dashboard .ud-brow-items{margin:2px 0 6px 18px;border-left:2px solid var(--border);padding-left:10px;}
 #usage-dashboard .ud-brow-item{display:flex;gap:10px;font-size:11px;padding:2px 0;align-items:baseline;min-width:0;}
 #usage-dashboard .ud-brow-item .ts{color:var(--muted-foreground);flex:none;font-variant-numeric:tabular-nums;}
-#usage-dashboard .ud-brow-item .sn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#usage-dashboard .ud-brow-item .sn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
+#usage-dashboard .ud-brow-item .sn .full{display:none;}
+#usage-dashboard .ud-brow-item.ud-full .sn{white-space:normal;word-break:break-all;}
+#usage-dashboard .ud-brow-item.ud-full .sn .full{display:inline;}
+#usage-dashboard .ud-brow-item.ud-full .sn{color:var(--foreground);}
 #usage-dashboard .ud-brow-item .abs{color:var(--muted-foreground);flex:none;font-variant-numeric:tabular-nums;}
 #usage-dashboard .ud-leg{display:flex;flex-direction:column;gap:3px;min-width:0;}
 #usage-dashboard .ud-leg-row{display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.5;padding:1px 4px;margin:0 -4px;border-radius:5px;min-width:0;}
@@ -648,6 +652,10 @@ var I18N_EN = {
   '上下文浏览器': 'Context Browser',
   ' 条': ' items',
   '仅展示最大的前 30 条': 'showing the largest 30 items only',
+  '近 1h': 'last 1h',
+  '水位': 'Level',
+  '增量': 'Delta',
+  '点击展开/收起全文': 'click to expand/collapse full text',
   '点击看该子代理请求': 'click to view its requests',
   '耗时构成': 'Timing Breakdown',
   '首字等待': 'TTFT wait',
@@ -1855,12 +1863,33 @@ function __usageBoot(D) {
       areaPath + turnSeps.join('') + limitLine + cmpMarks +
       (pts.length > 1 ? '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--viz-series-1)" stroke-width="1.5"/>' : '') +
       dots.join('') + subDots.join('') + '</svg>';
+    // 逐请求增量视图（对标 Delta 模式）：主会话相邻请求输入差值，正蓝负绿，压缩处可见净删
+    var deltaSvg = (function () {
+      var seq = [];
+      rs.forEach(function (r) { if (r[9] !== 1) seq.push({ t: r[1], v: N(r[4]) }); });
+      if (seq.length < 2) return '';
+      var ds = seq.map(function (x, i) { return { t: x.t, d: i ? x.v - seq[i - 1].v : x.v }; });
+      var maxAbs = 1;
+      ds.forEach(function (x) { if (Math.abs(x.d) > maxAbs) maxAbs = Math.abs(x.d); });
+      var y0 = H / 2, bw = Math.max(1.5, (W - 8) / ds.length - 1);
+      var bars = ds.map(function (x, i) {
+        var h = Math.abs(x.d) / maxAbs * (H / 2 - 10);
+        var x0 = ds.length > 1 ? i / (ds.length - 1) * (W - 8) + 4 : W / 2;
+        var up = x.d >= 0;
+        var d = new Date(x.t);
+        var tip = '<title>' + esc(pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())) + ' · ' + (up ? '+' : '−') + fmt(Math.abs(x.d)) + ' tok</title>';
+        return '<rect x="' + (x0 - bw / 2).toFixed(1) + '" y="' + (up ? (y0 - h) : y0).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(1, h).toFixed(1) + '" fill="' + (up ? 'var(--viz-series-1)' : 'var(--viz-series-3)') + '" fill-opacity="0.85">' + tip + '</rect>';
+      }).join('');
+      return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="逐请求增量">' +
+        '<line x1="0" x2="' + W + '" y1="' + y0 + '" y2="' + y0 + '" stroke="var(--border)" stroke-width="1"/>' + bars + '</svg>';
+    })();
     var startT = fullTs(rs.length ? rs[0][1] : 0), endT = fullTs(o.last);
     // 起止时间直接标在水位曲线两端上方
     var curveWrap = '<div style="position:relative">' +
       '<span class="text-small text-muted" style="position:absolute;left:0;top:0">' + esc(startT) + '</span>' +
       '<span class="text-small text-muted" style="position:absolute;right:0;top:0;text-align:right">' + esc(endT) + '</span>' +
-      '<div style="padding-top:16px">' + curve + '</div></div>';
+      '<div style="padding-top:16px"><div id="ud-curve-level">' + curve + '</div>' +
+      (deltaSvg ? '<div id="ud-curve-delta" hidden>' + deltaSvg + '</div>' : '') + '</div></div>';
     var hasSub = subReq > 0;
     var hasOver = rs.some(function (r) { return r[15] === 1 || r[15] === true; });
     var curveHead = '<div class="ud-kv-l" style="margin:2px 0 2px">' +
@@ -1869,6 +1898,7 @@ function __usageBoot(D) {
       (hasSub ? '<span class="ud-pill"><span style="color:var(--viz-series-2)">●</span> ' + tr('子代理散点') + '</span>' : '') +
       (cm ? '<span class="ud-pill"><span style="color:var(--yellow)">┆</span> ' + tr('压缩事件') + '</span>' : '') +
       (hasOver ? '<span class="ud-pill" style="color:var(--red)">● ' + tr('超出窗口') + '</span>' : '') +
+      (deltaSvg ? '<span class="viz-row" style="margin:0 6px;vertical-align:middle"><button type="button" class="ud-toggle" data-cmode="level" aria-pressed="true">' + tr('水位') + '</button><button type="button" class="ud-toggle" data-cmode="delta" aria-pressed="false">' + tr('增量') + '</button></span>' : '') +
       '<span class="text-muted">' + tr('悬停看点明细') + '</span></div>';
     var toolDonut = (toolsMap[o.g] || []).length
       ? donut((toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6).map(function (t) {
@@ -2269,16 +2299,19 @@ function __usageBoot(D) {
               var t = String(g[0]);
               var cat = CAT[t] || [t, 'var(--muted-foreground)'];
               var pct = btot ? Math.round(N(g[2]) / btot * 100) : 0;
+              var r1c = N(g[3]), r1b = N(g[4]);
+              var incBadge = r1c > 0 ? '<span class="ud-pill" style="color:var(--green);flex:none">+' + fmtI(r1c) + ' · ≈' + fmtBytes(r1b) + ' ' + tr('近 1h') + '</span>' : '';
               var itemsHtml = (byType[t] || []).map(function (i) {
                 var d = new Date(N(i[1]));
                 var sn = String(i[3] || '').replace(/\s+/g, ' ');
-                return '<div class="ud-brow-item"><span class="ts">' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + '</span><span class="sn" title="' + esc(sn) + '">' + esc(sn.slice(0, 120)) + '</span><span class="abs">' + fmtBytes(N(i[2])) + '</span></div>';
+                return '<div class="ud-brow-item"><span class="ts">' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + '</span><span class="sn" title="' + tr('点击展开/收起全文') + '">' + esc(sn.slice(0, 120)) + '<span class="full">' + esc(sn) + '</span></span><span class="abs">' + fmtBytes(N(i[2])) + '</span></div>';
               }).join('') || '';
               var capNote = (byType[t] || []).length >= 30 && N(g[1]) > (byType[t] || []).length
                 ? '<div class="ud-brow-item"><span class="ts"></span><span class="sn text-muted">' + tr('仅展示最大的前 30 条') + '</span><span class="abs"></span></div>'
                 : '';
               rowsHtml += '<div class="ud-brow-row" data-bg="' + esc(t) + '"><span class="ud-brow-arrow">▸</span><span class="ud-dot" style="background:' + cat[1] + '"></span><span class="nm">' + esc(cat[0]) + '</span>' +
                 '<span class="text-muted text-small tabular-nums" style="flex:none">' + fmtI(N(g[1])) + tr(' 条') + '</span>' +
+                incBadge +
                 '<span class="bar"><i style="width:' + pct + '%;background:' + cat[1] + '"></i></span>' +
                 '<span class="abs">≈' + fmtBytes(N(g[2])) + '</span><span class="n">' + pct + '%</span></div>' +
                 '<div class="ud-brow-items" data-bgp="' + esc(t) + '" hidden>' + itemsHtml + capNote + '</div>';
@@ -2303,13 +2336,33 @@ function __usageBoot(D) {
       // 浏览器类别行展开/收起
       bodyEl.addEventListener('click', function (e) {
         var row = e.target.closest ? e.target.closest('.ud-brow-row') : null;
-        if (!row) return;
-        var g = row.getAttribute('data-bg');
-        var items = row.parentElement.querySelector('.ud-brow-items[data-bgp="' + g + '"]');
-        if (!items) return;
-        var open = items.hidden;
-        items.hidden = !open;
-        row.classList.toggle('ud-open', open);
+        if (row) {
+          var g = row.getAttribute('data-bg');
+          var items = row.parentElement.querySelector('.ud-brow-items[data-bgp="' + g + '"]');
+          if (!items) return;
+          var open = items.hidden;
+          items.hidden = !open;
+          row.classList.toggle('ud-open', open);
+          return;
+        }
+        // 条目点击：展开/收起全文（摘要默认单行截断）
+        var it = e.target.closest ? e.target.closest('.ud-brow-item') : null;
+        if (it) it.classList.toggle('ud-full');
+      });
+      // 水位曲线 水位/增量 切换（两个 svg 都在 DOM，切显隐）
+      bodyEl.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.ud-toggle[data-cmode]') : null;
+        if (!btn) return;
+        var exp = btn.closest('tr.ud-exp');
+        if (!exp) return;
+        var mode = btn.getAttribute('data-cmode');
+        var lv = exp.querySelector('#ud-curve-level'), dl = exp.querySelector('#ud-curve-delta');
+        if (!lv || !dl) return;
+        lv.hidden = mode !== 'level';
+        dl.hidden = mode !== 'delta';
+        Array.prototype.forEach.call(exp.querySelectorAll('.ud-toggle[data-cmode]'), function (b) {
+          b.setAttribute('aria-pressed', b.getAttribute('data-cmode') === mode ? 'true' : 'false');
+        });
       });
       // Fleet 泳道条点击：跳到该子会话的请求日志（子会话 id 在 sessionIds 索引表内才可跳）
       bodyEl.addEventListener('click', function (e) {

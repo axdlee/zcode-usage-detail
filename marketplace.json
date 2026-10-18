@@ -4,7 +4,7 @@
     {
       "name": "usage-detail",
       "source": "./usage-detail",
-      "version": "0.29.0",
+      "version": "0.30.0",
       "description": "Per-request usage analytics for ZCode: live dashboard & side-panel with token/cost/cache breakdown, 5h windows, budget alerts, vendor quotas. Read-only, zero model overhead, zh/en.",
       "displayName": "Usage Detail",
       "displayName_i18n": {
