@@ -215,6 +215,20 @@ cmd_dashboard() {
 /* ===== 图例（构成/趋势） ===== */
 #usage-dashboard .ud-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0;}
 #usage-dashboard .ud-legend .form-check{display:inline-flex;align-items:center;gap:4px;margin:0;}
+#usage-dashboard .ud-brow-row{display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 6px;border-radius:6px;cursor:pointer;margin:0 -6px;min-width:0;}
+#usage-dashboard .ud-brow-row:hover{background:var(--muted);}
+#usage-dashboard .ud-brow-row .nm{font-weight:500;flex:none;}
+#usage-dashboard .ud-brow-arrow{display:inline-block;transition:transform .15s;color:var(--muted-foreground);width:12px;flex:none;}
+#usage-dashboard .ud-brow-row.ud-open .ud-brow-arrow{transform:rotate(90deg);}
+#usage-dashboard .ud-brow-row .bar{flex:1 1 20px;max-width:72px;height:5px;border-radius:3px;background:var(--muted);overflow:hidden;}
+#usage-dashboard .ud-brow-row .bar i{display:block;height:100%;border-radius:3px;}
+#usage-dashboard .ud-brow-row .abs{font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;flex:none;}
+#usage-dashboard .ud-brow-row .n{font-weight:600;font-variant-numeric:tabular-nums;flex:none;min-width:30px;text-align:right;}
+#usage-dashboard .ud-brow-items{margin:2px 0 6px 18px;border-left:2px solid var(--border);padding-left:10px;}
+#usage-dashboard .ud-brow-item{display:flex;gap:10px;font-size:11px;padding:2px 0;align-items:baseline;min-width:0;}
+#usage-dashboard .ud-brow-item .ts{color:var(--muted-foreground);flex:none;font-variant-numeric:tabular-nums;}
+#usage-dashboard .ud-brow-item .sn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#usage-dashboard .ud-brow-item .abs{color:var(--muted-foreground);flex:none;font-variant-numeric:tabular-nums;}
 #usage-dashboard .ud-leg{display:flex;flex-direction:column;gap:3px;min-width:0;}
 #usage-dashboard .ud-leg-row{display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.5;padding:1px 4px;margin:0 -4px;border-radius:5px;min-width:0;}
 #usage-dashboard .ud-leg-row:hover{background:var(--muted);}
@@ -631,6 +645,9 @@ var I18N_EN = {
   '上下文 Top →': 'Context Top →',
   '加载中…': "Loading…",
   '子代理并行时间轴': 'Subagent parallel timeline',
+  '上下文浏览器': 'Context Browser',
+  ' 条': ' items',
+  '仅展示最大的前 30 条': 'showing the largest 30 items only',
   '点击看该子代理请求': 'click to view its requests',
   '耗时构成': 'Timing Breakdown',
   '首字等待': 'TTFT wait',
@@ -2231,7 +2248,44 @@ function __usageBoot(D) {
                 '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="Fleet">' + seps + bars + '</svg>';
             }
           }
-          out.innerHTML = gantt +
+          // 上下文浏览器（对标 dsh Context Browser）：类别行可展开逐条看内容摘要
+          var br = '';
+          (function () {
+            var groups = j.bgroups || [], items = j.bitems || [];
+            if (!groups.length) return;
+            var CAT = {
+              text: [tr('对话文本'), 'var(--viz-series-1)'],
+              reasoning: [tr('思考'), 'var(--viz-series-2)'],
+              tool: [tr('工具调用与结果'), 'var(--viz-series-3)'],
+              file: [tr('附件'), 'var(--viz-series-4)'],
+              compaction: [tr('压缩'), 'var(--viz-series-5)']
+            };
+            var btot = 0;
+            groups.forEach(function (g) { btot += N(g[2]); });
+            var byType = {};
+            items.forEach(function (i) { (byType[i[0]] = byType[i[0]] || []).push(i); });
+            var rowsHtml = '';
+            groups.forEach(function (g) {
+              var t = String(g[0]);
+              var cat = CAT[t] || [t, 'var(--muted-foreground)'];
+              var pct = btot ? Math.round(N(g[2]) / btot * 100) : 0;
+              var itemsHtml = (byType[t] || []).map(function (i) {
+                var d = new Date(N(i[1]));
+                var sn = String(i[3] || '').replace(/\s+/g, ' ');
+                return '<div class="ud-brow-item"><span class="ts">' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + '</span><span class="sn" title="' + esc(sn) + '">' + esc(sn.slice(0, 120)) + '</span><span class="abs">' + fmtBytes(N(i[2])) + '</span></div>';
+              }).join('') || '';
+              var capNote = (byType[t] || []).length >= 30 && N(g[1]) > (byType[t] || []).length
+                ? '<div class="ud-brow-item"><span class="ts"></span><span class="sn text-muted">' + tr('仅展示最大的前 30 条') + '</span><span class="abs"></span></div>'
+                : '';
+              rowsHtml += '<div class="ud-brow-row" data-bg="' + esc(t) + '"><span class="ud-brow-arrow">▸</span><span class="ud-dot" style="background:' + cat[1] + '"></span><span class="nm">' + esc(cat[0]) + '</span>' +
+                '<span class="text-muted text-small tabular-nums" style="flex:none">' + fmtI(N(g[1])) + tr(' 条') + '</span>' +
+                '<span class="bar"><i style="width:' + pct + '%;background:' + cat[1] + '"></i></span>' +
+                '<span class="abs">≈' + fmtBytes(N(g[2])) + '</span><span class="n">' + pct + '%</span></div>' +
+                '<div class="ud-brow-items" data-bgp="' + esc(t) + '" hidden>' + itemsHtml + capNote + '</div>';
+            });
+            br = '<div class="ud-kv-l" style="margin-top:14px">' + tr('上下文浏览器') + '</div><div style="margin-top:2px">' + rowsHtml + '</div>';
+          })();
+          out.innerHTML = gantt + br +
             '<div class="ud-grid3" style="margin-top:' + (fleet.length ? '14px' : '8px') + '">' +
             '<div><div class="ud-kv-l">' + tr('工具字节 Top（存储字节）') + '</div>' + rows2(j.tools, tt, function (n) { return n.replace(/^mcp__/, ''); }) + '</div>' +
             '<div style="grid-column:span 2">' + (tf > 0 ? '<div class="ud-kv-l">' + tr('文件字节 Top（Read/Edit/Write）') + '</div>' + rows2(j.files, tf, base) : '') + '</div>' +
@@ -2245,6 +2299,17 @@ function __usageBoot(D) {
             Promise.resolve(window.zcode.callTool('usage_ctx_top', { session: sid })).then(function (r) { draw((r && r.structuredContent) || {}); }).catch(fail);
           } catch (e2) { fail(); }
         }
+      });
+      // 浏览器类别行展开/收起
+      bodyEl.addEventListener('click', function (e) {
+        var row = e.target.closest ? e.target.closest('.ud-brow-row') : null;
+        if (!row) return;
+        var g = row.getAttribute('data-bg');
+        var items = row.parentElement.querySelector('.ud-brow-items[data-bgp="' + g + '"]');
+        if (!items) return;
+        var open = items.hidden;
+        items.hidden = !open;
+        row.classList.toggle('ud-open', open);
       });
       // Fleet 泳道条点击：跳到该子会话的请求日志（子会话 id 在 sessionIds 索引表内才可跳）
       bodyEl.addEventListener('click', function (e) {

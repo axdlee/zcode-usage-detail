@@ -217,6 +217,8 @@ class ServerPanelTest(unittest.TestCase):
         self.assertIsInstance(sc.get("tools"), list)
         self.assertIsInstance(sc.get("files"), list)
         self.assertIsInstance(sc.get("fleet"), list)  # 子代理并行时间轴数据段
+        self.assertIsInstance(sc.get("bgroups"), list)  # 上下文浏览器：类别分组
+        self.assertIsInstance(sc.get("bitems"), list)  # 上下文浏览器：条目摘要
         # 面板 HTML 含 sessionIds 与「上下文 Top」按钮挂点
         msgs2 = self.rpc([
             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",

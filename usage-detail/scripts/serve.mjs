@@ -196,7 +196,7 @@ function writeLangPref(v) {
 // 上下文 Top 下钻（按会话按需查询，不随 dashboard 全量内嵌）：
 // 工具字节 Top（part type=tool 按工具聚合）+ 文件字节 Top（Read/Edit/Write 的 file_path 参数聚合）。
 // 口径与构成环一致（part 存储字节近似）。老库无 part 表时 prepare 抛错，返回空表。
-const CTX_TOP_SQL = `WITH P AS (SELECT data FROM part WHERE session_id = ?)
+const CTX_TOP_SQL = `WITH P AS (SELECT data, time_created AS tc, length(data) AS b, json_extract(data,'$.type') AS t FROM part WHERE session_id = ?)
   SELECT
     (SELECT COALESCE(json_group_array(json_array(t.tool, t.c, t.b)),'[]') FROM (
        SELECT json_extract(data,'$.tool') AS tool, count(*) AS c, sum(length(data)) AS b
@@ -212,15 +212,32 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data FROM part WHERE session_id = ?)
               mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok, mu.session_id AS sid
        FROM model_usage mu LEFT JOIN session ch ON ch.id = mu.session_id
        WHERE COALESCE(${PARENT_EXPR}, mu.session_id) = ? AND mu.query_source = 'subagent'
-       ORDER BY mu.started_at LIMIT 500) g) AS fleet`;
+       ORDER BY mu.started_at LIMIT 500) g) AS fleet,
+    (SELECT COALESCE(json_group_array(json_array(g.t, g.c, g.b)),'[]') FROM (
+       SELECT t, count(*) AS c, sum(b) AS b FROM P
+       WHERE t NOT IN ('step-start','step-finish','timeline') GROUP BY t ORDER BY b DESC) g) AS bgroups,
+    (SELECT COALESCE(json_group_array(json_array(i.t, i.tc, i.b, i.sn)),'[]') FROM (
+       SELECT t, tc, b, sn FROM (
+         SELECT t, tc, b,
+           CASE t
+             WHEN 'tool' THEN json_extract(data,'$.tool') || ' \u25b8 ' || substr(COALESCE(json_extract(data,'$.state.input'), json_extract(data,'$.state.output'), ''), 1, 140)
+             WHEN 'text' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 140)
+             WHEN 'reasoning' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 140)
+             WHEN 'file' THEN COALESCE(json_extract(data,'$.url'), '')
+             WHEN 'compaction' THEN COALESCE(json_extract(data,'$.trigger'), '') || '/' || COALESCE(json_extract(data,'$.phase'), '')
+             ELSE ''
+           END AS sn,
+           row_number() OVER (PARTITION BY t ORDER BY b DESC) AS rn
+         FROM P WHERE t NOT IN ('step-start','step-finish','timeline')
+       ) WHERE rn <= 30 ORDER BY b DESC LIMIT 150) i) AS bitems`;
 function ctxTop(sid) {
   sid = String(sid || '').slice(0, 128);
   if (!sid) return { tools: [], files: [] };
   try {
     const row = db.prepare(CTX_TOP_SQL).get(sid, sid);
     const j = (v) => { try { return JSON.parse(v) || []; } catch (e) { return []; } };
-    return { tools: j(row && row.tools), files: j(row && row.files), fleet: j(row && row.fleet) };
-  } catch (e) { return { tools: [], files: [], fleet: [] }; } // 老库无 part 表
+    return { tools: j(row && row.tools), files: j(row && row.files), fleet: j(row && row.fleet), bgroups: j(row && row.bgroups), bitems: j(row && row.bitems) };
+  } catch (e) { return { tools: [], files: [], fleet: [], bgroups: [], bitems: [] }; } // 老库无 part 表
 }
 function readBudget() {
   try { return JSON.parse(stripBom(fs.readFileSync(budgetPath(), 'utf8'))); } catch (e) { return { daily: 0, monthly: 0 }; }
