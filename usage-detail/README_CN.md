@@ -1,6 +1,6 @@
 # ZCode 用量明细 (usage-detail)
 
-[English](#english) | 简体中文
+[English](README.md) | 简体中文
 
 一个 [ZCode](https://zcode.z.ai) 插件：查看**每一次模型请求**的本地用量明细——逐条记录、按来源（GLM 官方套餐 / 自定义 BYOK 接入）区分、多维筛选与交互式仪表盘。
 
