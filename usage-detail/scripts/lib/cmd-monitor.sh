@@ -148,7 +148,12 @@ fmt_n() { printf '%s\n' "$1" | awk '{ n = $1; s = ""; while (length(n) > 3) { s 
 #   permission  Agent 等待权限批准时弹系统提醒（默认关）
 cmd_alerts() {
     local f="$HOME/.zcode/usage-alerts.json"
-    local what="${2:-status}" act="${3:-}"
+    local what="${2:-budget}" act="${3:-status}"
+    # 白名单校验：what/act 都是拼接进 node -e 的值，且 alerts 无参时缺省应显示 budget 状态
+    case "$what" in budget|permission) ;; *)
+      echo "用法：usage.sh alerts <budget|permission> [on|off|status]" >&2; exit 1 ;; esac
+    case "$act" in on|off|status) ;; *)
+      echo "用法：usage.sh alerts <budget|permission> [on|off|status]" >&2; exit 1 ;; esac
     [[ -f "$f" ]] || echo '{}' > "$f"
     local cur
     cur=$(node -e "const v=JSON.parse(require('fs').readFileSync('$f','utf8'));console.log(v['$what']==null?'(默认)':v['$what'])" 2>/dev/null || echo '(默认)')

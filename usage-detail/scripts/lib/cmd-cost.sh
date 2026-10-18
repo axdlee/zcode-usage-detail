@@ -8,7 +8,7 @@ cmd_cost() {
       echo "未找到价格表（应随插件内置 scripts/default-prices.json）" >&2
       exit 1
     fi
-    q "WITH src AS (SELECT replace(CAST(readfile('$pf') AS text), char(65279), '') AS j),
+    q "WITH src AS (SELECT replace(CAST(readfile($(sql_quote "$pf")) AS text), char(65279), '') AS j),
             n AS (SELECT CASE WHEN json_type(j,'\$.models')='object' THEN j ELSE json_object('models',json(j)) END AS j2,
                          COALESCE(json_extract(j,'\$.currency'),'CNY') AS cur FROM src),
             p AS (SELECT je.key AS model,
@@ -42,7 +42,7 @@ cmd_prices() {
         [[ -n "$pf" ]] || { echo "未找到价格表" >&2; exit 1; }
         echo "生效价格表：$pf"
         echo
-        q "WITH src AS (SELECT replace(CAST(readfile('$pf') AS text), char(65279), '') AS j),
+        q "WITH src AS (SELECT replace(CAST(readfile($(sql_quote "$pf")) AS text), char(65279), '') AS j),
                 n AS (SELECT CASE WHEN json_type(j,'\$.models')='object' THEN j ELSE json_object('models',json(j)) END AS j2 FROM src)
            SELECT je.key AS 模型,
                   json_extract(je.value,'\$.in') AS 输入,

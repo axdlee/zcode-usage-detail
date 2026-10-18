@@ -12,11 +12,17 @@
 // 任何失败静默退出 0，不影响调用方。
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 
 const [title, subtitle = '', msg = '', click = 'url'] = process.argv.slice(2);
 if (!msg) process.exit(0);
 
-const PANEL_URL = 'http://127.0.0.1:7741';
+// 面板实际地址：serve 被占端口会顺延并把真实端口写进 usage-serve.json（事实源），点击直达才不会落空
+let PANEL_URL = 'http://127.0.0.1:7741';
+try {
+  const m = JSON.parse(fs.readFileSync(os.homedir() + '/.zcode/usage-serve.json', 'utf8'));
+  if (m && m.port) PANEL_URL = 'http://127.0.0.1:' + m.port;
+} catch (e) {}
 try {
   if (process.platform === 'darwin') {
     const tn = ['/opt/homebrew/bin/terminal-notifier', '/usr/local/bin/terminal-notifier']

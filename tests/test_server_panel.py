@@ -362,6 +362,23 @@ class ServerPanelTest(unittest.TestCase):
         text = by_id[2]["result"]["contents"][0]["text"]
         self.assertIn("本轮用量", text)
 
+    def test_18_host_origin_guard_and_ctxoverride_keep(self):
+        # 发布加固护栏：① serve 拒绝异 Host（DNS rebinding）与跨站 Origin 写请求；
+        # ② MCP settings_set 未传 ctxOverride 时保留原覆盖（与 serve 同口径，不得静默清除）
+        serve_src = (PLUGIN / "scripts" / "serve.mjs").read_text()
+        self.assertIn("host !== '127.0.0.1:' + listenPort", serve_src)
+        self.assertIn("origin !== 'http://127.0.0.1:' + listenPort", serve_src)
+        self.assertIn("req.method === 'POST'", serve_src)
+        panel_src = (PLUGIN / "scripts" / "mcp" / "panel-server.mjs").read_text()
+        self.assertIn("coRaw !== undefined", panel_src)
+        self.assertIn("prevEntry.ctxOverride", panel_src)
+        self.assertIn("spawn(process.execPath", panel_src)  # 不依赖 PATH 里的 node
+
+    def test_19_budget_input_number_guard(self):
+        # 回归：设置弹窗保存预算后洞察区崩溃（'30'.toFixed）——N() 必须真转数字
+        src = (PLUGIN / "scripts" / "lib" / "dashboard.sh").read_text()
+        self.assertIn("var N = function (v) { var x = Number(v);", src)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@
     {
       "name": "usage-detail",
       "source": "./usage-detail",
-      "version": "0.23.2",
+      "version": "0.23.3",
       "description": "Local per-request usage analytics for ZCode: drill-down request rows (token breakdown, tok/s, cache rate), a live session side-panel dashboard, session health scores, model leaderboard, waste forensics, budget and burn alerts, list-price converted costs, activity heatmap and export - read-only local SQLite, zero model overhead.",
       "displayName": "Usage Detail",
       "displayName_i18n": {
@@ -14,7 +14,16 @@
         "zh-CN": "逐条用量明细：会话侧栏面板、两级钻取、tok/s 速率、每日明细钻取、零密钥配额条、分时计价、缓存率全链路、官方牌价折算、本地常驻面板"
       },
       "category": "developer-tools",
-      "icon": "assets/usage-detail/icon.png"
+      "icon": "assets/usage-detail/icon.png",
+      "license": "MIT",
+      "keywords": [
+        "usage",
+        "tokens",
+        "cost",
+        "dashboard",
+        "quota",
+        "analytics"
+      ]
     }
   ]
 }

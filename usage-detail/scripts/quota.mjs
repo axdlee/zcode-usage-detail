@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // 查询套餐配额。数据源链：
 //   1. 客户端日志尾随（零密钥，quota-log.mjs）——zcode-plan 套餐桶 + MCP 额度
-//   2. /api/monitor/usage/quota/limit（需要凭据：ANTHROPIC_AUTH_TOKEN → provider_config API Key → 令牌文件 → OAuth）
+//   2. /api/monitor/usage/quota/limit（仅使用用户显式提供给本插件的凭据：
+//      env ZCODE_USAGE_QUOTA_TOKEN / ANTHROPIC_AUTH_TOKEN，或 ~/.zcode/usage-quota-token.json）
+// 隐私红线：绝不读取 provider_config.json / credentials.json 等宿主凭据文件（README 明文承诺）。
 // 两级都无数据时输出降级提示（面板渲染为操作指引）。
 import https from 'node:https';
 import fs from 'node:fs';
@@ -20,40 +22,13 @@ function resolveEndpoint() {
   if (process.env.ANTHROPIC_AUTH_TOKEN && process.env.ANTHROPIC_BASE_URL) {
     return { token: process.env.ANTHROPIC_AUTH_TOKEN, base: process.env.ANTHROPIC_BASE_URL };
   }
-  // 1) Claude 兼容配置里的 API Key
-  const ruleFiles = [
-    path.join(os.homedir(), '.claude/settings.json'),
-    path.join(os.homedir(), '.zcode/v2/provider_config.json')
-  ];
-  for (const f of ruleFiles) {
-    try {
-      const j = JSON.parse(String(fs.readFileSync(f, 'utf8')).replace(/^\uFEFF/, ''));
-      const rules = (j.config && j.config.providerConfigRules && j.config.providerConfigRules.providerRules) || [];
-      for (const r of rules) {
-        const c = r.config || {};
-        const key = c.access && c.access.apiKey;
-        const base = (c.api && c.api.baseUrl) || '';
-        if (key && /anthropic|z\.ai|bigmodel/i.test(base + ' ' + (r.providerId || ''))) {
-          return { token: key, base: base.replace(/\/api\/anthropic.*$/, '') || 'https://open.bigmodel.cn' };
-        }
-      }
-    } catch (e) {}
-  }
-  // 1.5) 用户手动放置的令牌文件
+  // 用户手动放置的令牌文件（显式提供给本插件的凭据）
   try {
     const tf = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode/usage-quota-token.json'), 'utf8')).replace(/^\uFEFF/, ''));
     if (tf && tf.token) return { token: tf.token, base: tf.base || 'https://open.bigmodel.cn' };
   } catch (e) {}
-  // 2) ZCode 桌面端 OAuth 凭据（编码套餐登录态）
-  try {
-    const creds = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode/v2/credentials.json'), 'utf8')).replace(/^\uFEFF/, ''));
-    const raw = creds['oauth:bigmodel:access_token'];
-    if (raw) {
-      let token = raw;
-      try { const j = JSON.parse(raw); token = j.access_token || j.accessToken || raw; } catch (e) {}
-      return { token: token, base: 'https://open.bigmodel.cn' };
-    }
-  } catch (e) {}
+  // 不扫描 provider_config.json / ~/.claude/settings.json / credentials.json：
+  // 那些凭据用户并未提供给本插件，读取并外发即违反「只读名称映射、不读取 API Key」的承诺。
   return null;
 }
 

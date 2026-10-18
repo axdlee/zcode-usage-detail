@@ -616,14 +616,13 @@ var I18N_EN = {
   '厂商配额': 'Provider Quotas', '来源构成': 'By Provider', '模型分布': 'By Model', '常用工具': 'Top Tools',
   '最活跃会话（Top 5）': 'Most Active Sessions (Top 5)', '会话': 'Session', '请求数': 'Requests', 'token 合计': 'Total Tokens',
   '最后活动': 'Last Active', '会话数': 'Sessions', '近 7 天': '7-Day', '项目': 'Project', '平均 tok/s': 'Avg tok/s',
-  '平均首字': 'Avg TTFT', '失败率': 'Fail Rate', '平均产出': 'Avg Output', '输入 token M': 'Input Tokens',
+  '平均首字': 'Avg TTFT', '失败率': 'Fail Rate', '平均产出': 'Avg Output',
   '时间': 'Time', '类型': 'Type', '状态': 'Status', '输入': 'Input', '生成': 'Output', '缓存率': 'Cache %',
   '日期': 'Date', '请求': 'Requests', '缓存命中': 'Cache Hit', '每月汇总': 'Monthly', '每日明细': 'Daily Detail', '月份': 'Month',
   '健康': 'Health', '压缩': 'Compact', '折算成本': 'Cost', '耗时': 'Duration',
   '当前筛选下暂无数据': 'No data for current filters', '暂无数据': 'No data',
   '点击表头排序，筛选条件在上方全局生效；点击行可展开会话详情。': 'Click headers to sort; filters above apply globally; click a row to expand session details.',
   '点击表头排序；点击任意请求行可展开该请求的完整信息。': 'Click headers to sort; click any request row to expand its full details.',
-  '● 完成': '● Done', '● 失败': '● Failed', '● 已取消': '● Cancelled', '● 进行中': '● Running', '● 未知': '● Unknown',
   '主会话': 'Main', '子代理': 'Subagent', '其他': 'Other',
   '本轮用量': 'This Turn', '更新': 'updated', '截至': 'as of', '缓存': 'cache', '实时': 'Live', '燃烧率': 'burn rate', '近 5h': 'last 5h', '今日': 'today',
   '搜索会话 / 模型 / 来源…': 'Search sessions / models / providers…',
@@ -714,6 +713,11 @@ var I18N_EN = {
   " 条": " rows",
   "活跃": "Active",
   "点击只看该项目的会话": "Click to show only this project's sessions",
+  "健康分 ": "Health score ",
+  "／100：失败率×60 + 取消率×25 + 重试率（封顶 15）加权扣分": "/100: fail rate x60 + cancel x25 + retry x15 (capped) deducted",
+  "（全量 ": " (total ",
+  "）": ")",
+  "（仅显示前 60）": " (showing first 60)",
   "已选": "Selected",
   "跳转到页": "Go to page",
   '启动失败：请在终端运行 usage.sh serve': 'Failed to start: run "usage.sh serve" in a terminal'
@@ -785,7 +789,7 @@ function __usageBoot(D) {
     return { USD: '$', CNY: '¥', EUR: '€', GBP: '£', JPY: '¥' }[c] || (c ? c + ' ' : '$');
   })();
   var $ = function (id) { return document.getElementById(id); };
-  var N = function (v) { return v == null ? 0 : v; };
+  var N = function (v) { var x = Number(v); return v == null || !Number.isFinite(x) ? 0 : x; }; // 真·转数字：弹窗输入框的字符串值也要安全进入算术
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   function fmt(n) {
     n = N(n);
@@ -1219,7 +1223,7 @@ function __usageBoot(D) {
       if (!ct) return;
       var val = ct.name + (ct.mult === 1 ? '' : ' ' + ct.mult + '×');
       if (ct.until != null) val += tr(' · 至 ') + ct.until + ':00';
-      var sub = pick.name;
+      var sub = esc(pick.name);
       if (ct.name === tr('周末价')) sub += tr(' · 周末全天空闲价');
       if (ct.name === tr('节假日价')) sub += tr(' · 法定节假日全天空闲价');
       items.push(row(tr('当前时段'), val, 'gold', sub));
@@ -1802,7 +1806,7 @@ function __usageBoot(D) {
   }
   function healthBadge(h) {
     var c = h >= 90 ? 'var(--green)' : h >= 70 ? 'var(--yellow)' : 'var(--red)';
-    return '<span data-tip="健康分 ' + h + tr('／100：失败率×60 + 取消率×25 + 重试率（封顶 15）加权扣分" style="color:') + c + ';font-weight:600">' + h + '</span>';
+    return '<span data-tip="' + tr('健康分 ') + h + tr('／100：失败率×60 + 取消率×25 + 重试率（封顶 15）加权扣分') + '" style="color:' + c + ';font-weight:600">' + h + '</span>';
   }
   // 项目用量：按会话目录聚合（ccusage project / CCMeter 项目卡片的本地版）
   function renderProjects(rows) {
@@ -2388,10 +2392,10 @@ function __usageBoot(D) {
   var mgrState = { q: '', prices: null, budget: null, switches: null };
   function mgrRow(m, e, used) {
     return '<tr data-m="' + esc(m) + '"><td class="text-nowrap">' + esc(m) + (used ? ' <span class="ud-tag">' + tr('当前用量') + '</span>' : '') + '</td>' +
-      '<td class="ud-mgr-t"><input data-k="in" value="' + e.in + '" inputmode="decimal"></td>' +
-      '<td class="ud-mgr-t"><input data-k="out" value="' + e.out + '" inputmode="decimal"></td>' +
-      '<td class="ud-mgr-t"><input data-k="cache" value="' + e.cache + '" inputmode="decimal"></td>' +
-      '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + (e.ctxOverride || '') + '" placeholder="' + (e.ctx ? String(e.ctx) : tr('自动')) + '" title="' + tr('上下文窗口 token 数，留空按模型自动检测（水印曲线用）') + '" inputmode="numeric"></td>' +
+      '<td class="ud-mgr-t"><input data-k="in" value="' + esc(e.in) + '" inputmode="decimal"></td>' +
+      '<td class="ud-mgr-t"><input data-k="out" value="' + esc(e.out) + '" inputmode="decimal"></td>' +
+      '<td class="ud-mgr-t"><input data-k="cache" value="' + esc(e.cache) + '" inputmode="decimal"></td>' +
+      '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + esc(e.ctxOverride || '') + '" placeholder="' + (e.ctx ? esc(String(e.ctx)) : tr('自动')) + '" title="' + '" title="' + tr('上下文窗口 token 数，留空按模型自动检测（水印曲线用）') + '" inputmode="numeric"></td>' +
       '<td class="text-nowrap"><button type="button" class="btn ud-mgr-act ud-mgr-save" style="margin:0">' + tr('保存') + '</button> <button type="button" class="btn ud-mgr-act ud-mgr-del" style="margin:0" title="' + tr('删除该模型价') + '">' + tr('删除') + '</button></td></tr>';
   }
   function swRow(id, name, desc, on) {

@@ -1,6 +1,6 @@
 {
   "name": "usage-detail",
-  "version": "0.23.2",
+  "version": "0.23.3",
   "description": "ZCode 本地逐条用量分析：请求明细钻取（token 构成、tok/s、缓存率）、会话侧栏实时仪表盘、会话健康分、模型效率排行、浪费取证、预算与燃烧告警、折算成本（官方牌价）、活跃热力图与导出——只读本地 SQLite，零模型开销。",
   "author": {
     "name": "axdlee",
@@ -96,5 +96,16 @@
   "description_i18n": {
     "en": "Local per-request usage analytics for ZCode: drill-down request rows (token breakdown, tok/s, cache rate), a live session side-panel dashboard, session health scores, model leaderboard, waste forensics, budget and burn alerts, list-price converted costs, activity heatmap and export - read-only local SQLite, zero model overhead.",
     "zh-CN": "ZCode 本地逐条用量分析：请求明细钻取（token 构成、tok/s、缓存率）、会话侧栏实时仪表盘、会话健康分、模型效率排行、浪费取证、预算与燃烧告警、折算成本（官方牌价）、活跃热力图与导出——只读本地 SQLite，零模型开销。"
-  }
+  },
+  "license": "MIT",
+  "repository": "https://github.com/axdlee/zcode-usage-detail",
+  "homepage": "https://github.com/axdlee/zcode-usage-detail",
+  "keywords": [
+    "usage",
+    "tokens",
+    "cost",
+    "dashboard",
+    "quota",
+    "analytics"
+  ]
 }

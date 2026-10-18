@@ -115,6 +115,13 @@ class CliQueriesTest(unittest.TestCase):
     def test_doctor(self):
         self.q("doctor")
 
+    def test_alerts_whitelist(self):
+        # alerts 子命令参数白名单（what/act 拼接进 node -e 前必须校验；无参缺省 budget）
+        src = PLUGIN.joinpath("scripts", "lib", "cmd-monitor.sh").read_text()
+        self.assertIn('case "$what" in budget|permission)', src)
+        self.assertIn('case "$act" in on|off|status)', src)
+        self.assertIn('local what="${2:-budget}"', src)
+
 
 if __name__ == "__main__":
     unittest.main()

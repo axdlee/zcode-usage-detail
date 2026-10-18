@@ -337,7 +337,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.23.2' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.23.3' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -725,7 +725,9 @@ async function ensureServe() {
     if (r.ok && r.v === PLUGIN_VERSION) return { url: 'http://127.0.0.1:7741', started: false };
   }
   // 不传端口启动：serve 在 7741 被占时自行顺延并回写 usage-serve.json
-  const child = spawn('node', [path.join(HERE, '..', 'serve.mjs')], { detached: true, stdio: 'ignore' });
+  //（用 process.execPath 而非 PATH 里的 node：ZCode 内置 node 场景 PATH 可能没有）
+  const child = spawn(process.execPath, [path.join(HERE, '..', 'serve.mjs')], { detached: true, stdio: 'ignore' });
+  child.on('error', function () {});
   child.unref();
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 400));
@@ -774,8 +776,13 @@ function handleToolCall(name, args) {
           const prevEntry = next.models[m] || {};
           next.models[m] = { in: num(args.price.in), out: num(args.price.out), cache: num(args.price.cache) };
           if (prevEntry.ctx != null) next.models[m].ctx = prevEntry.ctx; // 改价保留上下文窗口字段
-          const co = Number(args.price.ctxOverride); // 用户覆盖的上下文窗口（空/0 = 清除覆盖）
-          if (Number.isFinite(co) && co > 0) next.models[m].ctxOverride = Math.round(co);
+          const coRaw = args.price.ctxOverride; // 显式传空/0 = 清除覆盖；未传 = 保留原值（与 serve.mjs 同口径）
+          if (coRaw !== undefined) {
+            const co = Number(coRaw);
+            if (Number.isFinite(co) && co > 0) next.models[m].ctxOverride = Math.round(co);
+          } else if (prevEntry.ctxOverride != null) {
+            next.models[m].ctxOverride = prevEntry.ctxOverride;
+          }
           writePricesCfg(next);
         }
       }

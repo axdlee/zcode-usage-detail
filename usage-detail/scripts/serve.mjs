@@ -325,7 +325,8 @@ function resolveBash() {
 }
 
 function renderFragment(limit) {
-  const out = path.join(os.tmpdir(), 'zcode-usage-serve-' + process.pid + '.html');
+  // 唯一临时名：并发重建时两个 bash 写同一路径会互相读到半成品（panel-server 同类路径已加随机）
+  const out = path.join(os.tmpdir(), 'zcode-usage-serve-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.html');
   const args = [USAGE_SH, 'dashboard', out];
   if (limit > 0) args.push(String(limit)); // -1（全部）走脚本默认，避免 num_arg 校验负数
   try {
@@ -400,12 +401,14 @@ function getFragment(limit) {
   return frag.html;
 }
 
-// 启动时价格表每日自动同步一次（与 dashboard 口径一致，可 env 关闭）
+// 启动时价格表每日自动同步一次（与 dashboard 口径一致，可 env 关闭；尊重价格表 autoSync:false 的用户 opt-out）
 try {
   if (process.env.ZCODE_USAGE_NO_AUTOSYNC !== '1') {
     let stale = !fs.existsSync(USER_PRICE);
     if (!stale) stale = Date.now() - fs.statSync(USER_PRICE).mtimeMs >= 86400e3;
-    if (stale && fs.existsSync(process.env.ZCODE_USAGE_PRICES || '/dev/null') === false || stale) {
+    let autoOff = false;
+    try { autoOff = /"autoSync"[: ]*false/.test(stripBom(fs.readFileSync(USER_PRICE, 'utf8'))); } catch (e) {}
+    if (stale && !autoOff) {
       spawn(resolveBash(), [USAGE_SH, 'prices', 'sync'], { detached: true, stdio: 'ignore' }).unref();
     }
   }
@@ -476,6 +479,22 @@ function budgetWatchTick() {
 const server = http.createServer(async function (req, res) {
   const u = new URL(req.url, 'http://127.0.0.1');
   try {
+    // 防 DNS rebinding 与跨站写（CSRF）：Host 必须为本机；带 Origin 的写请求必须同源。
+    // Origin 缺失（curl/地址栏导航）放行——浏览器发起的跨站 fetch 一定带 Origin。
+    const host = String(req.headers.host || '').toLowerCase();
+    if (host !== '127.0.0.1:' + listenPort && host !== 'localhost:' + listenPort) {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Forbidden');
+      return;
+    }
+    if (req.method === 'POST') {
+      const origin = String(req.headers.origin || '');
+      if (origin && origin !== 'http://127.0.0.1:' + listenPort && origin !== 'http://localhost:' + listenPort) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Forbidden');
+        return;
+      }
+    }
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
       const limit = u.searchParams.get('limit');
       const fragHtml = getFragment(limit);

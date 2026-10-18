@@ -34,7 +34,8 @@ bash "<本技能目录>/../../scripts/usage.sh" <子命令> [参数]
 | `serve [端口]` | 本地常驻面板（默认 7741，浏览器打开、5s 轮询实时燃烧率）。用户要"常驻看板/实时面板/浏览器打开"时使用：以后台方式启动（run_in_background），把 http://127.0.0.1:7741 以 Markdown 链接交付，并说明仅监听本机、停止方式 | "我要一个常驻的用量看板" |
 | `turnstats [notify|inject|off|status]` | 每轮统计附加出口：notify=每轮结束弹系统通知（本地计算，零模型开销，推荐）；inject=对话内统计行（每轮约 0.3k token）；off=仅侧栏面板「本轮」实时卡（始终开启）；默认 off | "打开/关闭每轮统计" |
 | `waste [N]` | 浪费取证：近 N 天（默认 7）失败/取消/重试白耗 token、反复失败会话 Top5、重试最多模型 | "浪费/失败请求分析" |
-| `alerts <budget|permission> [on|off|status]` | 通知开关：预算 80%/100% 与燃烧告警（默认开，本地检查）、权限等待提醒（默认关） | "打开预算告警/权限提醒" || `doctor` | 环境自检（"统计不见了/数字不对吗"先跑这个）：数据库与表结构、价格表时效、配额数据源、node 依赖逐项排查 | "统计好像不对"、"怎么没数据了" |
+| `alerts <budget|permission> [on|off|status]` | 通知开关：预算 80%/100% 与燃烧告警（默认开，本地检查）、权限等待提醒（默认关） | "打开预算告警/权限提醒" |
+| `doctor` | 环境自检（"统计不见了/数字不对吗"先跑这个）：数据库与表结构、价格表时效、配额数据源、node 依赖逐项排查 | "统计好像不对"、"怎么没数据了" |
 | `quota` | 查询 Coding Plan 套餐配额余量（智谱官方监控接口）。桌面 OAuth 不适用于该接口，用户以 API Key 接入且写了 ~/.zcode/usage-quota-token.json（`{"token":"KEY","base":"https://open.bigmodel.cn"}`）时才可用；未配置时如实说明并引导用 Usage Stats → Coding Plan | "套餐还剩多少额度" |
 | `export csv\|json [路径]` | 导出全部记录 | "导出成 CSV" |
 | `recent [N]` | 最近 N 条逐条明细（默认 20） | "看每条记录"、"最近 50 条" |
