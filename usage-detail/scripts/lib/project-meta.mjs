@@ -34,7 +34,7 @@ export function projectRoot(dir) {
   try {
     // Windows 的 git 输出正斜杠风格（C:/repo），与会话目录的反斜杠并存时归一为正斜杠，
     // 保证同项目不同目录归并到同一字符串、显示风格一致
-    root = String(execFileSync('git', ['-C', d, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 3000 })).trim().replace(/\\/g, '/');
+    root = String(execFileSync('git', ['-C', d, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })).trim().replace(/\\/g, '/');
   } catch (e) { root = ''; } // 目录已删除 / 非 git 仓库 / git 未安装（Windows 常见）：退化，前端按原目录分组
   rootCache.set(d, root);
   return root;
