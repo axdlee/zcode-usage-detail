@@ -50,7 +50,10 @@ cmd_dashboard() {
     [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"
     # agent / context_exceeded 同为较新列：老库回退（agent 置空显示未知来源，ctx 置 NULL 无超限标注）
     agent_expr="''"
-    [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'")" == "1" ]] && agent_expr="R.agent"
+    [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'")" == "1" ]] && agent_expr="mu.agent"
+    # 子代理会话归属：session.parent_id（较新列）把子会话挂到主会话；老库无此列时子代理团队留在子会话名下
+    parent_expr="NULL"
+    [[ "$(qr "SELECT count(*) FROM pragma_table_info('session') WHERE name='parent_id'")" == "1" ]] && parent_expr="ch.parent_id"
     ctx_exc_expr="NULL"
     [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='context_exceeded'")" == "1" ]] && ctx_exc_expr="R.context_exceeded"
     # BYOK 供应商显示名（provider_config.json，只取名映射）+ 项目根归并（git 仓库根）：
@@ -98,7 +101,7 @@ cmd_dashboard() {
         'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM U GROUP BY hr)),
         'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts), json(c.triggers))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts, json_group_array(COALESCE(json_extract(p.data,'$.trigger'),'manual') || '/' || COALESCE(json_extract(p.data,'$.phase'),'')) AS triggers FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
         'ctxMix',(SELECT COALESCE(json_group_array(json_array(SI.i, m.t, m.b)),'[]') FROM (SELECT p.session_id AS sid, json_extract(p.data,'$.type') AS t, sum(length(p.data)) AS b FROM part p WHERE p.session_id IN (SELECT DISTINCT session_id FROM R) AND p.session_id IS NOT NULL GROUP BY p.session_id, json_extract(p.data,'$.type')) m LEFT JOIN S SI ON SI.v = m.sid WHERE SI.i IS NOT NULL),
-        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT session_id AS sid, COALESCE(${agent_expr},'-') AS agent, count(*) AS c, sum(input_tokens+output_tokens+reasoning_tokens) AS tok FROM R WHERE query_source='subagent' GROUP BY session_id, 2) a LEFT JOIN S SI ON SI.v = a.sid WHERE SI.i IS NOT NULL),
+        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT COALESCE(${parent_expr}, mu.session_id) AS root_sid, COALESCE(${agent_expr},'-') AS agent, count(*) AS c, sum(mu.input_tokens+mu.output_tokens+mu.reasoning_tokens) AS tok FROM R mu LEFT JOIN session ch ON ch.id = mu.session_id WHERE mu.query_source='subagent' GROUP BY 1, 2) a LEFT JOIN S SI ON SI.v = a.root_sid WHERE SI.i IS NOT NULL),
         'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
         'providerNames', json_extract(json('$PMETA'),'$.providerNames'),
@@ -597,6 +600,7 @@ var I18N_EN = {
   '已保存，重新打开面板后生效': "Saved. Reopen the panel to apply",
   '上下文 Top →': 'Context Top →',
   '加载中…': "Loading…",
+  '子代理并行时间轴': 'Subagent parallel timeline',
   '工具字节 Top（存储字节）': 'Tool bytes top (storage bytes)',
   '文件字节 Top（Read/Edit/Write）': 'File bytes top (Read/Edit/Write)',
   '保存中…': "Saving…",
@@ -1808,8 +1812,10 @@ function __usageBoot(D) {
     var SID = (typeof D === 'object' && D && D.sessionIds) ? D.sessionIds : [];
     var canCtxTop = !!(window.__USAGE_SERVE__ || (window.zcode && typeof window.zcode.callTool === 'function'));
     var ctxTopBtn = (mixItems && canCtxTop && SID[o.g])
-      ? '<button type="button" class="btn ud-ctx-top" data-sid="' + esc(String(SID[o.g])) + '" data-sg="' + o.g + '" style="margin:6px 0 0;padding:2px 10px;font-size:12px">' + tr('上下文 Top →') + '</button><div class="ud-ctx-top-out"></div>'
+      ? '<button type="button" class="btn ud-ctx-top" data-sid="' + esc(String(SID[o.g])) + '" data-sg="' + o.g + '" style="margin:6px 0 0;padding:2px 10px;font-size:12px">' + tr('上下文 Top →') + '</button>'
       : '';
+    // 上下文 Top 展开输出区（全宽：Fleet 时间轴 + 两榜），挂在详情底部
+    var ctxTopOut = ctxTopBtn ? '<div class="ud-ctx-top-out"></div>' : '';
     var mixNote = mixItems ? '<div class="text-small text-muted" style="margin-top:4px">' + tr('按本地存储字节近似，非模型实际读取的 token 计量') + '</div>' : '';
     // Agent 团队：该会话子代理具名分布（strip zcode- 前缀；'-' 为未知来源）
     var sagRows = SAGENTS.filter(function (x) { return x[0] === o.g && N(x[2]) > 0; })
@@ -1858,7 +1864,7 @@ function __usageBoot(D) {
       '<div><div class="ud-kv-l">' + tr('使用工具（调用次数占比）') + '</div>' + toolDonut + '</div>' +
       '<div>' + (tl8 || '<div class="ud-kv-l">' + tr('事件时间线') + '</div><span class="text-muted text-small">无压缩 / 模型切换事件</span>') + '</div>' +
       '</div>' +
-      ctxRow +
+      ctxRow + ctxTopOut +
       '<div class="ud-sec" style="margin-top:14px">' + curveHead + curveWrap + '</div>';
   }
   function renderModelBoard(rows) {
@@ -2054,7 +2060,7 @@ function __usageBoot(D) {
       bodyEl.addEventListener('click', function (e) {
         var btn = e.target.closest ? e.target.closest('.ud-ctx-top') : null;
         if (!btn) return;
-        var out = btn.parentElement.querySelector('.ud-ctx-top-out');
+        var out = btn.closest('.ud-exp').querySelector('.ud-ctx-top-out');
         if (!out) return;
         var sid = btn.getAttribute('data-sid');
         btn.disabled = true; btn.textContent = tr('加载中…');
@@ -2072,9 +2078,41 @@ function __usageBoot(D) {
           var tt = 0; (j.tools || []).forEach(function (x) { tt += N(x[2]); });
           var tf = 0; (j.files || []).forEach(function (x) { tf += N(x[2]); });
           var base = function (p) { return p.replace(/^.*\//, '') || p; };
-          out.innerHTML =
-            '<div class="ud-kv-l" style="margin-top:8px">' + tr('工具字节 Top（存储字节）') + '</div>' + rows2(j.tools, tt, function (n) { return n.replace(/^mcp__/, ''); }) +
-            (tf > 0 ? '<div class="ud-kv-l" style="margin-top:8px">' + tr('文件字节 Top（Read/Edit/Write）') + '</div>' + rows2(j.files, tf, base) : '');
+          // Fleet 泳道时间轴：每个具名子代理一行，区间条按 [started_at, +duration_ms] 映射到会话时间轴
+          var fleet = j.fleet || [];
+          var gantt = '';
+          if (fleet.length) {
+            var lanes = [];
+            fleet.forEach(function (f) { var a = String(f[0] || '-'); if (lanes.indexOf(a) < 0) lanes.push(a); });
+            var t0 = Infinity, t1 = 0;
+            fleet.forEach(function (f) { var st = N(f[1]), du = Math.max(N(f[2]), 1000); if (st < t0) t0 = st; if (st + du > t1) t1 = st + du; });
+            if (isFinite(t0) && t1 > t0) {
+              var span = t1 - t0, W = 600, laneH = 22, H = lanes.length * laneH + 6;
+              var bars = fleet.map(function (f) {
+                var li = lanes.indexOf(String(f[0] || '-'));
+                var st = N(f[1]), du = Math.max(N(f[2]), 1000);
+                var x = (st - t0) / span * (W - 8) + 4;
+                var w = Math.max(2, du / span * (W - 8));
+                var dt = new Date(st);
+                var tip = esc(String(f[0]).replace(/^zcode-/, '')) + ' · ' + pad(dt.getHours()) + ':' + pad(dt.getMinutes()) + ' · ' + durCell(du) + ' · ' + fmt(N(f[3])) + ' tok';
+                return '<rect x="' + x.toFixed(1) + '" y="' + (li * laneH + 3) + '" width="' + w.toFixed(1) + '" height="' + (laneH - 8) + '" rx="3" fill="' + PALETTE[li % PALETTE.length] + '" fill-opacity="0.85"><title>' + tip + '</title></rect>';
+              }).join('');
+              var seps = lanes.map(function (_, i) {
+                return '<line x1="0" x2="' + W + '" y1="' + ((i + 1) * laneH + 3) + '" y2="' + ((i + 1) * laneH + 3) + '" stroke="var(--border)" stroke-width="1" opacity="0.45"/>';
+              }).join('');
+              var legend = lanes.map(function (ln, i) {
+                return '<span class="text-small" style="margin-right:14px"><span style="color:' + PALETTE[i % PALETTE.length] + '">■</span> ' + esc(String(ln).replace(/^zcode-/, '')) + '</span>';
+              }).join('');
+              gantt = '<div class="ud-kv-l" style="margin-top:12px">' + tr('子代理并行时间轴') + '</div>' +
+                '<div style="margin:2px 0 2px">' + legend + '</div>' +
+                '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="none" role="img" aria-label="Fleet">' + seps + bars + '</svg>';
+            }
+          }
+          out.innerHTML = gantt +
+            '<div class="ud-grid3" style="margin-top:' + (fleet.length ? '14px' : '8px') + '">' +
+            '<div><div class="ud-kv-l">' + tr('工具字节 Top（存储字节）') + '</div>' + rows2(j.tools, tt, function (n) { return n.replace(/^mcp__/, ''); }) + '</div>' +
+            '<div style="grid-column:span 2">' + (tf > 0 ? '<div class="ud-kv-l">' + tr('文件字节 Top（Read/Edit/Write）') + '</div>' + rows2(j.files, tf, base) : '') + '</div>' +
+            '</div>';
         };
         var fail = function () { btn.disabled = false; btn.textContent = tr('上下文 Top →'); };
         if (window.__USAGE_SERVE__) {

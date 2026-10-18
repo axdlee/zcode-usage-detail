@@ -42,10 +42,19 @@ function turnExpr() {
 let agExprCache = null;
 function agentExpr() {
   if (agExprCache == null) {
-    try { agExprCache = q1("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'") === '1' ? 'R.agent' : "''"; }
+    try { agExprCache = q1("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'") === '1' ? 'mu.agent' : "''"; }
     catch (e) { agExprCache = "''"; }
   }
   return agExprCache;
+}
+// 子代理会话归属：session.parent_id（较新列）把子会话挂到主会话；老库无此列时留在子会话名下
+let parentExprCache = null;
+function parentExpr() {
+  if (parentExprCache == null) {
+    try { parentExprCache = q1("SELECT count(*) FROM pragma_table_info('session') WHERE name='parent_id'") === '1' ? 'ch.parent_id' : 'NULL'; }
+    catch (e) { parentExprCache = 'NULL'; }
+  }
+  return parentExprCache;
 }
 let ctxExcCache = null;
 function ctxExcExpr() {
@@ -357,7 +366,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.25.0' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.26.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -493,15 +502,21 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data FROM part WHERE session_id = ?)
        FROM P WHERE json_extract(data,'$.type')='tool'
          AND json_extract(data,'$.tool') IN ('Read','Edit','Write')
          AND json_extract(data,'$.state.input.file_path') IS NOT NULL
-       GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files`;
+       GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files,
+    (SELECT COALESCE(json_group_array(json_array(g.agent, g.started_at, g.duration_ms, g.tok)),'[]') FROM (
+       SELECT COALESCE(${agentExpr()},'-') AS agent, mu.started_at AS started_at, mu.duration_ms AS duration_ms,
+              mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok
+       FROM model_usage mu LEFT JOIN session ch ON ch.id = mu.session_id
+       WHERE COALESCE(${parentExpr()}, mu.session_id) = ? AND mu.query_source = 'subagent'
+       ORDER BY mu.started_at LIMIT 500) g) AS fleet`;
 function ctxTop(sid) {
   sid = String(sid || '').slice(0, 128);
   if (!sid) return { tools: [], files: [] };
   try {
-    const row = db.prepare(CTX_TOP_SQL).get(sid);
+    const row = db.prepare(CTX_TOP_SQL).get(sid, sid);
     const j = (v) => { try { return JSON.parse(v) || []; } catch (e) { return []; } };
-    return { tools: j(row && row.tools), files: j(row && row.files) };
-  } catch (e) { return { tools: [], files: [] }; } // 老库无 part 表
+    return { tools: j(row && row.tools), files: j(row && row.files), fleet: j(row && row.fleet) };
+  } catch (e) { return { tools: [], files: [], fleet: [] }; } // 老库无 part 表
 }
 
 function atomicWrite(file, data, mode) {

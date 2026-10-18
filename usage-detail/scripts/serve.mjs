@@ -41,8 +41,10 @@ function q(sql) {
 // turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
 const TURN_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'") === '1' ? 'R.turn_id' : 'NULL';
 // agent / context_exceeded 同为较新列：老库回退（agent 置空显示未知来源，ctx 置 NULL 无超限标注）
-const AGENT_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'") === '1' ? 'R.agent' : "''";
+const AGENT_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'") === '1' ? 'mu.agent' : "''";
 const CTX_EXC_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='context_exceeded'") === '1' ? 'R.context_exceeded' : 'NULL';
+// 子代理会话归属：session.parent_id（较新列）把子会话挂到主会话；老库无此列时留在子会话名下
+const PARENT_EXPR = q("SELECT count(*) FROM pragma_table_info('session') WHERE name='parent_id'") === '1' ? 'ch.parent_id' : 'NULL';
 
 function pricePath() {
   if (process.env.ZCODE_USAGE_PRICES && fs.existsSync(process.env.ZCODE_USAGE_PRICES)) return process.env.ZCODE_USAGE_PRICES;
@@ -69,7 +71,7 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
     'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM model_usage GROUP BY hr)),
     'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts), json(c.triggers))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts, json_group_array(COALESCE(json_extract(p.data,'$.trigger'),'manual') || '/' || COALESCE(json_extract(p.data,'$.phase'),'')) AS triggers FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
         'ctxMix',(SELECT COALESCE(json_group_array(json_array(SI.i, m.t, m.b)),'[]') FROM (SELECT p.session_id AS sid, json_extract(p.data,'$.type') AS t, sum(length(p.data)) AS b FROM part p WHERE p.session_id IN (SELECT DISTINCT session_id FROM R) AND p.session_id IS NOT NULL GROUP BY p.session_id, json_extract(p.data,'$.type')) m LEFT JOIN S SI ON SI.v = m.sid WHERE SI.i IS NOT NULL),
-        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT session_id AS sid, COALESCE(${AGENT_EXPR},'-') AS agent, count(*) AS c, sum(input_tokens+output_tokens+reasoning_tokens) AS tok FROM R WHERE query_source='subagent' GROUP BY session_id, 2) a LEFT JOIN S SI ON SI.v = a.sid WHERE SI.i IS NOT NULL),
+        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT COALESCE(${PARENT_EXPR}, mu.session_id) AS root_sid, COALESCE(${AGENT_EXPR},'-') AS agent, count(*) AS c, sum(mu.input_tokens+mu.output_tokens+mu.reasoning_tokens) AS tok FROM R mu LEFT JOIN session ch ON ch.id = mu.session_id WHERE mu.query_source='subagent' GROUP BY 1, 2) a LEFT JOIN S SI ON SI.v = a.root_sid WHERE SI.i IS NOT NULL),
     'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'providerNames', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."providerNames"'),
@@ -204,15 +206,21 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data FROM part WHERE session_id = ?)
        FROM P WHERE json_extract(data,'$.type')='tool'
          AND json_extract(data,'$.tool') IN ('Read','Edit','Write')
          AND json_extract(data,'$.state.input.file_path') IS NOT NULL
-       GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files`;
+       GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files,
+    (SELECT COALESCE(json_group_array(json_array(g.agent, g.started_at, g.duration_ms, g.tok)),'[]') FROM (
+       SELECT COALESCE(${AGENT_EXPR},'-') AS agent, mu.started_at AS started_at, mu.duration_ms AS duration_ms,
+              mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok
+       FROM model_usage mu LEFT JOIN session ch ON ch.id = mu.session_id
+       WHERE COALESCE(${PARENT_EXPR}, mu.session_id) = ? AND mu.query_source = 'subagent'
+       ORDER BY mu.started_at LIMIT 500) g) AS fleet`;
 function ctxTop(sid) {
   sid = String(sid || '').slice(0, 128);
   if (!sid) return { tools: [], files: [] };
   try {
-    const row = db.prepare(CTX_TOP_SQL).get(sid);
+    const row = db.prepare(CTX_TOP_SQL).get(sid, sid);
     const j = (v) => { try { return JSON.parse(v) || []; } catch (e) { return []; } };
-    return { tools: j(row && row.tools), files: j(row && row.files) };
-  } catch (e) { return { tools: [], files: [] }; } // 老库无 part 表
+    return { tools: j(row && row.tools), files: j(row && row.files), fleet: j(row && row.fleet) };
+  } catch (e) { return { tools: [], files: [], fleet: [] }; } // 老库无 part 表
 }
 function readBudget() {
   try { return JSON.parse(stripBom(fs.readFileSync(budgetPath(), 'utf8'))); } catch (e) { return { daily: 0, monthly: 0 }; }
