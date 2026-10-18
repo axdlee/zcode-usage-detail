@@ -68,6 +68,8 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'providerNames', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."providerNames"'),
     'projectMap', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."projectMap"'),
+    'budgetDaily', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."budgetDaily"'),
+    'budgetMonthly', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."budgetMonthly"'),
     'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
@@ -226,7 +228,7 @@ function dataJSON(limit) {
   // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table。
   // 注意消费方按字符串处理（res.end(dataJSON())），必须 stringify
   if (q("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
-    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, prices: {}, total: 0, covered: 0, rows: [] });
+    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, prices: {}, total: 0, covered: 0, rows: [] });
   }
   // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
   const pp = pricePath();
@@ -337,7 +339,7 @@ function renderFragment(limit) {
   // 切换为服务模式：数据走 /api/data，由 boot 函数异步加载
   html = html.replace(/^const DATA =\n.*$/m, "const DATA = null;\nwindow.__USAGE_DATA_URL__ = '/api/data';\nwindow.__USAGE_SERVE__ = true;");
   if (html.indexOf('__USAGE_DATA_URL__') < 0) throw new Error('dashboard 生成结果异常');
-  // 服务态附加：刷新按钮 + 实时燃烧率角标（5s 轻轮询）
+  // 服务态附加：刷新按钮 + 自动刷新开关（挂机监控；页签 hash 在 reload 后保留）+ 实时燃烧率角标（5s 轻轮询）
   html += `<script>
 (function () {
   var t = setInterval(function () {
@@ -349,6 +351,25 @@ function renderFragment(limit) {
     b.textContent = '刷新数据';
     b.addEventListener('click', function () { b.disabled = true; b.textContent = '刷新中…'; location.reload(); });
     c.appendChild(b);
+    // 自动刷新：60s 整页刷新（保留页签 hash；开关状态记忆在 localStorage）
+    var auto = document.createElement('button');
+    auto.type = 'button'; auto.className = 'ud-toggle'; auto.style.margin = '0'; auto.style.fontSize = '12px';
+    var on = false;
+    try { on = localStorage.getItem('ud-autorefresh') === '1'; } catch (e) {}
+    function paint() { auto.textContent = 'Auto ' + (on ? 'ON' : 'OFF'); auto.setAttribute('aria-pressed', String(on)); }
+    function applyAuto() {
+      paint();
+      if (on) {
+        if (!window.__udAutoT) window.__udAutoT = setInterval(function () { location.reload(); }, 60000);
+      } else if (window.__udAutoT) { clearInterval(window.__udAutoT); window.__udAutoT = null; }
+    }
+    auto.addEventListener('click', function () {
+      on = !on;
+      try { localStorage.setItem('ud-autorefresh', on ? '1' : '0'); } catch (e) {}
+      applyAuto();
+    });
+    paint(); applyAuto();
+    c.appendChild(auto);
     var badge = document.createElement('span');
     badge.id = 'ud-live-badge'; badge.className = 'text-small text-muted';
     c.appendChild(badge);

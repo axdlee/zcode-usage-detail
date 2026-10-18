@@ -68,6 +68,8 @@ function metaSQL(limit, disk, extraJson) {
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'providerNames', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."providerNames"'),
     'projectMap', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."projectMap"'),
+    'budgetDaily', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."budgetDaily"'),
+    'budgetMonthly', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."budgetMonthly"'),
     'prices',(SELECT CASE
           WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
           ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
@@ -103,11 +105,12 @@ function dataJSON(limit) {
   const disk = { logs: duMB(path.join(os.homedir(), '.zcode/v2/logs')), rollout: duMB(path.join(os.homedir(), '.zcode/cli/rollout')), artifacts: duMB(path.join(os.homedir(), '.zcode/cli/artifacts')), db: duMB(DB) };
   // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table
   if (q1("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
-    return { providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk, providerNames: {}, projectMap: {}, prices: {}, total: 0, covered: 0, rows: [] };
+    return { providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk, providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, prices: {}, total: 0, covered: 0, rows: [] };
   }
   let dirsList = [];
   try { dirsList = JSON.parse(q1(`SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')`) || '[]'); } catch (e) {}
-  const extra = JSON.stringify({ providerNames: vendorDisplayNames(), projectMap: buildProjectMap(dirsList) });
+  const bg = readBudgetCfg();
+  const extra = JSON.stringify({ providerNames: vendorDisplayNames(), projectMap: buildProjectMap(dirsList), budgetDaily: Number(bg && bg.daily) || 0, budgetMonthly: Number(bg && bg.monthly) || 0 });
   const data = JSON.parse(q1(metaSQL(limit, disk, extra)));
   metaCache = { at: Date.now(), v: { limit, data } };
   return data;
@@ -334,7 +337,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', version: '0.22.4' };
+const SERVER_INFO = { name: 'usage-detail-panel', version: '0.23.0' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';

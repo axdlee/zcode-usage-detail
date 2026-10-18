@@ -104,7 +104,7 @@ class ProjectMetaTest(unittest.TestCase):
     def test_05_dashboard_text_guards(self):
         # 前端三特性的文本护栏：真名映射 / 项目归并 / 本轮兜底，缺一处即回归
         src = DASH.read_text()
-        self.assertIn("(D.providerNames || {})[raw] || raw", src, "pvLabel 未接 BYOK 名映射")
+        self.assertIn("esc(PVNAME[raw] || raw)", src, "pvLabel 未接 BYOK 名映射")
         self.assertIn("var PMAP = D.projectMap || {};", src, "项目归并映射缺失")
         self.assertIn("projKey(SD[r[0]]", src, "项目聚合未按仓库根归并")
         self.assertIn("window.__udTurnFallback", src, "本轮兜底函数缺失")

@@ -54,9 +54,14 @@ cmd_dashboard() {
     DIRS_JSON=$(qr "SELECT COALESCE(json_group_array(d),'[]') FROM (SELECT DISTINCT se.directory AS d FROM model_usage u LEFT JOIN session se ON se.id=u.session_id WHERE coalesce(se.directory,'')<>'')")
     PMETA=$(printf '%s' "$DIRS_JSON" | node "$SCRIPT_DIR/lib/project-meta.mjs" 2>/dev/null || echo '{"providerNames":{},"projectMap":{}}')
     PMETA=${PMETA//\'/\'\'}
+    # 预算值（洞察区「今日预算」进度卡用）：node 读 usage-budget.json，只取两个数字
+    BUDGET_JSON=$(node -e "try{const b=JSON.parse(require('fs').readFileSync(require('path').join(process.env.HOME||'', '.zcode', 'usage-budget.json'),'utf8'));process.stdout.write((Number(b.daily)||0)+' '+(Number(b.monthly)||0))}catch(e){process.stdout.write('0 0')}" 2>/dev/null || echo "0 0")
+    BUDGET_D=${BUDGET_JSON%% *}; BUDGET_M=${BUDGET_JSON##* }
+    [[ "$BUDGET_D" =~ ^[0-9.]+$ ]] || BUDGET_D=0
+    [[ "$BUDGET_M" =~ ^[0-9.]+$ ]] || BUDGET_M=0
     # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
     if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
-      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"prices":{},"total":0,"covered":0,"rows":[]}'
+      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"prices":{},"total":0,"covered":0,"rows":[]}'
     else
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
@@ -84,6 +89,8 @@ cmd_dashboard() {
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
         'providerNames', json_extract(json('$PMETA'),'$.providerNames'),
         'projectMap', json_extract(json('$PMETA'),'$.projectMap'),
+        'budgetDaily', $BUDGET_D,
+        'budgetMonthly', $BUDGET_M,
         'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
@@ -282,8 +289,10 @@ UD_HEAD
   <select class="form-select" id="ud-f-pv"></select>
   <label class="form-label text-small text-muted" for="ud-f-model">模型</label>
   <select class="form-select" id="ud-f-model"></select>
+  <input type="search" class="form-control form-control-sm" id="ud-f-q" placeholder="搜索会话 / 模型 / 来源…" style="max-width:200px" aria-label="文本筛选">
   <div class="viz-row" role="group" aria-label="时间范围" id="ud-f-range">
     <button type="button" class="ud-toggle" data-r="today" aria-pressed="true">今天</button>
+    <button type="button" class="ud-toggle" data-r="yday" aria-pressed="false">昨天</button>
     <button type="button" class="ud-toggle" data-r="7" aria-pressed="false">近 7 天</button>
     <button type="button" class="ud-toggle" data-r="30" aria-pressed="false">近 30 天</button>
     <button type="button" class="ud-toggle" data-r="all" aria-pressed="false">全部</button>
@@ -435,6 +444,64 @@ UD_DATA_HEAD
       printf '%s\n' "$META"
       cat <<'UD_TAIL'
 ;
+// ===== i18n 基础设施：中文原文为 key 的字典 + t() 查表（缺失回退中文原文）=====
+// 语言判定优先级：localStorage 显式选择 > 系统语言（zh 开头为中文，其余英文）。
+// v1 覆盖高频可见文案（页签/筛选/KPI/洞察标签/列头/按钮/空态）；长句口径说明暂中文，逐步补全。
+var I18N_EN = {
+  '总览': 'Overview', '每日趋势': 'Daily Trend', '会话排行': 'Sessions', '模型效率': 'Model Efficiency',
+  '项目用量': 'Projects', '请求明细': 'Requests', '失败请求': 'Failures',
+  '来源': 'Provider', '模型': 'Model', '今天': 'Today', '昨天': 'Yesterday', '近 7 天': '7 Days', '近 30 天': '30 Days', '全部': 'All',
+  '折算成本（API 牌价）': 'Converted Cost (API list)', '同步价格': 'Sync Prices', '设置': 'Settings',
+  '导出报表': 'Export Report', '刷新数据': 'Refresh', '刷新中…': 'Refreshing…', '自动': 'Auto',
+  '请求次数': 'Requests', '输入 token': 'Input Tokens', '生成 token': 'Output Tokens', '活跃会话': 'Active Sessions',
+  '缓存读': 'Cache Read', '缓存写': 'Cache Write', '日均': 'Daily Avg', '覆盖': 'Days', '输出 + 思考 token': 'Output + Reasoning Tokens', '合计': 'Total', '含子代理请求': 'incl. subagent requests',
+  '用量洞察': 'Insights', '今日用量': 'Today', '昨日用量': 'Yesterday', '近 7 天用量': '7-Day', '近 30 天用量': '30-Day', '累计用量': 'All-Time',
+  '活跃天数': 'Active Days', '连续活跃': 'Streak', '最长': 'max', '峰值日': 'Peak Day', '缓存命中率': 'Cache Hit', '读': 'read',
+  '近 1h 燃烧率': '1h Burn Rate', '节奏：放缓': 'Pace: slowing', '节奏：平稳': 'Pace: steady', '节奏：加速': 'Pace: accelerating',
+  '当前时段': 'Current Tier', '任务完成': 'Todos Done', '重试 / 取消': 'Retries / Cancels', '平均耗时': 'Avg Duration',
+  '今日预算': 'Today Budget', '月预算': 'Monthly', '峰值时段': 'Peak Hours', '缓存量（读+写）': 'Cache Volume (read+write)',
+  '展开全部': 'Expand all', '收起洞察': 'Collapse', '项': 'items',
+  '性能体检': 'Health Check', '平均首字': 'Avg TTFT', '首个 token 延迟': 'time to first token', '生成速率': 'Gen Speed',
+  '错误率': 'Error Rate', '失败 / 全部': 'failed / total', '峰值上下文': 'Peak Context', '压缩前最高': 'pre-compact max', '工具调用': 'Tool Calls', '累计': 'total',
+  '次': 'calls',
+  '厂商配额': 'Provider Quotas', '来源构成': 'By Provider', '模型分布': 'By Model', '常用工具': 'Top Tools',
+  '最活跃会话（Top 5）': 'Most Active Sessions (Top 5)', '会话': 'Session', '请求数': 'Requests', 'token 合计': 'Total Tokens',
+  '最后活动': 'Last Active', '会话数': 'Sessions', '近 7 天': '7-Day', '项目': 'Project', '平均 tok/s': 'Avg tok/s',
+  '平均首字': 'Avg TTFT', '失败率': 'Fail Rate', '平均产出': 'Avg Output', '输入 token M': 'Input Tokens',
+  '时间': 'Time', '类型': 'Type', '状态': 'Status', '输入': 'Input', '生成': 'Output', '缓存率': 'Cache %',
+  '日期': 'Date', '请求': 'Requests', '缓存命中': 'Cache Hit', '每月汇总': 'Monthly', '每日明细': 'Daily Detail', '月份': 'Month',
+  '健康': 'Health', '压缩': 'Compact', '折算成本': 'Cost', '耗时': 'Duration',
+  '当前筛选下暂无数据': 'No data for current filters', '暂无数据': 'No data',
+  '点击表头排序，筛选条件在上方全局生效；点击行可展开会话详情。': 'Click headers to sort; filters above apply globally; click a row to expand session details.',
+  '点击表头排序；点击任意请求行可展开该请求的完整信息。': 'Click headers to sort; click any request row to expand its full details.',
+  '● 完成': '● Done', '● 失败': '● Failed', '● 已取消': '● Cancelled', '● 进行中': '● Running', '● 未知': '● Unknown',
+  '主会话': 'Main', '子代理': 'Subagent', '其他': 'Other',
+  '本轮用量': 'This Turn', '更新': 'updated', '截至': 'as of', '缓存': 'cache',
+  '搜索会话 / 模型 / 来源…': 'Search sessions / models / providers…'
+};
+var I18N_LANG = 'zh';
+try {
+  I18N_LANG = localStorage.getItem('ud-lang') || ((navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+} catch (e) { I18N_LANG = (navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
+function t(s) { return I18N_LANG === 'en' && I18N_EN[s] ? I18N_EN[s] : s; }
+// 静态 HTML 区的 DOM 文本翻译：boot 前对精确匹配的文本节点与 placeholder/title 属性做一次替换
+(function () {
+  if (I18N_LANG !== 'en') return;
+  var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  var nodes = [], n;
+  while ((n = walker.nextNode())) {
+    var v = n.nodeValue.trim();
+    if (v && I18N_EN[v]) nodes.push([n, n.nodeValue.replace(v, I18N_EN[v])]);
+  }
+  nodes.forEach(function (x) { x[0].nodeValue = x[1]; });
+  Array.prototype.forEach.call(document.querySelectorAll('[placeholder],[title]'), function (el) {
+    ['placeholder', 'title'].forEach(function (a) {
+      var v = el.getAttribute(a);
+      if (v && I18N_EN[v.trim()]) el.setAttribute(a, I18N_EN[v.trim()]);
+    });
+  });
+})();
+
 function __usageBoot(D) {
   // 模型名归一：同一模型可能以多种大小写形态入库（GLM-5.3-Flash / glm-5.3-flash），
   // 不合并会把同模型拆成多行、模型筛选也分裂。建索引前就地合并：lower 相同的形态
@@ -459,6 +526,8 @@ function __usageBoot(D) {
     (D.rows || []).forEach(function (r) { r[2] = remap[r[2]] != null ? remap[r[2]] : r[2]; });
   })();
   var PV = D.providers || [], MD = D.models || [], TL = D.sessions || [], R = D.rows || [];
+  var PVNAME = D.providerNames || {}; // BYOK 真名映射（id → 显示名），pvLabel 与文本筛选共用
+  var PVNAME_PV = PV.map(function (id) { return PVNAME[id] || id; });
   var TOOLS = D.tools || [], SD = D.sessionDirs || [];
   var PRICE = (D.prices && typeof D.prices === 'object') ? D.prices : null;
   var PMODELS = PRICE && PRICE.models && typeof PRICE.models === 'object' ? PRICE.models : PRICE;
@@ -484,9 +553,9 @@ function __usageBoot(D) {
       + '\n仅统计该 session_id 的记录。';
   }
 
-  var STAT = ['完成', '失败', '已取消', '进行中'];
+  var STAT = [t('完成'), t('失败'), t('已取消'), t('进行中')];
   var SCOLOR = ['var(--green)', 'var(--red)', 'var(--yellow)', 'var(--blue)'];
-  var QT = ['主会话', '子代理', '系统'];
+  var QT = [t('主会话'), t('子代理'), t('系统')];
   // tok/s：生成 = 输出+思考；生成耗时 ≈ 总耗时 - 首字（首字缺失按总耗时近似）
   function tpsOf(r) {
     var gen = Math.max(1, N(r[7]) - (r[11] == null ? 0 : N(r[11])));
@@ -553,7 +622,7 @@ function __usageBoot(D) {
       return esc(PV_CN[id] || id);
     }
     // BYOK 自定义接入（如 new-provider）：用 provider_config.json 里的 providerName 显示
-    return esc((D.providerNames || {})[raw] || raw);
+    return esc(PVNAME[raw] || raw);
   }
   function pvTag(p) { return /^account:/.test(String(PV[p] || '')) ? '官方账号' : '自定义接入'; }
 
@@ -674,7 +743,7 @@ function __usageBoot(D) {
   (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [] }; });
   (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
-  var st = { p: -1, m: -1, s: -1, rng: 'today', day: null, proj: null, hidePv: {} };
+  var st = { p: -1, m: -1, s: -1, rng: 'today', day: null, proj: null, q: '', hidePv: {} };
   var sortS = { k: 4, d: -1 }, sortD = { k: 0, d: -1 };
   var page = 1, pageSize = 50, sessShown = 50, detailStat = -1, curMetric = 'req', costOn = false;
   var heatMode = 'hour', heatLastW = -1, sessExp = -1, detExp = -1;
@@ -683,16 +752,30 @@ function __usageBoot(D) {
   function cutOf() {
     if (st.rng === 'all') return 0;
     if (st.rng === 'today') { var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+    if (st.rng === 'yday') { var d2 = new Date(); d2.setHours(0, 0, 0, 0); return d2.getTime() - 864e5; }
     return maxTs - (st.rng === '7' ? 7 : 30) * 864e5;
   }
+  // 「昨天」是有上界的区间：[昨天 0 点, 今天 0 点)；其余档位只有下界
+  function cutTo() {
+    if (st.rng !== 'yday') return 0;
+    var d = new Date(); d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
   function frows(ignorePv) {
-    var cut = cutOf();
+    var cut = cutOf(), cutUp = cutTo();
+    var q = (st.q || '').toLowerCase();
     return R.filter(function (r) {
       if (!ignorePv && st.p >= 0 && r[3] !== st.p) return false;
       if (st.m >= 0 && r[2] !== st.m) return false;
       if (st.s >= 0 && r[0] !== st.s) return false;
       if (st.day && dayKey(r[1]) !== st.day) return false;
       if (cut && r[1] < cut) return false;
+      if (cutUp && r[1] >= cutUp) return false;
+      if (q) {
+        // 文本筛选：会话标题 / 模型名 / 来源显示名（含 BYOK 真名）大小写不敏感包含
+        var hay = (TL[r[0]] || '') + '\n' + (MD[r[2]] || '') + '\n' + (PVNAME_PV[r[3]] || PV[r[3]] || '');
+        if (hay.toLowerCase().indexOf(q) < 0) return false;
+      }
       return true;
     });
   }
@@ -798,10 +881,12 @@ function __usageBoot(D) {
       return '<div class="ud-fact"><span class="fdot" style="background:' + (C[ac] || C.gray) + '"></span><span class="fl">' + l + '</span><span class="fv">' + v + (s ? '<span class="fs">' + s + '</span>' : '') + '</span></div>';
     }
     var items = [];
-    // 今日 vs 昨日环比徽章（quota-peek 式：上涨红 / 下降绿 / ±10% 平稳灰）。
-    // 用全量 R 而非筛选后的 rows：默认筛选是「今天」，昨天的行会被滤掉，环比就没了基准
+    // 用量首项（quota-peek 式环比徽章：上涨红 / 下降绿 / ±10% 平稳灰）。
+    // 用全量 R 而非筛选后的 rows：默认筛选是「今天」，昨天的行会被滤掉，环比就没了基准。
+    // 档位语义：today=今日 vs 昨日；yday=昨日 vs 前日；其余档位显示筛选期总量（无环比）
     (function () {
       var t0 = new Date(new Date().toDateString()).getTime();
+      if (st.rng === 'yday') t0 -= 864e5; // 「昨天」档：对比窗口整体平移一天
       var y0 = t0 - 864e5;
       var today = 0, yest = 0, todayC = 0, yestC = 0;
       R.forEach(function (r) {
@@ -811,15 +896,32 @@ function __usageBoot(D) {
       });
       if (today > 0 || yest > 0) {
         var badge = '';
-        if (yest > 0) {
+        if (yest > 0 && (st.rng === 'today' || st.rng === 'yday')) {
           var pct = Math.round((today - yest) / yest * 100);
           if (pct >= 10) badge = '<span class="ud-badge up">↑ ' + pct + '%</span>';
           else if (pct <= -10) badge = '<span class="ud-badge down">↓ ' + Math.abs(pct) + '%</span>';
           else badge = '<span class="ud-badge flat">→ 平稳</span>';
         }
-        items.push(row('今日用量', fmt(today) + ' tok ' + badge, 'gold',
-          (yestC > 0 ? '昨日 ' + fmtCost(yestC) : '')));
+        var rngLabel = { today: '今日用量', yday: '昨日用量', '7': '近 7 天用量', '30': '近 30 天用量', all: '累计用量' }[st.rng] || '今日用量';
+        var prevLabel = st.rng === 'yday' ? '前日 ' : '昨日 ';
+        items.push(row(rngLabel, fmt(today) + ' tok ' + badge, 'gold',
+          (yestC > 0 && (st.rng === 'today' || st.rng === 'yday') ? prevLabel + fmtCost(yestC) : '')));
       }
+    })();
+    // 今日预算进度（设了日预算才显示）：恒按「今天」全量口径（不随筛选变化），阈值色呼应告警 80%/100%
+    (function () {
+      var bd = N(D.budgetDaily);
+      if (!(bd > 0)) return;
+      var t0 = new Date(new Date().toDateString()).getTime();
+      var c = 0, hasCost = false;
+      R.forEach(function (r) {
+        if (r[1] >= t0) { var x = rowCost(r); if (x != null) { c += x; hasCost = true; } }
+      });
+      if (!hasCost || c <= 0) return;
+      var pct = Math.min(999, Math.round(c / bd * 100));
+      var color = pct >= 100 ? 'red' : pct >= 80 ? 'gold' : 'green';
+      var sub = N(D.budgetMonthly) > 0 ? '月预算 ' + CURSYM + N(D.budgetMonthly).toFixed(0) : '达 80% / 100% 时系统提醒';
+      items.push(row('今日预算', CURSYM + (c >= 100 ? Math.round(c) : c.toFixed(2)) + ' / ' + CURSYM + bd.toFixed(0) + ' · ' + pct + '%', color, sub));
     })();
     items.push(row('活跃天数', days.length + ' 天', 'blue'));
     items.push(row('连续活跃', cur + ' 天', 'blue', '最长 ' + longest));
@@ -937,7 +1039,7 @@ function __usageBoot(D) {
     if (peakCtx > 0) out += hrow('峰值上下文', fmt(peakCtx), 'purple', '压缩前最高');
     var toolMs = 0, toolC = 0;
     (D.sessionTools || []).forEach(function (t) { toolC += N(t[2]); toolMs += N(t[3]); });
-    if (toolC) out += hrow('工具调用', fmtI(toolC) + ' 次', 'gray', '累计 ' + (toolMs / 1000).toFixed(0) + ' s');
+    if (toolC) out += hrow('工具调用', fmtI(toolC) + ' 次', 'gray', '累计 ' + fmtDur(toolMs));
     host.innerHTML = out;
   }
 
@@ -1017,7 +1119,7 @@ function __usageBoot(D) {
       var last = vals[6];
       return '<svg width="' + W + '" height="' + Hh + '" style="display:block" role="img" aria-label="近 7 天趋势"><polyline points="' + pts + '" fill="none" stroke="var(--ud-accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity=".85"/><circle cx="' + W + '" cy="' + (Hh - 2 - (Hh - 5) * last / mx).toFixed(1) + '" r="2.2" fill="var(--ud-accent)"/></svg>';
     }
-    $('ud-top-sessions').innerHTML = list.length ? '<div class="table-responsive"><table class="table table-sm" style="min-width:520px;margin:0"><thead><tr><th>会话</th><th class="text-end">请求数</th><th class="text-end">token 合计</th><th>近 7 天</th><th class="text-end">最后活动</th></tr></thead><tbody>' +
+    $('ud-top-sessions').innerHTML = list.length ? '<div class="table-responsive"><table class="table table-sm" style="min-width:520px;margin:0"><thead><tr><th>' + t('会话') + '</th><th class="text-end">' + t('请求数') + '</th><th class="text-end">' + t('token 合计') + '</th><th>' + t('近 7 天') + '</th><th class="text-end">' + t('最后活动') + '</th></tr></thead><tbody>' +
       list.map(function (o) {
         return '<tr class="ud-click" data-sg="' + o.g + '" title="点击查看会话详情"><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td>' + spark(o.g) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="text-muted">当前筛选下暂无数据</p>';
@@ -1544,12 +1646,12 @@ function __usageBoot(D) {
       .sort(function (a, b) { return ((a[keys[sortS.k]] || 0) - (b[keys[sortS.k]] || 0)) * sortS.d; });
     var hasCmp = (D.compactions || []).length > 0;
     var cols = [
-      { h: '会话', k: null }, { h: '请求数', k: 1, end: 1 }, { h: '输入 token', k: 2, end: 1 },
-      { h: '生成 token', k: 3, end: 1 }, { h: 'token 合计', k: 4, end: 1 },
-      { h: '缓存率', k: 7, end: 1 }, { h: '健康', k: 8, end: 1 },
-      hasCmp ? { h: '压缩', k: null, end: 1 } : null,
-      costOn ? { h: '折算成本', k: 6, end: 1 } : null,
-      { h: '最后活动', k: 5, end: 1 }
+      { h: t('会话'), k: null }, { h: t('请求数'), k: 1, end: 1 }, { h: t('输入 token'), k: 2, end: 1 },
+      { h: t('生成 token'), k: 3, end: 1 }, { h: t('token 合计'), k: 4, end: 1 },
+      { h: t('缓存率'), k: 7, end: 1 }, { h: t('健康'), k: 8, end: 1 },
+      hasCmp ? { h: t('压缩'), k: null, end: 1 } : null,
+      costOn ? { h: t('折算成本'), k: 6, end: 1 } : null,
+      { h: t('最后活动'), k: 5, end: 1 }
     ].filter(Boolean);
     var span = cols.length;
     $('ud-sessions-head').innerHTML = '<tr>' + cols.map(function (c) {
@@ -1867,8 +1969,8 @@ function __usageBoot(D) {
       var hit2 = o.inn ? Math.round(o.ca / o.inn * 100) : 0;
       return '<tr><td class="text-nowrap">' + mk + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + fmt(o.inn) + '</td><td class="text-end tabular-nums">' + fmt(o.out) + '</td><td class="text-end tabular-nums">' + fmt(o.ca) + '</td><td class="text-end tabular-nums">' + hit2 + '%</td>' + (o.hasCost ? '<td class="text-end tabular-nums">' + fmtCost(o.cost) + '</td>' : '') + '</tr>';
     }).join('');
-    $('ud-daily-wrap').innerHTML = '<h3 style="margin-top:18px">每日明细</h3><div class="table-responsive" style="max-height:420px;overflow:auto"><table class="table table-sm"><thead><tr><th>日期</th><th class="text-end">请求</th><th class="text-end">输入</th><th class="text-end">生成</th><th class="text-end">缓存读</th><th class="text-end">缓存命中</th><th class="text-end">生成速率</th></tr></thead><tbody>' + dayRows.join('') + '</tbody></table></div>' +
-      '<h3 style="margin-top:18px">每月汇总</h3><div class="table-responsive"><table class="table table-sm"><thead><tr><th>月份</th><th class="text-end">请求</th><th class="text-end">输入</th><th class="text-end">生成</th><th class="text-end">缓存读</th><th class="text-end">缓存命中</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '</tr></thead><tbody>' + mRows + '</tbody></table></div>';
+    $('ud-daily-wrap').innerHTML = '<h3 style="margin-top:18px">' + t('每日明细') + '</h3><div class="table-responsive" style="max-height:420px;overflow:auto"><table class="table table-sm"><thead><tr><th>' + t('日期') + '</th><th class="text-end">' + t('请求') + '</th><th class="text-end">' + t('输入') + '</th><th class="text-end">' + t('生成') + '</th><th class="text-end">' + t('缓存读') + '</th><th class="text-end">' + t('缓存命中') + '</th><th class="text-end">' + t('生成速率') + '</th></tr></thead><tbody>' + dayRows.join('') + '</tbody></table></div>' +
+      '<h3 style="margin-top:18px">' + t('每月汇总') + '</h3><div class="table-responsive"><table class="table table-sm"><thead><tr><th>' + t('月份') + '</th><th class="text-end">' + t('请求') + '</th><th class="text-end">' + t('输入') + '</th><th class="text-end">' + t('生成') + '</th><th class="text-end">' + t('缓存读') + '</th><th class="text-end">' + t('缓存命中') + '</th>' + (costOn ? '<th class="text-end">折算成本</th>' : '') + '</tr></thead><tbody>' + mRows + '</tbody></table></div>';
     Array.prototype.forEach.call($('ud-daily-wrap').querySelectorAll('tr.ud-click'), function (tr) {
       tr.addEventListener('click', function () {
         var d = tr.getAttribute('data-day');
@@ -1961,6 +2063,13 @@ function __usageBoot(D) {
   })();
   $('ud-f-pv').addEventListener('change', function () { st.p = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
   $('ud-f-model').addEventListener('change', function () { st.m = +this.value; page = 1; sessExp = -1; detExp = -1; apply(); });
+  // 文本筛选：200ms 防抖（大数据集下每次按键全量 filter）
+  var qTimer = null;
+  $('ud-f-q').addEventListener('input', function () {
+    clearTimeout(qTimer);
+    var v = this.value;
+    qTimer = setTimeout(function () { st.q = v; page = 1; sessExp = -1; detExp = -1; apply(); }, 200);
+  });
   $('ud-f-stat').addEventListener('change', function () { detailStat = +this.value; page = 1; renderDetail(frows(false)); });
   $('ud-f-cost').addEventListener('change', function () { costOn = this.checked; renderProviders(frows(true)); renderSessions(frows(false)); renderInsights(frows(false)); renderDetail(frows(false)); });
   Array.prototype.forEach.call(document.querySelectorAll('#ud-f-range .ud-toggle'), function (b) {
@@ -2064,6 +2173,12 @@ function __usageBoot(D) {
       '<button type="button" class="btn" id="ud-mgr-bsave" style="margin:0;padding:2px 10px;font-size:12px">保存预算</button>' +
       '</div>' +
       '<div class="ud-mgr-h">通知（macOS 系统通知，全部本地计算、零模型开销）</div>' +
+      '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">界面语言 / Language</div><div class="ud-mgr-sub" style="margin:1px 0 0">切换后本地面板立即生效；侧栏面板重新打开后生效</div></div>' +
+      '<select class="form-select form-select-sm" id="ud-mgr-lang" style="width:auto;flex:none">' +
+      '<option value=""' + (langPref === '' ? ' selected' : '') + '>跟随系统 / Auto</option>' +
+      '<option value="zh"' + (langPref === 'zh' ? ' selected' : '') + '>中文</option>' +
+      '<option value="en"' + (langPref === 'en' ? ' selected' : '') + '>English</option>' +
+      '</select></div>' +
       swRow('ud-sw-permission', '权限等待提醒', 'Agent 弹出批准请求时通知你——挂机跑长任务不漏确认', sw.permissionAlerts === true) +
       swRow('ud-sw-budget', '预算 / 燃烧告警', '日折算成本达预算 80% / 100% 时提醒；今日用量超近 7 天日均 50% 也会提示', sw.budgetAlerts !== false) +
       '<div class="ud-sw-row"><div><div style="font-size:13px;font-weight:500">每轮用量统计</div><div class="ud-mgr-sub" style="margin:1px 0 0">每轮回合结束弹通知显示本轮速率 / 缓存率 / 耗时（不进入对话上下文）。选「关」时统计仍显示在侧栏面板顶部横幅</div></div>' +
@@ -2130,6 +2245,21 @@ function __usageBoot(D) {
     $('ud-sw-permission').addEventListener('change', function () { postSwitch({ permissionAlerts: this.checked }); });
     $('ud-sw-budget').addEventListener('change', function () { postSwitch({ budgetAlerts: this.checked }); });
     $('ud-sw-turnstats').addEventListener('change', function () { postSwitch({ turnstats: this.value }); });
+    // 界面语言：localStorage 持久化（'' = 跟随系统）；serve 模式整页 reload 即时生效，
+    // 侧栏/file 模式 boot 不可重入，提示重开面板生效
+    var langPref = '';
+    try { langPref = localStorage.getItem('ud-lang') || ''; } catch (e) {}
+    $('ud-mgr-lang').addEventListener('change', function () {
+      var v = this.value;
+      try { localStorage.setItem('ud-lang', v); } catch (e) {}
+      if (window.__USAGE_SERVE__) location.reload();
+      else {
+        var tip = document.createElement('span');
+        tip.className = 'ud-tag';
+        tip.textContent = I18N_LANG === 'en' ? 'Reopen the panel to apply' : '重新打开面板后生效';
+        this.replaceWith(tip);
+      }
+    });
     // 厂商配额 Key：只提交有输入的项；已配置项保持输入框为空即不变更
     $('ud-mgr-vsave').addEventListener('click', function () {
       var keys = {};
@@ -2415,11 +2545,11 @@ function __usageBoot(D) {
     if (!reqs) return '';
     var parts = ['本轮用量'];
     if (genMs > 0) parts.push('⚡ ' + Math.round(gen / genMs * 1000) + ' tok/s');
-    parts.push('输入 ' + fmt(miss + ca) + ' tok（缓存 ' + (miss + ca ? Math.round(ca / (miss + ca) * 100) : 0) + '%）');
-    if (gen > 0) parts.push('生成 ' + fmtI(gen) + ' tok');
-    parts.push(fmtI(reqs) + ' 次请求');
-    if (durMs > 0) parts.push('本轮 ' + fmtDur(durMs));
-    return parts.join(' · ') + '（截至 ' + pad(new Date(lastTs).getHours()) + ':' + pad(new Date(lastTs).getMinutes()) + ' 数据）';
+    parts.push(t('输入') + ' ' + fmt(miss + ca) + ' tok (' + t('缓存') + ' ' + (miss + ca ? Math.round(ca / (miss + ca) * 100) : 0) + '%)');
+    if (gen > 0) parts.push(t('生成') + ' ' + fmtI(gen) + ' tok');
+    parts.push(fmtI(reqs) + ' ' + t('次'));
+    if (durMs > 0) parts.push(fmtDur(durMs));
+    return parts.join(' · ') + ' (' + t('截至') + ' ' + pad(new Date(lastTs).getHours()) + ':' + pad(new Date(lastTs).getMinutes()) + ')';
   };
   window.__usageBootDone = true;
 }

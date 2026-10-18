@@ -57,8 +57,8 @@ class PerfEscapeTest(unittest.TestCase):
         # \u003c 是合法 JSON 转义：抽出的 DATA 必须能被 JSON.parse 无损还原
         html = self.out.read_text()
         start = html.index("const DATA =") + len("const DATA =")
-        end = html.index(";\nfunction __usageBoot")
-        data = json.loads(html[start:end].strip())
+        end = html.index("// ===== i18n 基础设施")
+        data = json.loads(html[start:end].strip().rstrip(";"))
         # 含 < 的会话标题语义无损（JSON 解析后还原为 <）
         self.assertTrue(any("<2GB" in t for t in data["sessions"]))
         self.assertEqual(len(data["rows"]), 30000)
