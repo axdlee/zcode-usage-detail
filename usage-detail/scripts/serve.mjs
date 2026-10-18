@@ -61,6 +61,7 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
     'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
     'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
     'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
+    'sessionIds',(SELECT json_group_array(v) FROM (SELECT v,i FROM S ORDER BY i)),
     'sessionDirs',(SELECT json_group_array(coalesce(se.directory,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
     'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
     'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
@@ -190,6 +191,29 @@ function readLangPref() {
 function writeLangPref(v) {
   atomicWrite(LANG_FILE, JSON.stringify({ language: v === 'zh' || v === 'en' ? v : '' }) + '\n');
 }
+// 上下文 Top 下钻（按会话按需查询，不随 dashboard 全量内嵌）：
+// 工具字节 Top（part type=tool 按工具聚合）+ 文件字节 Top（Read/Edit/Write 的 file_path 参数聚合）。
+// 口径与构成环一致（part 存储字节近似）。老库无 part 表时 prepare 抛错，返回空表。
+const CTX_TOP_SQL = `WITH P AS (SELECT data FROM part WHERE session_id = ?)
+  SELECT
+    (SELECT COALESCE(json_group_array(json_array(t.tool, t.c, t.b)),'[]') FROM (
+       SELECT json_extract(data,'$.tool') AS tool, count(*) AS c, sum(length(data)) AS b
+       FROM P WHERE json_extract(data,'$.type')='tool' GROUP BY 1 ORDER BY b DESC LIMIT 8) t) AS tools,
+    (SELECT COALESCE(json_group_array(json_array(f.path, f.c, f.b)),'[]') FROM (
+       SELECT json_extract(data,'$.state.input.file_path') AS path, count(*) AS c, sum(length(data)) AS b
+       FROM P WHERE json_extract(data,'$.type')='tool'
+         AND json_extract(data,'$.tool') IN ('Read','Edit','Write')
+         AND json_extract(data,'$.state.input.file_path') IS NOT NULL
+       GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files`;
+function ctxTop(sid) {
+  sid = String(sid || '').slice(0, 128);
+  if (!sid) return { tools: [], files: [] };
+  try {
+    const row = db.prepare(CTX_TOP_SQL).get(sid);
+    const j = (v) => { try { return JSON.parse(v) || []; } catch (e) { return []; } };
+    return { tools: j(row && row.tools), files: j(row && row.files) };
+  } catch (e) { return { tools: [], files: [] }; } // 老库无 part 表
+}
 function readBudget() {
   try { return JSON.parse(stripBom(fs.readFileSync(budgetPath(), 'utf8'))); } catch (e) { return { daily: 0, monthly: 0 }; }
 }
@@ -245,7 +269,7 @@ function dataJSON(limit) {
   // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table。
   // 注意消费方按字符串处理（res.end(dataJSON())），必须 stringify
   if (q("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
-    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, userLang: readLangPref(), ctxMix: [], sessionAgents: [], prices: {}, total: 0, covered: 0, rows: [] });
+    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], sessionIds: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, userLang: readLangPref(), ctxMix: [], sessionAgents: [], prices: {}, total: 0, covered: 0, rows: [] });
   }
   // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
   const pp = pricePath();
@@ -524,6 +548,9 @@ const server = http.createServer(async function (req, res) {
     } else if (req.method === 'GET' && u.pathname === '/api/data') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(dataJSON(u.searchParams.get('limit')));
+    } else if (req.method === 'GET' && u.pathname === '/api/ctx') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(ctxTop(u.searchParams.get('session'))));
     } else if (req.method === 'GET' && u.pathname === '/api/quota') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(await quotaJSON()));

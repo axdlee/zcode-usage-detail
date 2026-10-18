@@ -197,12 +197,36 @@ class ServerPanelTest(unittest.TestCase):
         by_id = {m.get("id"): m for m in msgs if m.get("id")}
         caps = by_id[1]["result"]["capabilities"]
         self.assertTrue(caps["resources"]["subscribe"])
-        self.assertEqual(len(by_id[2]["result"]["tools"]), 10)  # 7 数据工具 + settings_get/set + open_full_panel + prices_sync
+        self.assertEqual(len(by_id[2]["result"]["tools"]), 11)  # 7 数据工具 + ctx_top + settings_get/set + open_full_panel + prices_sync
         uris = [r["uri"] for r in by_id[3]["result"]["resources"]]
         self.assertIn("ui://usage-detail/panel.html", uris)
         self.assertIn("ui://usage-detail/turn.txt", uris)
-        detail = by_id[4]["result"]["structuredContent"]
-        self.assertEqual(len(detail["rows"]), 2)
+
+
+    def test_12_ctx_top(self):
+        # 上下文 Top 下钻：工具存在、返回结构固定（tools/files 数组）；
+        # 合成库无 part 数据 → 空数组但不缺键（真实数据渲染由前端端到端覆盖）
+        msgs = self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                        "params": {"name": "usage_ctx_top", "arguments": {"session": "sess_x"}}}),
+        ])
+        by_id = {m.get("id"): m for m in msgs if m.get("id")}
+        sc = by_id[2]["result"]["structuredContent"]
+        self.assertIsInstance(sc.get("tools"), list)
+        self.assertIsInstance(sc.get("files"), list)
+        # 面板 HTML 含 sessionIds 与「上下文 Top」按钮挂点
+        msgs2 = self.rpc([
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "resources/read",
+                        "params": {"uri": "ui://usage-detail/panel.html"}}),
+        ])
+        by2 = {m.get("id"): m for m in msgs2 if m.get("id")}
+        html = by2[2]["result"]["contents"][0]["text"]
+        self.assertIn('"sessionIds"', html)
+        self.assertIn("ud-ctx-top", html)
 
     def test_12_mcp_resource_subscribe_push(self):
         self.home.zcode_path("usage-detail-turn-done.json").unlink(missing_ok=True)

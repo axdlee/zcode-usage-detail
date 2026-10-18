@@ -72,7 +72,7 @@ cmd_dashboard() {
     ULANG=$(node -e "try{const b=JSON.parse(require('fs').readFileSync(require('path').join(process.env.HOME||'', '.zcode', 'usage-lang.json'),'utf8'));const v=String(b.language||'');process.stdout.write(v==='zh'||v==='en'?v:'')}catch(e){process.stdout.write('')}" 2>/dev/null || echo "")
     # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
     if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
-      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"zcodeLocale":"","userLang":"","ctxMix":[],"sessionAgents":[],"prices":{},"total":0,"covered":0,"rows":[]}'
+      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"sessionIds":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"zcodeLocale":"","userLang":"","ctxMix":[],"sessionAgents":[],"prices":{},"total":0,"covered":0,"rows":[]}'
     else
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
@@ -90,6 +90,7 @@ cmd_dashboard() {
         'providers',(SELECT json_group_array(v) FROM (SELECT v,i FROM P ORDER BY i)),
         'models',(SELECT json_group_array(v) FROM (SELECT v,i FROM M ORDER BY i)),
         'sessions',(SELECT json_group_array(coalesce(se.title,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
+    'sessionIds',(SELECT json_group_array(v) FROM (SELECT v,i FROM S ORDER BY i)),
         'sessionDirs',(SELECT json_group_array(coalesce(se.directory,'')) FROM (SELECT v,i FROM S ORDER BY i) SI LEFT JOIN session se ON se.id=SI.v),
         'tools',(SELECT COALESCE(json_group_array(json_array(tool_name, c, f, d)),'[]') FROM (SELECT tool_name, count(*) AS c, sum(status<>'completed') AS f, CAST(round(avg(duration_ms)) AS int) AS d FROM tool_usage $scope GROUP BY tool_name ORDER BY c DESC LIMIT 8)),
         'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
@@ -594,6 +595,10 @@ var I18N_EN = {
   'Token Plan 窗口用量': "Token Plan window usage",
   '重新打开面板后生效': "Reopen the panel to apply",
   '已保存，重新打开面板后生效': "Saved. Reopen the panel to apply",
+  '上下文 Top →': 'Context Top →',
+  '加载中…': "Loading…",
+  '工具字节 Top（存储字节）': 'Tool bytes top (storage bytes)',
+  '文件字节 Top（Read/Edit/Write）': 'File bytes top (Read/Edit/Write)',
   '保存中…': "Saving…",
   '已保存': "Saved",
   '保存 Key': "Save Keys",
@@ -1799,6 +1804,12 @@ function __usageBoot(D) {
       return out;
     })();
     var mixRing = mixItems ? donut(mixItems, tr('上下文构成')) : '<span class="text-muted text-small">' + tr('无分段数据') + '</span>';
+    // 上下文 Top 下钻：按需拉取（serve 走 /api/ctx，侧栏走 usage_ctx_top 工具）；生成页无服务不显示
+    var SID = (typeof D === 'object' && D && D.sessionIds) ? D.sessionIds : [];
+    var canCtxTop = !!(window.__USAGE_SERVE__ || (window.zcode && typeof window.zcode.callTool === 'function'));
+    var ctxTopBtn = (mixItems && canCtxTop && SID[o.g])
+      ? '<button type="button" class="btn ud-ctx-top" data-sid="' + esc(String(SID[o.g])) + '" data-sg="' + o.g + '" style="margin:6px 0 0;padding:2px 10px;font-size:12px">' + tr('上下文 Top →') + '</button><div class="ud-ctx-top-out"></div>'
+      : '';
     var mixNote = mixItems ? '<div class="text-small text-muted" style="margin-top:4px">' + tr('按本地存储字节近似，非模型实际读取的 token 计量') + '</div>' : '';
     // Agent 团队：该会话子代理具名分布（strip zcode- 前缀；'-' 为未知来源）
     var sagRows = SAGENTS.filter(function (x) { return x[0] === o.g && N(x[2]) > 0; })
@@ -1813,7 +1824,7 @@ function __usageBoot(D) {
       : '';
     var ctxRow = (mixItems || sagRows.length)
       ? '<div class="ud-grid3" style="margin-top:14px">' +
-        (mixItems ? '<div><div class="ud-kv-l">' + tr('上下文构成') + '</div>' + mixRing + mixNote + '</div>' : '<div></div>') +
+        (mixItems ? '<div><div class="ud-kv-l">' + tr('上下文构成') + '</div>' + mixRing + mixNote + ctxTopBtn + '</div>' : '<div></div>') +
         (sagRows.length ? '<div style="grid-column:span 2"><div class="ud-kv-l">' + tr('Agent 团队（子代理分布）') + '</div>' + sagHtml + '</div>' : '') +
         '</div>'
       : '';
@@ -2038,6 +2049,41 @@ function __usageBoot(D) {
         var dbtn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-detail"]');
         if (dbtn) dbtn.click();
         apply();
+      });
+      // 上下文 Top 下钻：点击后按需拉取（会话详情是 innerHTML 重渲染，事件挂在表体上）
+      bodyEl.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.ud-ctx-top') : null;
+        if (!btn) return;
+        var out = btn.parentElement.querySelector('.ud-ctx-top-out');
+        if (!out) return;
+        var sid = btn.getAttribute('data-sid');
+        btn.disabled = true; btn.textContent = tr('加载中…');
+        var draw = function (j) {
+          btn.style.display = 'none';
+          var rows2 = function (arr, total, labelFn) {
+            return (arr || []).map(function (x) {
+              var nm = String(x[0] || '');
+              var pct = total > 0 ? Math.round(N(x[2]) / total * 100) : 0;
+              return '<div style="display:flex;justify-content:space-between;gap:8px;max-width:460px" class="text-small">' +
+                '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(nm) + '">' + esc(labelFn(nm)) + '</span>' +
+                '<span class="text-muted tabular-nums" style="flex:none">' + fmtI(N(x[1])) + tr(' 次 · ') + fmtBytes(N(x[2])) + ' · ' + pct + '%</span></div>';
+            }).join('') || '<span class="text-muted text-small">' + tr('暂无数据') + '</span>';
+          };
+          var tt = 0; (j.tools || []).forEach(function (x) { tt += N(x[2]); });
+          var tf = 0; (j.files || []).forEach(function (x) { tf += N(x[2]); });
+          var base = function (p) { return p.replace(/^.*\//, '') || p; };
+          out.innerHTML =
+            '<div class="ud-kv-l" style="margin-top:8px">' + tr('工具字节 Top（存储字节）') + '</div>' + rows2(j.tools, tt, function (n) { return n.replace(/^mcp__/, ''); }) +
+            (tf > 0 ? '<div class="ud-kv-l" style="margin-top:8px">' + tr('文件字节 Top（Read/Edit/Write）') + '</div>' + rows2(j.files, tf, base) : '');
+        };
+        var fail = function () { btn.disabled = false; btn.textContent = tr('上下文 Top →'); };
+        if (window.__USAGE_SERVE__) {
+          fetch('/api/ctx?session=' + encodeURIComponent(sid)).then(function (r) { return r.json(); }).then(draw).catch(fail);
+        } else {
+          try {
+            Promise.resolve(window.zcode.callTool('usage_ctx_top', { session: sid })).then(function (r) { draw((r && r.structuredContent) || {}); }).catch(fail);
+          } catch (e2) { fail(); }
+        }
       });
     }
     Array.prototype.forEach.call($('ud-sessions-head').querySelectorAll('.ud-sortable'), function (th) {
