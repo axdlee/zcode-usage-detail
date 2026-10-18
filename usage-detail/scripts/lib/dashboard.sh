@@ -48,6 +48,11 @@ cmd_dashboard() {
     # turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
     turn_expr="NULL"
     [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'")" == "1" ]] && turn_expr="R.turn_id"
+    # agent / context_exceeded 同为较新列：老库回退（agent 置空显示未知来源，ctx 置 NULL 无超限标注）
+    agent_expr="''"
+    [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'")" == "1" ]] && agent_expr="R.agent"
+    ctx_exc_expr="NULL"
+    [[ "$(qr "SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='context_exceeded'")" == "1" ]] && ctx_exc_expr="R.context_exceeded"
     # BYOK 供应商显示名（provider_config.json，只取名映射）+ 项目根归并（git 仓库根）：
     # node 一次性解析成两个映射表进 META；node/git 不可用或空目录时给空表，前端按原样回退。
     # dirs 走 stdin：Git Bash(MSYS) 会改写 argv 里以 / 开头的路径参数，JSON 清单会被篡改
@@ -65,7 +70,7 @@ cmd_dashboard() {
     [[ "$ZLOC" =~ ^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$ ]] || ZLOC=''
     # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
     if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
-      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"zcodeLocale":"","prices":{},"total":0,"covered":0,"rows":[]}'
+      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"zcodeLocale":"","ctxMix":[],"sessionAgents":[],"prices":{},"total":0,"covered":0,"rows":[]}'
     else
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
@@ -88,7 +93,9 @@ cmd_dashboard() {
         'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
         'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM U),
         'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM U GROUP BY hr)),
-        'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+        'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts), json(c.triggers))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts, json_group_array(COALESCE(json_extract(p.data,'$.trigger'),'manual') || '/' || COALESCE(json_extract(p.data,'$.phase'),'')) AS triggers FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+        'ctxMix',(SELECT COALESCE(json_group_array(json_array(SI.i, m.t, m.b)),'[]') FROM (SELECT p.session_id AS sid, json_extract(p.data,'$.type') AS t, sum(length(p.data)) AS b FROM part p WHERE p.session_id IN (SELECT DISTINCT session_id FROM R) AND p.session_id IS NOT NULL GROUP BY p.session_id, json_extract(p.data,'$.type')) m LEFT JOIN S SI ON SI.v = m.sid WHERE SI.i IS NOT NULL),
+        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT session_id AS sid, COALESCE(${agent_expr},'-') AS agent, count(*) AS c, sum(input_tokens+output_tokens+reasoning_tokens) AS tok FROM R WHERE query_source='subagent' GROUP BY session_id, 2) a LEFT JOIN S SI ON SI.v = a.sid WHERE SI.i IS NOT NULL),
         'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
         'providerNames', json_extract(json('$PMETA'),'$.providerNames'),
@@ -115,7 +122,7 @@ cmd_dashboard() {
                   R.duration_ms,
                   CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
                   CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${turn_expr}))
+                  R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${turn_expr}, ${ctx_exc_expr}))
                 FROM R
                 LEFT JOIN S SI ON SI.v = R.session_id
                 LEFT JOIN M MI ON MI.v = R.model_id
@@ -636,6 +643,23 @@ var I18N_EN = {
   '近 7 天，每天按 0–23 时切分；着色深浅按该小时 token 用量，悬停查看明细。': 'Last 7 days split into 0–23h slots; darker means more tokens in that hour. Hover for details.',
   '每日自动同步模型价': 'Auto-sync model prices daily',
   '共 N 个事件': 'N events in total',
+  '上下文构成': 'Context Composition',
+  '对话文本': 'Conversation text',
+  '思考': 'Reasoning',
+  '工具调用与结果': 'Tool calls & results',
+  '步骤骨架': 'Step skeleton',
+  '附件': 'Attachments',
+  '元数据与其他': 'Metadata & other',
+  '按本地存储字节近似，非模型实际读取的 token 计量': 'Approximated by local storage bytes, not the tokens actually read by the model',
+  '无分段数据': 'No part data',
+  'Agent 团队（子代理分布）': 'Agent team (subagent breakdown)',
+  '未知来源': 'Unknown',
+  '（': ' (',
+  '）': ')',
+  '自动': 'auto',
+  '手动': 'manual',
+  '超出窗口': 'over window',
+  ' · 已超上下文窗口 · 输入 ': ' · over context window · input ',
   '按请求输入 token 近似 · 峰值 ': 'Approx. per-request input tokens · peak ',
   '压缩事件 ': 'Compact event ',
   '压缩事件': 'Compact events',
@@ -784,6 +808,8 @@ function __usageBoot(D) {
   var PVNAME = D.providerNames || {}; // BYOK 真名映射（id → 显示名），pvLabel 与文本筛选共用
   var PVNAME_PV = PV.map(function (id) { return PVNAME[id] || id; });
   var TOOLS = D.tools || [], SD = D.sessionDirs || [];
+  var CTXMIX = D.ctxMix || [];   // 上下文构成（按 part 存储字节近似）：[session索引, part类型, 字节]
+  var SAGENTS = D.sessionAgents || []; // 子代理具名分布：[session索引, agent, 请求数, token]
   var PRICE = (D.prices && typeof D.prices === 'object') ? D.prices : null;
   var PMODELS = PRICE && PRICE.models && typeof PRICE.models === 'object' ? PRICE.models : PRICE;
   var CURSYM = (function () {
@@ -976,6 +1002,7 @@ function __usageBoot(D) {
     return base * tierMult(r[1], p.tariff);
   }
   function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : N(mb) + ' MB'; }
+  function fmtBytes(b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : b >= 1024 ? (b / 1024).toFixed(1) + ' KB' : N(b) + ' B'; } // 构成环口径（存储字节）
   // 项目名：取最后一段目录名，兼容 Windows 反斜杠与 POSIX 斜杠（尾分隔符、盘符根都安全）
   function baseName(dir) {
     var parts = String(dir || '').split(/[\\/]+/).filter(Boolean);
@@ -1007,7 +1034,7 @@ function __usageBoot(D) {
   var maxTs = 0;
   R.forEach(function (r) { if (r[1] > maxTs) maxTs = r[1]; });
   var cmpMap = {}, toolsMap = {};
-  (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [] }; });
+  (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [], trg: c[4] || [] }; });
   (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
 
   var st = { p: -1, m: -1, s: -1, rng: 'today', day: null, proj: null, q: '', hidePv: {} };
@@ -1622,7 +1649,10 @@ function __usageBoot(D) {
     var cmpHtml = cm ? tr('压缩 ') + cm.cnt + tr(' 次 · 压缩前水位最高 ') + fmt(cm.pre) + ' token' : tr('无压缩记录');
     // 事件时间线：压缩事件（META 带时间）+ 模型切换（相邻请求模型变化推导），按时间归并
     var events = [];
-    (cm ? cm.ts : []).forEach(function (t) { events.push({ t: t, label: tr('上下文压缩') }); });
+    (cm ? cm.ts : []).forEach(function (t, i) {
+      var trig = cm.trg && cm.trg[i] ? String(cm.trg[i]).replace(/^auto\//, tr('自动') + '/').replace(/^manual\//, tr('手动') + '/').replace(/\/$/, '') : '';
+      events.push({ t: t, label: tr('上下文压缩') + (trig ? tr('（') + trig + tr('）') : ''), cls: 'ud-tl-c' });
+    });
     var prevM = -1;
     rs.forEach(function (r) {
       if (prevM !== -1 && r[2] !== prevM) {
@@ -1635,7 +1665,7 @@ function __usageBoot(D) {
     var tl8 = events.length
       ? '<div class="ud-sec"><div class="ud-kv-l">' + tr('事件时间线') + '</div><div class="ud-timeline">' +
         events.slice(-12).map(function (e) {
-          var cls = e.label.indexOf(tr('压缩')) >= 0 ? 'ud-tl-c' : 'ud-tl-m';
+          var cls = e.cls || (e.label.indexOf(tr('压缩')) >= 0 ? 'ud-tl-c' : 'ud-tl-m');
           return '<div class="ud-tl-item"><span class="ud-tl-dot ' + cls + '"></span><span class="ud-tl-t">' + esc(e.t) + '</span><span class="ud-tl-x">' + esc(e.label) + '</span></div>';
         }).join('') +
         (events.length > 12 ? '<div class="ud-tl-item"><span class="ud-tl-dot ud-tl-more"></span><span class="ud-tl-t">…</span><span class="ud-tl-x text-muted">' + tr('共 N 个事件').replace('N', events.length) + '</span></div>' : '') +
@@ -1682,9 +1712,11 @@ function __usageBoot(D) {
       var tt = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
       var st = r[8] === 0 ? tr('完成') : r[8] === 1 ? tr('失败') : r[8] === 2 ? tr('已取消') : tr('进行中');
       var tip = '<title>' + esc(tt) + tr(' · 输入 ') + fmt(N(r[4])) + tr(' tok · 生成 ') + fmt(N(r[5])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + turnLabel + (r[9] === 1 ? tr(' · 子代理') : '') + '</title>';
-      if (r[9] === 1) { subDots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.2 : 3.2) + '" fill="var(--viz-series-2)" fill-opacity="0.9">' + tip + '</circle>'); return; }
+      var over = r[15] === 1 || r[15] === true;
+      if (over) tip = '<title>' + esc(tt) + tr(' · 已超上下文窗口 · 输入 ') + fmt(N(r[4])) + ' tok · ' + esc(MD[r[2]] || '?') + ' · ' + st + turnLabel + '</title>';
+      if (r[9] === 1) { subDots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.2 : 3.2) + '" fill="' + (over ? 'var(--red)' : 'var(--viz-series-2)') + '" fill-opacity="0.9">' + tip + '</circle>'); return; }
       pts.push(x.toFixed(1) + ',' + y.toFixed(1));
-      dots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.4 : 3.4) + '" fill="var(--viz-series-1)" fill-opacity="0.85">' + tip + '</circle>');
+      dots.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (rs.length > 60 ? 2.4 : 3.4) + '" fill="' + (over ? 'var(--red)' : 'var(--viz-series-1)') + '" fill-opacity="0.85">' + tip + '</circle>');
     });
     // 压缩事件：按时间对齐到最近的请求位置，虚线竖线标注
     var cmpMarks = '';
@@ -1718,16 +1750,62 @@ function __usageBoot(D) {
       '<span class="text-small text-muted" style="position:absolute;right:0;top:0;text-align:right">' + esc(endT) + '</span>' +
       '<div style="padding-top:16px">' + curve + '</div></div>';
     var hasSub = subReq > 0;
+    var hasOver = rs.some(function (r) { return r[15] === 1 || r[15] === true; });
     var curveHead = '<div class="ud-kv-l" style="margin:2px 0 2px">' + tr('按请求输入 token 近似 · 峰值 ') + fmt(maxIn) +
       (ctxLimit ? tr(' · 占 ') + esc(MD[domModel]) + tr(' 窗口 ') + Math.round(maxIn / ctxLimit * 100) + tr('%（上限 ') + fmt(ctxLimit) + '）' : '') +
       tr(' · 悬停看点明细') + (hasSub ? ' · <span style="color:var(--viz-series-2)">●</span> 子代理为独立上下文（散点）' : '') +
-      (cm ? ' · <span style="color:var(--yellow)">┆</span> ' + tr('压缩事件') : '') + '</div>';
+      (cm ? ' · <span style="color:var(--yellow)">┆</span> ' + tr('压缩事件') : '') +
+      (hasOver ? ' · <span style="color:var(--red)">●</span> ' + tr('超出窗口') : '') + '</div>';
     var toolDonut = (toolsMap[o.g] || []).length
       ? donut((toolsMap[o.g] || []).slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 6).map(function (t) {
           return { name: String(t[0]).replace(/^mcp__/, ''), value: t[1], tip: String(t[0]).replace(/^mcp__/, '') + ' · ' + fmtI(t[1]) + tr(' 次调用') + (t[3] ? tr(' · 累计 ') + fmtI(t[3]) + ' ms' : '') };
         }), tr('调用'))
       : '<span class="text-muted text-small">无工具调用</span>';
     function kv(l, v) { return '<div><div class="ud-kv-l">' + l + '</div><div class="ud-kv-v">' + v + '</div></div>'; }
+    // 上下文构成环：按 part 存储字节近似（text/reasoning/tool/step/file/其他 → 五类），口径非 token
+    var mixItems = (function () {
+      var agg = {};
+      (CTXMIX.filter(function (x) { return x[0] === o.g; })).forEach(function (x) {
+        var t = String(x[1] || 'other');
+        var cat = t === 'text' ? 'text' : t === 'reasoning' ? 'reasoning' : t === 'tool' ? 'tool'
+          : (t === 'step-start' || t === 'step-finish') ? 'step' : t === 'file' ? 'file' : 'meta';
+        agg[cat] = (agg[cat] || 0) + N(x[2]);
+      });
+      var spec = [
+        ['text', tr('对话文本'), 'var(--viz-series-1)'],
+        ['reasoning', tr('思考'), 'var(--viz-series-2)'],
+        ['tool', tr('工具调用与结果'), 'var(--viz-series-3)'],
+        ['step', tr('步骤骨架'), 'var(--viz-series-6)'],
+        ['file', tr('附件'), 'var(--viz-series-4)'],
+        ['meta', tr('元数据与其他'), 'var(--viz-series-5)']
+      ];
+      var out = [], tot = 0;
+      spec.forEach(function (sp) { if (agg[sp[0]] > 0) { tot += agg[sp[0]]; } });
+      if (!tot) return null;
+      spec.forEach(function (sp) {
+        if (agg[sp[0]] > 0) out.push({ name: sp[1], value: agg[sp[0]], color: sp[2], tip: sp[1] + ' · ' + fmtBytes(agg[sp[0]]) + ' (' + Math.round(agg[sp[0]] / tot * 100) + '%)' });
+      });
+      return out;
+    })();
+    var mixRing = mixItems ? donut(mixItems, tr('上下文构成')) : '<span class="text-muted text-small">' + tr('无分段数据') + '</span>';
+    var mixNote = mixItems ? '<div class="text-small text-muted" style="margin-top:4px">' + tr('按本地存储字节近似，非模型实际读取的 token 计量') + '</div>' : '';
+    // Agent 团队：该会话子代理具名分布（strip zcode- 前缀；'-' 为未知来源）
+    var sagRows = SAGENTS.filter(function (x) { return x[0] === o.g && N(x[2]) > 0; })
+      .sort(function (a, b) { return N(b[3]) - N(a[3]); });
+    var sagHtml = sagRows.length
+      ? sagRows.map(function (x) {
+          var nm = String(x[1]) === '-' ? tr('未知来源') : String(x[1]).replace(/^zcode-/, '');
+          return '<div class="ud-kv"><div style="display:flex;justify-content:space-between;gap:8px;max-width:460px">' +
+            '<span title="' + esc(String(x[1])) + '">' + esc(nm) + '</span>' +
+            '<span class="text-muted text-small tabular-nums">' + fmtI(N(x[2])) + tr(' 次 · ') + fmt(N(x[3])) + ' tok</span></div></div>';
+        }).join('')
+      : '';
+    var ctxRow = (mixItems || sagRows.length)
+      ? '<div class="ud-grid3" style="margin-top:14px">' +
+        (mixItems ? '<div><div class="ud-kv-l">' + tr('上下文构成') + '</div>' + mixRing + mixNote + '</div>' : '<div></div>') +
+        (sagRows.length ? '<div style="grid-column:span 2"><div class="ud-kv-l">' + tr('Agent 团队（子代理分布）') + '</div>' + sagHtml + '</div>' : '') +
+        '</div>'
+      : '';
     // 主/子代理 token 拆分条（双色堆叠，悬停看明细；rows r[9]：0 主会话 1 子代理）
     var tot2 = mainTok + subTok;
     var subBar = tot2 > 0
@@ -1758,6 +1836,7 @@ function __usageBoot(D) {
       '<div><div class="ud-kv-l">' + tr('使用工具（调用次数占比）') + '</div>' + toolDonut + '</div>' +
       '<div>' + (tl8 || '<div class="ud-kv-l">' + tr('事件时间线') + '</div><span class="text-muted text-small">无压缩 / 模型切换事件</span>') + '</div>' +
       '</div>' +
+      ctxRow +
       '<div class="ud-sec" style="margin-top:14px">' + curveHead + curveWrap + '</div>';
   }
   function renderModelBoard(rows) {

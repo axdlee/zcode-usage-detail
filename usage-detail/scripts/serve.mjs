@@ -40,6 +40,9 @@ function q(sql) {
 }
 // turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
 const TURN_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'") === '1' ? 'R.turn_id' : 'NULL';
+// agent / context_exceeded 同为较新列：老库回退（agent 置空显示未知来源，ctx 置 NULL 无超限标注）
+const AGENT_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='agent'") === '1' ? 'R.agent' : "''";
+const CTX_EXC_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='context_exceeded'") === '1' ? 'R.context_exceeded' : 'NULL';
 
 function pricePath() {
   if (process.env.ZCODE_USAGE_PRICES && fs.existsSync(process.env.ZCODE_USAGE_PRICES)) return process.env.ZCODE_USAGE_PRICES;
@@ -63,7 +66,9 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
     'todos',(SELECT json_array(sum(CASE WHEN status='completed' THEN 1 ELSE 0 END), count(*)) FROM todo),
     'stability',(SELECT json_array(COALESCE(sum(retry_count),0), COALESCE(sum(cancelled_by_user),0), COALESCE(sum(CASE WHEN status='error' THEN 1 ELSE 0 END),0)) FROM model_usage),
     'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM model_usage GROUP BY hr)),
-    'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+    'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts), json(c.triggers))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts, json_group_array(COALESCE(json_extract(p.data,'$.trigger'),'manual') || '/' || COALESCE(json_extract(p.data,'$.phase'),'')) AS triggers FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
+        'ctxMix',(SELECT COALESCE(json_group_array(json_array(SI.i, m.t, m.b)),'[]') FROM (SELECT p.session_id AS sid, json_extract(p.data,'$.type') AS t, sum(length(p.data)) AS b FROM part p WHERE p.session_id IN (SELECT DISTINCT session_id FROM R) AND p.session_id IS NOT NULL GROUP BY p.session_id, json_extract(p.data,'$.type')) m LEFT JOIN S SI ON SI.v = m.sid WHERE SI.i IS NOT NULL),
+        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT session_id AS sid, COALESCE(${AGENT_EXPR},'-') AS agent, count(*) AS c, sum(input_tokens+output_tokens+reasoning_tokens) AS tok FROM R WHERE query_source='subagent' GROUP BY session_id, 2) a LEFT JOIN S SI ON SI.v = a.sid WHERE SI.i IS NOT NULL),
     'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'providerNames', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."providerNames"'),
@@ -89,7 +94,7 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
               R.duration_ms,
               CASE R.status WHEN 'completed' THEN 0 WHEN 'error' THEN 1 WHEN 'cancelled' THEN 2 ELSE 3 END,
               CASE R.query_source WHEN 'main_turn' THEN 0 WHEN 'subagent' THEN 1 ELSE 2 END,
-              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${TURN_EXPR}))
+              R.cache_creation_input_tokens, R.time_to_first_token_ms, R.id, R.retry_count, ${TURN_EXPR}, ${CTX_EXC_EXPR}))
             FROM R
             LEFT JOIN S SI ON SI.v = R.session_id
             LEFT JOIN M MI ON MI.v = R.model_id
@@ -228,7 +233,7 @@ function dataJSON(limit) {
   // 全新环境表还不存在（ZCode 尚未写入）：直接空数据，避免 META SQL 报 no such table。
   // 注意消费方按字符串处理（res.end(dataJSON())），必须 stringify
   if (q("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')") !== '2') {
-    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, prices: {}, total: 0, covered: 0, rows: [] });
+    return JSON.stringify({ providers: [], models: [], sessions: [], sessionDirs: [], tools: [], todos: [0, 0], stability: [0, 0, 0], hours: {}, compactions: [], sessionTools: [], disk: diskJSON(), providerNames: {}, projectMap: {}, budgetDaily: 0, budgetMonthly: 0, ctxMix: [], sessionAgents: [], prices: {}, total: 0, covered: 0, rows: [] });
   }
   // node:sqlite 没有 CLI 的 readfile()：价格文件内容在 node 侧读好后内联（单引号转义）
   const pp = pricePath();
