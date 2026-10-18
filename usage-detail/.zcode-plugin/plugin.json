@@ -1,7 +1,7 @@
 {
   "name": "usage-detail",
   "version": "0.23.4",
-  "description": "ZCode 本地逐条用量分析：请求明细钻取（token 构成、tok/s、缓存率）、会话侧栏实时仪表盘、会话健康分、模型效率排行、浪费取证、预算与燃烧告警、折算成本（官方牌价）、活跃热力图与导出——只读本地 SQLite，零模型开销。",
+  "description": "Per-request usage analytics for ZCode: live dashboard & side-panel with token/cost/cache breakdown, 5h windows, budget alerts, vendor quotas. Read-only, zero model overhead, zh/en.",
   "author": {
     "name": "axdlee",
     "url": "https://github.com/axdlee"
@@ -94,8 +94,8 @@
   },
   "hooks": "./hooks",
   "description_i18n": {
-    "en": "Local per-request usage analytics for ZCode: drill-down request rows (token breakdown, tok/s, cache rate), a live session side-panel dashboard, session health scores, model leaderboard, waste forensics, budget and burn alerts, list-price converted costs, activity heatmap and export - read-only local SQLite, zero model overhead.",
-    "zh-CN": "ZCode 本地逐条用量分析：请求明细钻取（token 构成、tok/s、缓存率）、会话侧栏实时仪表盘、会话健康分、模型效率排行、浪费取证、预算与燃烧告警、折算成本（官方牌价）、活跃热力图与导出——只读本地 SQLite，零模型开销。"
+    "en": "Per-request usage analytics for ZCode: live dashboard & side-panel with token/cost/cache breakdown, 5h windows, budget alerts, vendor quotas. Read-only, zero model overhead, zh/en.",
+    "zh-CN": "逐条用量分析：实时仪表盘与会话侧栏，token 构成、折算成本、缓存率与 5h 计费窗口；预算燃烧告警与多厂商配额。只读本地数据、零模型开销、中英双语。"
   },
   "license": "MIT",
   "repository": "https://github.com/axdlee/zcode-usage-detail",
