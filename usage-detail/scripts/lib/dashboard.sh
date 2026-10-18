@@ -101,7 +101,7 @@ cmd_dashboard() {
         'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM U GROUP BY hr)),
         'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts), json(c.triggers))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts, json_group_array(COALESCE(json_extract(p.data,'$.trigger'),'manual') || '/' || COALESCE(json_extract(p.data,'$.phase'),'')) AS triggers FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
         'ctxMix',(SELECT COALESCE(json_group_array(json_array(SI.i, m.t, m.b)),'[]') FROM (SELECT p.session_id AS sid, json_extract(p.data,'$.type') AS t, sum(length(p.data)) AS b FROM part p WHERE p.session_id IN (SELECT DISTINCT session_id FROM R) AND p.session_id IS NOT NULL GROUP BY p.session_id, json_extract(p.data,'$.type')) m LEFT JOIN S SI ON SI.v = m.sid WHERE SI.i IS NOT NULL),
-        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT COALESCE(${parent_expr}, mu.session_id) AS root_sid, COALESCE(${agent_expr},'-') AS agent, count(*) AS c, sum(mu.input_tokens+mu.output_tokens+mu.reasoning_tokens) AS tok FROM R mu LEFT JOIN session ch ON ch.id = mu.session_id WHERE mu.query_source='subagent' GROUP BY 1, 2) a LEFT JOIN S SI ON SI.v = a.root_sid WHERE SI.i IS NOT NULL),
+        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT COALESCE(${parent_expr}, mu.session_id) AS root_sid, COALESCE(NULLIF(${agent_expr},''),'-') AS agent, count(*) AS c, sum(mu.input_tokens+mu.output_tokens+mu.reasoning_tokens) AS tok FROM R mu LEFT JOIN session ch ON ch.id = mu.session_id WHERE mu.query_source='subagent' GROUP BY 1, 2) a LEFT JOIN S SI ON SI.v = a.root_sid WHERE SI.i IS NOT NULL),
         'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
         'disk', json('{"logs":$logs_mb,"rollout":$rollout_mb,"artifacts":$artifacts_mb,"db":$db_mb}'),
         'providerNames', json_extract(json('$PMETA'),'$.providerNames'),
@@ -232,6 +232,16 @@ cmd_dashboard() {
 #usage-dashboard .ud-brow-item.ud-full .sn{white-space:normal;word-break:break-all;}
 #usage-dashboard .ud-brow-item.ud-full .sn .full{display:inline;}
 #usage-dashboard .ud-brow-item.ud-full .sn{color:var(--foreground);}
+#usage-dashboard .ud-brow-item.ud-full .sn{white-space:normal;word-break:break-word;}
+#usage-dashboard .ud-toolhead{font-weight:600;margin:4px 0 4px;}
+#usage-dashboard .ud-tooljson{background:var(--muted);border-radius:8px;padding:6px 10px;max-height:280px;overflow-y:auto;}
+#usage-dashboard .ud-tooljson .ud-kvrow{display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--ud-soft);align-items:baseline;}
+#usage-dashboard .ud-tooljson .ud-kvrow:last-child{border-bottom:none;}
+#usage-dashboard .ud-tooljson .ud-kvrow .k{flex:none;min-width:90px;max-width:30%;color:var(--muted-foreground);font-family:var(--ud-mono);font-size:11px;word-break:break-all;}
+#usage-dashboard .ud-tooljson .ud-kvrow .v{flex:1;font-family:var(--ud-mono);font-size:11px;white-space:pre-wrap;word-break:break-word;}
+#usage-dashboard .ud-rawbody{font-family:var(--ud-mono);font-size:11px;background:var(--muted);border-radius:8px;padding:6px 10px;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow-y:auto;margin:4px 0 0;}
+#usage-dashboard .ud-msgbody{white-space:pre-wrap;word-break:break-word;line-height:1.7;max-height:320px;overflow-y:auto;background:var(--muted);border-radius:8px;padding:8px 12px;margin:4px 0 0;}
+#usage-dashboard .ud-msgbody.ud-reasoning{color:var(--muted-foreground);font-style:italic;}
 #usage-dashboard .ud-brow-item .abs{color:var(--muted-foreground);flex:none;font-variant-numeric:tabular-nums;}
 #usage-dashboard .ud-leg{display:flex;flex-direction:column;gap:3px;min-width:0;}
 #usage-dashboard .ud-leg-row{display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.5;padding:1px 4px;margin:0 -4px;border-radius:5px;min-width:0;}
@@ -1867,7 +1877,7 @@ function __usageBoot(D) {
     var deltaSvg = (function () {
       var seq = [];
       rs.forEach(function (r) { if (r[9] !== 1) seq.push({ t: r[1], v: N(r[4]) }); });
-      if (seq.length < 2) return '';
+      if (seq.length < 2 || seq.length > 2000) return ''; // 超大序列不构建增量视图（避免双倍 SVG DOM）
       var ds = seq.map(function (x, i) { return { t: x.t, d: i ? x.v - seq[i - 1].v : x.v }; });
       var maxAbs = 1;
       ds.forEach(function (x) { if (Math.abs(x.d) > maxAbs) maxAbs = Math.abs(x.d); });
@@ -2304,9 +2314,58 @@ function __usageBoot(D) {
               var itemsHtml = (byType[t] || []).map(function (i) {
                 var d = new Date(N(i[1]));
                 var sn = String(i[3] || '').replace(/\s+/g, ' ');
-                return '<div class="ud-brow-item"><span class="ts">' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + '</span><span class="sn" title="' + tr('点击展开/收起全文') + '">' + esc(sn.slice(0, 120)) + '<span class="full">' + esc(sn) + '</span></span><span class="abs">' + fmtBytes(N(i[2])) + '</span></div>';
+                var bodyRaw = String(i[4] == null ? '' : i[4]);
+                var oneLine = (sn + (bodyRaw ? ' ' + bodyRaw.replace(/\s+/g, ' ') : '')).slice(0, 140);
+                var fullHtml;
+                if (t === 'tool') {
+                  // 工具条目：参数 JSON → key/value 表；完整解析失败（800 字符截断）用容错逐 key 配对，再失败回退等宽原文
+                  var pairs = null;
+                  try {
+                    var o = JSON.parse(bodyRaw);
+                    if (o && typeof o === 'object' && !Array.isArray(o)) {
+                      pairs = Object.keys(o).map(function (k) {
+                        var v = o[k];
+                        return [k, typeof v === 'string' ? v : JSON.stringify(v)];
+                      });
+                    }
+                  } catch (e2) {}
+                  if (!pairs) {
+                    try {
+                      var body2 = bodyRaw.replace(/^\s*\{/, '');
+                      var re = /"((?:[^"\\]|\\.)*)"\s*:\s*/g, m, keys = [], last = 0;
+                      while ((m = re.exec(body2))) {
+                        var before = body2.slice(Math.max(0, m.index - 1), m.index);
+                        if (before !== '' && before !== ',' && before !== '{') continue;
+                        keys.push({ k: m[1], vs: m.index + m[0].length, at: m.index });
+                      }
+                      var ps = [];
+                      for (var ik = 0; ik < keys.length; ik++) {
+                        var end = ik + 1 < keys.length ? keys[ik + 1].at : body2.length;
+                        var v = body2.slice(keys[ik].vs, end).replace(/,\s*$/, '').trim();
+                        if (v.charAt(0) === '"' && v.charAt(v.length - 1) === '"' && v.length > 1) v = v.slice(1, -1);
+                        if (v.length > 1200) v = v.slice(0, 1200) + ' …';
+                        else if (ik === keys.length - 1 && !/[}"0-9\]]$/.test(v)) v += ' …';
+                        ps.push([keys[ik].k, v]);
+                      }
+                      if (ps.length) pairs = ps;
+                    } catch (e3) {}
+                  }
+                  var kv = pairs ? pairs.map(function (pr) {
+                    var vs = String(pr[1]).replace(/\\n/g, '\n');
+                    if (vs.length > 1200) vs = vs.slice(0, 1200) + ' …';
+                    return '<div class="ud-kvrow"><span class="k">' + esc(pr[0]) + '</span><span class="v">' + esc(vs) + '</span></div>';
+                  }).join('') : '';
+                  fullHtml = kv ? '<div class="ud-toolhead">' + esc(sn) + '</div><div class="ud-tooljson">' + kv + '</div>'
+                    : '<div class="ud-toolhead">' + esc(sn) + '</div><pre class="ud-rawbody">' + esc(bodyRaw) + '</pre>';
+                } else if (t === 'text' || t === 'reasoning') {
+                  fullHtml = '<div class="ud-msgbody' + (t === 'reasoning' ? ' ud-reasoning' : '') + '">' + esc(String(i[4] == null ? '' : i[4])) + '</div>';
+                } else {
+                  fullHtml = esc(oneLine);
+                }
+                return '<div class="ud-brow-item"><span class="ts">' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + '</span><span class="sn" title="' + tr('点击展开/收起全文') + '">' + esc(oneLine) + '<span class="full">' + fullHtml + '</span></span><span class="abs">' + fmtBytes(N(i[2])) + '</span></div>';
               }).join('') || '';
-              var capNote = (byType[t] || []).length >= 30 && N(g[1]) > (byType[t] || []).length
+              var shown = (byType[t] || []).length;
+              var capNote = N(g[1]) > shown && shown > 0
                 ? '<div class="ud-brow-item"><span class="ts"></span><span class="sn text-muted">' + tr('仅展示最大的前 30 条') + '</span><span class="abs"></span></div>'
                 : '';
               rowsHtml += '<div class="ud-brow-row" data-bg="' + esc(t) + '"><span class="ud-brow-arrow">▸</span><span class="ud-dot" style="background:' + cat[1] + '"></span><span class="nm">' + esc(cat[0]) + '</span>' +
@@ -2338,7 +2397,7 @@ function __usageBoot(D) {
         var row = e.target.closest ? e.target.closest('.ud-brow-row') : null;
         if (row) {
           var g = row.getAttribute('data-bg');
-          var items = row.parentElement.querySelector('.ud-brow-items[data-bgp="' + g + '"]');
+          var items = row.parentElement.querySelector('.ud-brow-items[data-bgp="' + (window.CSS && CSS.escape ? CSS.escape(g) : g) + '"]');
           if (!items) return;
           var open = items.hidden;
           items.hidden = !open;

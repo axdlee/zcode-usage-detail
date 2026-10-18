@@ -71,7 +71,7 @@ const META_SQL = (pfText, limit, disk, extraJson) => `
     'hours',(SELECT COALESCE(json_group_object(hr, c),'{}') FROM (SELECT strftime('%H', started_at/1000,'unixepoch','localtime') AS hr, count(*) AS c FROM model_usage GROUP BY hr)),
     'compactions',(SELECT COALESCE(json_group_array(json_array(SI.i, c.cnt, c.maxpre, json(c.ts), json(c.triggers))),'[]') FROM (SELECT p.session_id AS sid, count(*) AS cnt, max(COALESCE(json_extract(p.data,'$.preCompactTokenCount'),0)) AS maxpre, json_group_array(strftime('%m-%d %H:%M', p.time_created/1000,'unixepoch','localtime')) AS ts, json_group_array(COALESCE(json_extract(p.data,'$.trigger'),'manual') || '/' || COALESCE(json_extract(p.data,'$.phase'),'')) AS triggers FROM part p WHERE json_extract(p.data,'$.type')='compaction' GROUP BY p.session_id) c LEFT JOIN S SI ON SI.v = c.sid WHERE SI.i IS NOT NULL),
         'ctxMix',(SELECT COALESCE(json_group_array(json_array(SI.i, m.t, m.b)),'[]') FROM (SELECT p.session_id AS sid, json_extract(p.data,'$.type') AS t, sum(length(p.data)) AS b FROM part p WHERE p.session_id IN (SELECT DISTINCT session_id FROM R) AND p.session_id IS NOT NULL GROUP BY p.session_id, json_extract(p.data,'$.type')) m LEFT JOIN S SI ON SI.v = m.sid WHERE SI.i IS NOT NULL),
-        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT COALESCE(${PARENT_EXPR}, mu.session_id) AS root_sid, COALESCE(${AGENT_EXPR},'-') AS agent, count(*) AS c, sum(mu.input_tokens+mu.output_tokens+mu.reasoning_tokens) AS tok FROM R mu LEFT JOIN session ch ON ch.id = mu.session_id WHERE mu.query_source='subagent' GROUP BY 1, 2) a LEFT JOIN S SI ON SI.v = a.root_sid WHERE SI.i IS NOT NULL),
+        'sessionAgents',(SELECT COALESCE(json_group_array(json_array(SI.i, a.agent, a.c, a.tok)),'[]') FROM (SELECT COALESCE(${PARENT_EXPR}, mu.session_id) AS root_sid, COALESCE(NULLIF(${AGENT_EXPR},''),'-') AS agent, count(*) AS c, sum(mu.input_tokens+mu.output_tokens+mu.reasoning_tokens) AS tok FROM R mu LEFT JOIN session ch ON ch.id = mu.session_id WHERE mu.query_source='subagent' GROUP BY 1, 2) a LEFT JOIN S SI ON SI.v = a.root_sid WHERE SI.i IS NOT NULL),
     'sessionTools',(SELECT COALESCE(json_group_array(json_array(SI.i, t.tool, t.c, t.ms)),'[]') FROM (SELECT session_id AS sid, tool_name AS tool, count(*) AS c, CAST(sum(duration_ms) AS int) AS ms FROM tool_usage GROUP BY session_id, tool_name) t LEFT JOIN S SI ON SI.v = t.sid WHERE SI.i IS NOT NULL),
     'disk', json('${JSON.stringify(disk).replace(/'/g, "''")}'),
     'providerNames', json_extract(json('${extraJson.replace(/'/g, "''")}'),'$."providerNames"'),
@@ -208,7 +208,7 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data, time_created AS tc, length(data) AS
          AND json_extract(data,'$.state.input.file_path') IS NOT NULL
        GROUP BY 1 ORDER BY b DESC LIMIT 8) f) AS files,
     (SELECT COALESCE(json_group_array(json_array(g.agent, g.started_at, g.duration_ms, g.tok, g.sid)),'[]') FROM (
-       SELECT COALESCE(${AGENT_EXPR},'-') AS agent, mu.started_at AS started_at, mu.duration_ms AS duration_ms,
+       SELECT COALESCE(NULLIF(${AGENT_EXPR},''),'-') AS agent, mu.started_at AS started_at, mu.duration_ms AS duration_ms,
               mu.input_tokens+mu.output_tokens+mu.reasoning_tokens AS tok, mu.session_id AS sid
        FROM model_usage mu LEFT JOIN session ch ON ch.id = mu.session_id
        WHERE COALESCE(${PARENT_EXPR}, mu.session_id) = ? AND mu.query_source = 'subagent'
@@ -218,17 +218,11 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data, time_created AS tc, length(data) AS
               sum(CASE WHEN tc >= (strftime('%s','now') * 1000 - 3600000) THEN 1 ELSE 0 END) AS r1c,
               sum(CASE WHEN tc >= (strftime('%s','now') * 1000 - 3600000) THEN b ELSE 0 END) AS r1b
        FROM P WHERE t NOT IN ('step-start','step-finish','timeline') GROUP BY t ORDER BY b DESC) g) AS bgroups,
-    (SELECT COALESCE(json_group_array(json_array(i.t, i.tc, i.b, i.sn)),'[]') FROM (
-       SELECT t, tc, b, sn FROM (
+    (SELECT COALESCE(json_group_array(json_array(i.t, i.tc, i.b, i.sn, i.sbody)),'[]') FROM (
+       SELECT t, tc, b, sn, sbody FROM (
          SELECT t, tc, b,
-           CASE t
-             WHEN 'tool' THEN json_extract(data,'$.tool') || ' \u25b8 ' || substr(COALESCE(json_extract(data,'$.state.input'), json_extract(data,'$.state.output'), ''), 1, 600)
-             WHEN 'text' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 600)
-             WHEN 'reasoning' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 600)
-             WHEN 'file' THEN COALESCE(json_extract(data,'$.url'), '')
-             WHEN 'compaction' THEN COALESCE(json_extract(data,'$.trigger'), '') || '/' || COALESCE(json_extract(data,'$.phase'), '')
-             ELSE ''
-           END AS sn,
+           CASE t WHEN 'tool' THEN json_extract(data,'$.tool') WHEN 'text' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 600) WHEN 'reasoning' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 600) WHEN 'file' THEN COALESCE(json_extract(data,'$.url'), '') WHEN 'compaction' THEN COALESCE(json_extract(data,'$.trigger'), '') || '/' || COALESCE(json_extract(data,'$.phase'), '') ELSE '' END AS sn,
+           CASE t WHEN 'tool' THEN substr(COALESCE(json_extract(data,'$.state.input'), json_extract(data,'$.state.output'), ''), 1, 800) WHEN 'text' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 800) WHEN 'reasoning' THEN substr(COALESCE(json_extract(data,'$.text'), ''), 1, 800) ELSE '' END AS sbody,
            row_number() OVER (PARTITION BY t ORDER BY b DESC) AS rn
          FROM P WHERE t NOT IN ('step-start','step-finish','timeline')
        ) WHERE rn <= 30 ORDER BY b DESC LIMIT 150) i) AS bitems`;
