@@ -59,9 +59,13 @@ cmd_dashboard() {
     BUDGET_D=${BUDGET_JSON%% *}; BUDGET_M=${BUDGET_JSON##* }
     [[ "$BUDGET_D" =~ ^[0-9.]+$ ]] || BUDGET_D=0
     [[ "$BUDGET_M" =~ ^[0-9.]+$ ]] || BUDGET_M=0
+    # 界面语言跟随 ZCode 设置（~/.zcode/v2/setting.json 的 localePreference）：
+    # 只取显式语言（system=跟随系统时留空，前端回退 navigator.language）；严格校验格式防注入
+    ZLOC=$(node -e "try{const s=JSON.parse(require('fs').readFileSync(require('path').join(process.env.HOME||'', '.zcode', 'v2', 'setting.json'),'utf8'));const p=String(s.localePreference||'');process.stdout.write(p&&p!=='system'?p:'')}catch(e){process.stdout.write('')}" 2>/dev/null || echo "")
+    [[ "$ZLOC" =~ ^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$ ]] || ZLOC=''
     # 全新环境：model_usage/session 表还不存在（ZCode 尚未写入）→ 直接给空数据，避免 META SQL 报 no such table
     if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
-      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"prices":{},"total":0,"covered":0,"rows":[]}'
+      META='{"providers":[],"models":[],"sessions":[],"sessionDirs":[],"tools":[],"todos":[0,0],"stability":[0,0,0],"hours":{},"compactions":[],"sessionTools":[],"disk":{"logs":0,"rollout":0,"artifacts":0,"db":0},"providerNames":{},"projectMap":{},"budgetDaily":0,"budgetMonthly":0,"zcodeLocale":"","prices":{},"total":0,"covered":0,"rows":[]}'
     else
     META=$(qr "
       WITH U AS (SELECT * FROM model_usage $scope),
@@ -91,6 +95,7 @@ cmd_dashboard() {
         'projectMap', json_extract(json('$PMETA'),'$.projectMap'),
         'budgetDaily', $BUDGET_D,
         'budgetMonthly', $BUDGET_M,
+        'zcodeLocale', '$ZLOC',
         'prices',(SELECT CASE
               WHEN pj IS NULL OR NOT json_valid(pj) THEN json('{}')
               ELSE json_object('currency', COALESCE(json_extract(pj,'$.currency'),'CNY'),
@@ -715,7 +720,17 @@ var I18N_EN = {
 };
 var I18N_LANG = 'zh';
 try {
-  I18N_LANG = localStorage.getItem('ud-lang') || ((navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+  // 语言判定：手动选择(localStorage) > 侧栏/本地跟随 ZCode 界面语言(localePreference) > 浏览器/WebView 语言
+  // serve 浏览器模式恒跟随浏览器（独立服务的访客以浏览器语言为准）；localePreference=system 留空同回退
+  I18N_LANG = (function () {
+    var pref = localStorage.getItem('ud-lang');
+    if (pref) return pref;
+    var zl = '';
+    try { zl = String((typeof DATA === 'object' && DATA && DATA.zcodeLocale) || ''); } catch (e) {}
+    var zc = zl ? (zl.toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en') : '';
+    if (!window.__USAGE_SERVE__ && zc) return zc;
+    return ((navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+  })();
 } catch (e) { I18N_LANG = (navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
 function tr(s) { return I18N_LANG === 'en' && I18N_EN[s] ? I18N_EN[s] : s; }
 // 静态 HTML 区的 DOM 文本翻译：boot 前对精确匹配的文本节点与 placeholder/title 属性做一次替换

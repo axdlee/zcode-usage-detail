@@ -57,6 +57,19 @@ class I18nTest(unittest.TestCase):
         self.assertIn("text = enTurn(text);", src)
         self.assertIn("This turn: ", src)
 
+    def test_zcode_locale_follow(self):
+        # 语言判定链：手动(localStorage) > 侧栏跟随 ZCode localePreference > 浏览器 navigator；
+        # serve 浏览器模式恒跟随浏览器。bash 侧只取显式语言并严格校验格式（防注入）。
+        src = DASH.read_text()
+        self.assertIn("localePreference", src)
+        self.assertIn("'.zcode', 'v2', 'setting.json'", src)  # 读取路径
+        self.assertIn('[[ "$ZLOC" =~ ^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$ ]] || ZLOC=\'\'', src)
+        self.assertIn("'zcodeLocale', '$ZLOC',", src)
+        self.assertIn('"zcodeLocale":""', src)  # 空库 META 同步
+        self.assertIn("window.__USAGE_SERVE__ && zc", src)  # serve 分支：浏览器优先
+        self.assertIn("var pref = localStorage.getItem('ud-lang');", src)
+        self.assertIn("if (pref) return pref;", src)
+
 
 if __name__ == "__main__":
     unittest.main()
