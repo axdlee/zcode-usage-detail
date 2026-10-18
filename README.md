@@ -1,52 +1,45 @@
-# ZCode 用量明细 (usage-detail)
+# usage-detail
 
-[English](#english) | 简体中文
+[简体中文](README_CN.md) | English
 
-一个 [ZCode](https://zcode.z.ai) 插件：查看**每一次模型请求**的本地用量明细——逐条记录、按来源（GLM 官方套餐 / 自定义 BYOK 接入）区分、多维筛选与交互式仪表盘。
+A [ZCode](https://zcode.z.ai) plugin for inspecting **every single model request** your client makes — row-by-row records, official plan vs. custom BYOK providers, multi-dimensional filters and an interactive dashboard.
 
-纯本地只读查询，**不发起任何网络请求，不上传任何数据**。
+Purely local read-only queries. **No network calls, no data leaves your machine.**
 
-![仪表盘总览](screenshots/dashboard-overview-dark.png)
+![Dashboard overview](screenshots/dashboard-overview-dark.png)
 
-会话排行支持点击展开：上下文压缩、模型占比、使用工具、上下文水位曲线一目了然：
+The sessions tab expands in place: context compactions, model mix, tool usage and a context-watermark curve at a glance:
 
-![会话排行与钻取](screenshots/dashboard-sessions-dark.png)
+![Sessions & drill-down](screenshots/dashboard-sessions-dark.png)
 
-每日趋势按来源堆叠，图表下方附每日明细表（请求 / token / 缓存命中 / 生成速率），点击某天直接切换为该日的请求日志：
+Daily trend stacks by provider, with a per-day table (requests / tokens / cache hits / generation speed) below — click a day to jump straight to that day's request log:
 
-![每日趋势](screenshots/dashboard-trend-light.png)
+![Daily trend](screenshots/dashboard-trend-light.png)
 
-## 功能
+## Features
 
-> **平台支持**：macOS 完整支持；Windows 与 Linux 支持全部核心能力（侧栏面板 / MCP / 钩子 / 仪表盘 / CLI）——CLI 依赖 bash（Windows 用 Git Bash，无 sqlite3 时自动走 node 替身）与 Node ≥ 22.13（ZCode 自带）；系统通知按平台原生通道（osascript / WinRT toast / notify-send），不可用时静默。
+> **Platform support**: full experience on macOS; Windows & Linux cover all core capabilities (side panel / MCP / hooks / dashboard / CLI) — the CLI needs bash (Git Bash on Windows; falls back to a node:sqlite shim when sqlite3 is unavailable) and Node ≥ 22.13 (bundled with ZCode). Notifications use per-platform native channels (osascript / WinRT toast / notify-send) and degrade silently.
 
-- **燃烧率与节奏**：近 1h tok/min + 折算金额常驻洞察前排，按近 7 天日均给出「放缓 / 平稳 / 加速」节奏标记
-- **项目用量页签**：按项目目录聚合（会话数 / 请求 / token / 近 7 天 sparkline），点击项目行筛选会话表
-- **计费窗口（近似）**：本地 5h 切分（与 ccusage blocks 同口径），最近 8 个窗口横条对比，活跃窗口带全窗投影
-- **状态栏一行摘要**：`usage.sh statusline` 输出「今日 token · 折算 · 燃烧率 · 预算 %」，可挂 tmux / SwiftBar
-- **动效**：KPI 数字滚动、页签淡入、横幅呼吸脉点、热力图悬停描边——尊重系统减弱动效设置
-
-- **逐条明细**：每次模型请求一行——时间、会话、模型、来源、主会话/子代理、输入/缓存读/缓存写/生成/合计 token、耗时、首字延迟、**输出速率 tok/s**（六档变色）、状态、每行折算成本（API 牌价，可开关）；分页浏览、点表头排序
-- **会话侧栏面板**（ZCode Desktop 3.15+）：**与 `/usage-ui` 完整版同一份界面**（不是简化版）——六个标签页、热力图、趋势、每日明细、会话钻取、模型效率、请求分页/排序/钻取全部可用，明暗主题跟随宿主，由插件内置零依赖 MCP 服务按需生成（默认**内嵌全部历史**，插件设置里可自定义数据库路径与聚合条数）。图表悬停即时显示明细（含 token 与缓存率）；时段分布支持「请求 / token」指标切换；明细分页支持页码直跳
-- **每轮用量实时卡**：每轮回合结束由本地脚本统计（零模型开销、不进上下文），经 MCP 资源订阅实时推送到侧栏面板顶部「⏱ 本轮」横幅；可选系统通知（macOS / Windows / Linux）或对话内统计行（`usage.sh turnstats`，默认仅侧栏卡）
-- **预算 / 燃烧告警**（零模型开销）：本地面板常驻时每分钟本地检查——日折算成本达日预算 80%/100% 时弹 macOS 通知（各档每日最多一次），今日 token 超近 7 天日均 50% 也会提醒；`usage.sh alerts budget off` 可关
-- **权限等待提醒**（默认关）：Agent 弹出权限批准请求时发 macOS 通知，挂机跑长任务不漏确认；`usage.sh alerts permission on` 开启
-- **浪费取证**：失败 / 取消请求白耗的 token 一眼看穿——洞察卡带汇总，`usage.sh waste [N天]` 出近 N 天详单（失败/取消/重试口径 + 反复失败会话 Top5 + 重试最多模型）
-- **模型效率排行**：仪表盘新「模型效率」页签——按模型对比平均 tok/s、平均首字延迟、失败率、缓存率与每 1k token 折算成本；会话排行新增 **0-100 健康分**（失败率/取消率/重试率加权，可解释口径）
-- **两级钻取**：点击会话行（或总览「最活跃会话」行）展开该会话详情——项目目录、主会话/子代理用量拆分、压缩事件、模型占比**甜甜圈**、来源分布、**使用工具甜甜圈**、事件时间线（压缩/模型切换，竖轴彩点）、**上下文水位曲线**（起止融入图头，逐点悬停看输入/生成/模型/状态）、一键跳转该会话请求日志；点击请求行展开该条完整信息——Token 构成、时序、**输出速率**，本地面板模式还能查看 provider 上报的**原始用量 JSON**
-- **当前会话**（感谢 [@Garfielk](https://github.com/Garfielk)）：`/usage-this` 查看当前会话汇总、按模型/来源分组和最近失败/取消请求；`/usage-this-ui` 使用精简面板，首屏展示请求/输入/生成/缓存读，模型分布和请求明细按需展开，支持直接查看失败/取消记录
-- **来源区分**：自动区分 `account:*` 官方套餐（如 GLM Coding Plan）与自定义/BYOK 接入，仪表盘按来源堆叠展示每日趋势
-- **界面**：列表 token 与耗时人性化显示（小数字原样、大数 k/M，悬停看完整值）；「设置」弹窗集成本地价格表 / 日月预算 / 通知开关（权限等待提醒、预算告警、每轮统计通知）——本地面板里点点即可配置，不再需要记命令；洞察/体检/KPI 为彩色内容卡片（值/标签层级 + 按信息类型固定的强调色）；官方套餐来源显示中文名（如「GLM Coding Plan 个人版」，自定义来源保留原名）；默认时间范围为「今天」
-- **交互式仪表盘**（`/usage-ui`）：总览 / 每日趋势（含每日明细表）/ 会话排行 / 模型效率 / 请求明细 / 失败请求六个标签页；来源、模型、会话、时间范围（今天 / 近 7 天 / 30 天 / 全部）全局筛选即时生效——**明细里点击会话/模型名直接切换为该会话/该模型的日志**（筛选条一键清除）；请求明细**分页浏览**（每页 50 条 + 页码直跳）；表格点击表头排序；界面自动适配 ZCode 明暗主题。**默认内嵌全部历史**，`/usage-ui <条数>` 可限制（1–20000；会话内嵌渲染有体积上限，超大的历史建议用本地面板或侧栏）
-- **缓存率全链路**：缓存命中率、缓存量（读+写）进洞察；来源构成、模型分布、会话排行、请求明细逐项带缓存率
-- **悬停明细**：热力图、趋势图、时段分布鼠标悬停即时显示完整用量分解
-- **洞察指标**：活跃天数、当前/最长连续活跃、峰值日、缓存命中率、缓存量（读+写）、任务完成率（todo）、重试/取消、平均耗时、主会话/子代理拆分、常用工具**甜甜圈图**（悬停看调用次数/均耗时/失败）、峰值时段（请求/token 切换，悬停含缓存率）、数据体量体检（日志/导出/库）
-- **活跃热力图**：GitHub 提交风格，按天 token 四分位着色，悬停看当日明细；粒度「每日 / 每周 / 月历」三态切换（月历为最近 3 个月日历视图）
-- **健康度卡片**：平均首字延迟、生成速率、错误率、峰值上下文水位、工具调用次数与总耗时，一行体检指标
-- **每日明细 + 每月汇总**：趋势页图表下方附逐日表（请求 / token / 缓存命中 / 生成速率）与逐月汇总表（含折算成本），点击某天直接切换为该日的请求日志
-- **多厂商配额聚合（可选接入）**：总览页配额卡与 MCP 工具 `usage_quota` 聚合显示各厂商用量——GLM 零密钥（自动读客户端日志观测）；DeepSeek（余额）、Kimi（5 小时/周窗口）、OpenRouter（预付额度）、MiniMax（Token Plan）在设置里填入各自 API Key 后启用。Key 仅发送到对应厂商官方域名做只读查询，保存在本地 `~/.zcode/usage-vendors.json`（权限 0600），可随时清除；未配置时如实提示，不做猜测
-- **折算成本（API 牌价，CNY）**：GLM 5.3 系内置智谱官网权威牌价（¥/百万 token，与官方定价页一致）；其余模型从 [models.dev](https://models.dev) 全量同步并按 USD→CNY 汇率换算（`ZCODE_USAGE_USD_CNY` 可改）；自定义条目与官方权威条目不会被同步覆盖。订阅套餐请求不按 token 计费，金额仅表示等量 API 用量的牌价价值。仪表盘有"折算成本"开关与"同步价格"按钮
-- **分时计价（峰谷定价）**：按每条请求的本地时间取档计价（官方套餐高峰/低峰时段单价不同、其他模型同理），在价格表里加 `tariff` 字段即可生效：
+- **Per-request detail**: one row per model request — time, session, model, provider, main-turn vs. subagent, input / cache-read / cache-write / output tokens, duration, TTFT, **output tok/s** (color-coded in six tiers), status, and per-row converted cost (list price, toggleable); paginated, sortable by column headers
+- **Session side panel** (ZCode Desktop 3.15+): **the exact same UI as `/usage-ui`**, not a stripped-down view — six tabs, heatmap, trends, per-day table, session drill-down, model efficiency, request pagination/sorting/drill-down, dark/light following the host theme, generated on demand by a zero-dependency built-in MCP service (**full history embedded by default**; database path and row limit configurable in Settings). Hover any chart for the full breakdown (tokens + cache rate); the hourly-distribution tab switches between requests / tokens; request pagination supports direct page jumps
+- **Per-turn usage card**: stats computed locally at each turn's end (zero model overhead, never enters context), pushed in real time to the panel's top banner via MCP resource subscription; optional system notification (macOS / Windows / Linux) or an in-conversation stats line (`usage.sh turnstats`, side-panel card only by default)
+- **Budget / burn alerts** (zero model overhead): while the local panel is running, checked locally every minute — a system notification fires when today's converted cost reaches 80%/100% of your daily budget (once per tier per day), and also when today's tokens exceed 50% over the 7-day daily average; disable with `usage.sh alerts budget off`
+- **Permission-wait reminder** (off by default): get notified when the agent waits for a permission approval — long unattended runs never miss a confirmation; enable with `usage.sh alerts permission on`
+- **Waste forensics**: see the tokens burned by failed/cancelled requests at a glance — an insight card plus `usage.sh waste [days]` for a full report (fail/cancel/retry breakdown + worst-offender sessions + most-retried models)
+- **Model efficiency tab**: compare models by avg tok/s, avg TTFT, fail rate, cache rate and cost per 1k tokens; session rankings carry a **0–100 health score** (weighted fail/cancel/retry, explainable formula)
+- **Two-level drill-down**: click a session row (or a "most active sessions" row) to expand it — project directory, main/subagent split, compaction events, model mix **donut**, provider mix, **tool-usage donut**, event timeline (compactions / model switches) and a **context-watermark curve** with per-point hover; click a request row for its full record — token breakdown, timing, output speed, and (local panel mode) the provider-reported **raw usage JSON**
+- **Current session** (thanks to [@Garfielk](https://github.com/Garfielk)): `/usage-this` summarizes the current session with per-model/per-provider grouping and recent failures; `/usage-this-ui` renders a compact panel
+- **Provider separation**: automatically distinguishes `account:*` official plans (e.g. GLM Coding Plan) from custom/BYOK providers, with trends stacked by provider
+- **Interactive dashboard** (`/usage-ui`): six tabs — overview / daily trend (with per-day table) / sessions / model efficiency / requests / failures. Provider, model, session and time-range filters apply globally; **clicking a session or model name in the detail table jumps to that session's/model's log**; requests paginate at 50 per page with direct page jumps; dark/light follows ZCode. **Full history embedded by default**; `/usage-ui <rows>` limits to 1–20000
+- **Cache-rate end to end**: hit rate and cache volume (read+write) in the insights; provider mix, model mix, session ranking and request rows all carry cache rates
+- **Hover details**: heatmap, trend and hourly charts show the full usage breakdown on hover
+- **Insight metrics**: active days, current/longest streak, peak day, cache hit rate, cache volume, todo completion, retries/cancellations, avg duration, main/subagent split, top-tools **donut**, peak hours (requests/tokens switchable), data volume checkup
+- **Activity heatmap**: GitHub-contribution style, tokens per day in quartiles; daily / weekly / month-calendar granularity
+- **Health card**: avg TTFT, generation speed, error rate, peak context watermark, tool calls and total time — one row of checkup metrics
+- **Daily table + monthly summary**: below the trend chart; click a day to load that day's request log
+- **Multi-vendor quota aggregation (optional)**: the overview quota card and the `usage_quota` MCP tool aggregate vendor usage — GLM keyless (parses client-log observations); DeepSeek (balance), Kimi (5-hour/weekly windows), OpenRouter (credits), MiniMax (Token Plan) activate once you store their API keys in Settings. Keys are sent only to the corresponding vendor's official domain for read-only queries, stored in `~/.zcode/usage-vendors.json` (mode 0600), never logged or exported
+- **Converted cost (list price, CNY)**: GLM 5.3 models ship with z.ai's official list price built in; everything else syncs from [models.dev](https://models.dev) with a USD→CNY rate (`ZCODE_USAGE_USD_CNY` overridable). Custom entries and official anchors are never overwritten by sync. Subscription-plan requests are not actually billed per token — the amount expresses the list-price value of equivalent API usage. The dashboard has a "converted cost" toggle and a "sync prices" button
+- **Time-of-use pricing**: price each request by its local time tier — add a `tariff` field to the price table:
 
   ```json
   { "currency": "CNY",
@@ -57,89 +50,89 @@
           { "hours": [[0, 24]], "mult": 0.5, "name": "空闲" } ] } } } }
   ```
 
-  `weekend` 为可选的周末统一倍率（周六/日全天，如 DeepSeek 周末按空闲价）；`holidays` / `workdays` 为可选的法定节假日与调休上班日列表（`"YYYY-MM-DD"`，按 `tz` 口径）——节假日全天按 `weekend` 倍率计空闲价，调休上班的周末按正常分时档。历史请求按各自发生时刻取档。**洞察区「当前时段」行**按系统当前时间实时判定所处档位（取用量最大的分时模型为代表）。**内置 DeepSeek 官方峰谷牌价**（deepseek-flash / deepseek-v4-flash / deepseek-v4-pro，2026-10 核对官方价目页：工作日 9:00–12:00、14:00–18:00 高峰，周末与法定节假日全天空闲半价）与 **2026 年国务院办公厅节假日安排**（含 6 天调休上班日，2025-11-04 通知）——重跑 `prices sync` 即更新到本地价格表；新年份安排公布后随插件内置表更新，也可自行编辑 `tariff.holidays`。**GLM Coding Plan 积分峰谷**（工作日 14:00–18:00 按 1× 抵扣、其余 0.5×，2026-10 核对官方套餐文档）在配额卡的 GLM 厂商块实时提示。不配置 `tariff` 时按基础价计算，行为不变。
-- **套餐配额查询**（`quota`，CLI 可选）：GLM 余量因账号/套餐类型差异较大（客户端凭据为加密托管，日志并非对所有套餐包含 5 小时池/周池观测），优先零密钥解析客户端日志里的额度观测；界面侧的多厂商聚合见上方「多厂商配额聚合」，本子命令面向 CLI 场景保留：写入 `~/.zcode/usage-quota-token.json`（`{"token":"你的KEY","base":"https://open.bigmodel.cn"}`）后可查监控接口
-- **本地常驻面板**（`serve`）：一条命令在本机起一个只读 Web 服务，浏览器打开即得常驻看板——数据一次加载，燃烧率每 5 秒轻量轮询实时刷新，支持两级钻取与原始用量查看，不占会话上下文
-- **导出**：`export csv` / `export json` 全量记录（CSV 遵循 RFC 4180）
-- **零依赖**：只用 macOS / Linux 自带的 `bash` + `sqlite3`，不需要 Node / Python
+  `weekend` is an optional flat weekend multiplier; `holidays` / `workdays` accept holiday and make-up-workday lists (`"YYYY-MM-DD"`, in `tz`). **The official DeepSeek peak/off-peak list price is built in** (deepseek-flash / deepseek-v4-flash / deepseek-v4-pro; verified against the official pricing page 2026-10: weekdays 9:00–12:00 & 14:00–18:00 peak, weekends and holidays off-peak) together with the **2026 State Council holiday schedule** — rerun `prices sync` to refresh. The GLM Coding Plan credit off-peak (14:00–18:00 at 1×, otherwise 0.5×) shows live on the GLM quota card. Without `tariff`, base prices apply unchanged.
+- **Plan quota query** (`quota`, optional CLI): GLM remaining quota varies by account/plan type — the command prefers keyless parsing of client-log observations; for the monitoring API write `~/.zcode/usage-quota-token.json` (`{"token":"YOUR_KEY","base":"https://open.bigmodel.cn"}`)
+- **Local resident panel** (`serve`): one command starts a read-only web service on this machine — data loads once, burn rate polls every 5 seconds, full drill-downs, never touches your session context
+- **Export**: `export csv` / `export json` for all records (CSV follows RFC 4180)
+- **Zero dependencies**: only `bash` + `sqlite3` (+ Node, bundled with ZCode)
 
-数据来自 ZCode 客户端本地数据库 `~/.zcode/cli/db/db.sqlite`（只读）。
+Data comes from ZCode's local client database `~/.zcode/cli/db/db.sqlite` (read-only).
 
-## 安装
+## Installation
 
-### 方式一：添加 GitHub 市场源（推荐）
+### Option 1: add the GitHub marketplace source (recommended)
 
-1. 打开 ZCode 的 **插件市场**
-2. 点击 **添加 → 添加插件市场**，粘贴本仓库地址：
+1. Open ZCode's **Plugin Marketplace**
+2. Click **Add → Add marketplace** and paste this repository:
 
    ```
    https://github.com/axdlee/zcode-usage-detail
    ```
 
-3. 添加后进入 **个人** 标签页，找到 **用量明细 (Usage Detail)**，点击 **安装**
+3. Switch to the **Personal** tab, find **Usage Detail (用量明细)** and click **Install**
 
-### 方式二：本地目录
+### Option 2: local directory
 
 ```bash
 git clone https://github.com/axdlee/zcode-usage-detail.git
 ```
 
-然后在 **插件市场 → 添加 → 添加插件市场** 粘贴克隆出的目录路径（即包含 `marketplace.json` 的那一层），后续步骤同上。
+Then **Plugin Marketplace → Add → Add marketplace** with the cloned folder (the level containing `marketplace.json`), and install as above.
 
-### 方式三：AI 一键安装
+### Option 3: one-shot AI install
 
-把下面这段话直接发给 ZCode（或任何编码智能体），它会替你完成剩余步骤：
+Paste this to ZCode (or any coding agent) and it will handle the rest:
 
 ```text
-请帮我安装 GitHub 上的 zcode-usage-detail 插件：
+Please install the zcode-usage-detail plugin from GitHub:
 
-1. 执行 git clone https://github.com/axdlee/zcode-usage-detail.git ~/.zcode/plugins/zcode-usage-detail（目录已存在则 git -C 拉取更新）
-2. 校验插件清单：node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs plugins validate ~/.zcode/plugins/zcode-usage-detail/usage-detail（没有这个 CLI 就跳过）
-3. 读完插件 README 的安装章节后，告诉我手动步骤：在 ZCode 的「插件市场 → 添加 → 添加插件市场」里粘贴 ~/.zcode/plugins/zcode-usage-detail，然后在「个人」标签安装「用量明细」插件
-4. 最后给我一条验收提示：安装后新建任务运行 /usage-ui，应看到内嵌的用量仪表盘
+1. Run git clone https://github.com/axdlee/zcode-usage-detail.git ~/.zcode/plugins/zcode-usage-detail (git -C pull if it exists)
+2. Validate the plugin manifest: node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs plugins validate ~/.zcode/plugins/zcode-usage-detail/usage-detail (skip if the CLI is missing)
+3. After reading the plugin README's install section, tell me the manual steps: paste ~/.zcode/plugins/zcode-usage-detail into "Plugin Marketplace → Add → Add marketplace", then install "Usage Detail" under the Personal tab
+4. Give me an acceptance check: after installing, start a new task and run /usage-ui — the embedded usage dashboard should appear
 ```
 
-## 使用
+## Usage
 
-安装后**新建任务**：
+After installing, **start a new task**:
 
-| 输入 | 效果 |
+| Input | Effect |
 |---|---|
-| `/usage-ui` | 生成交互式仪表盘，内嵌渲染在会话中 |
-| `/usage-ui 8000` | 同上，内嵌最近 8000 条 |
-| `/usage-this` | 推断当前会话，显示身份、用量汇总、模型/来源与最近失败/取消请求 |
-| `/usage-this-ui` | 当前会话的精简面板：四项用量统计、折叠模型分布与请求明细 |
-| `/usage-this --session sess_xxx` | 显式指定会话（UI 命令同样支持） |
-| `/usage-this --directory /绝对/项目路径` | 选择指定项目目录内最近请求的会话（UI 命令同样支持） |
-| `/usage` | 文本总览（累计 + 今日） |
-| `/usage blocks` | 5 小时窗口用量（CLI 近似口径；界面已移除该模块，官方配额看 Usage Stats → Coding Plan） |
-| `/usage recent 50` | 最近 50 条逐条明细 |
-| `/usage providers` | 按来源（官方套餐 / 自定义接入）汇总 |
-| `/usage months` | 按月汇总 |
-| `/usage projects 10` | 按项目目录汇总 Top 10 |
-| `/usage tools` | 工具调用统计 |
-| `/usage cost` | 按模型折算成本（官方牌价 CNY，可自定义价格表） |
-| `/usage-today` | 今天用了多少：当日明细 + 折算金额 + 失败情况 |
-| `/usage prices sync` | 从 models.dev 同步最新官方价 |
-| `/usage quota` | 查询套餐配额余量（零密钥读客户端日志，可选 API Key 补充） |
-| `/usage doctor` | 环境自检：数据库/表结构/价格表/配额数据源/依赖逐项排查（"统计不见了？"先跑这个） |
-| `/usage export csv` | 导出全部记录为 CSV |
-| `/usage day 2026-10-14` | 某天的逐条明细 |
-| `/usage sessions 10` | 会话用量排行 Top 10 |
-| `/usage errors` | 最近的失败/取消请求 |
-| “看看我哪个会话最烧 token” | 自然语言同样可以，会自动路由到对应查询 |
+| `/usage-ui` | Generate the interactive dashboard, rendered inline in the session |
+| `/usage-ui 8000` | Same, limited to the latest 8000 rows |
+| `/usage-this` | Infer the current session: identity, usage summary, per-model/provider, recent failures |
+| `/usage-this-ui` | Compact current-session panel: four usage stats, collapsible model mix and request detail |
+| `/usage-this --session sess_xxx` | Explicit session (UI commands accept it too) |
+| `/usage-this --directory /absolute/project/path` | Pick the latest session inside a project directory (UI commands accept it too) |
+| `/usage` | Text overview (all-time + today) |
+| `/usage blocks` | 5-hour window usage (CLI approximation; the UI module was removed — official quota lives in Usage Stats → Coding Plan) |
+| `/usage recent 50` | Latest 50 request rows |
+| `/usage providers` | Aggregate by provider (official plan / custom BYOK) |
+| `/usage months` | Monthly summary |
+| `/usage projects 10` | Top 10 projects by directory |
+| `/usage tools` | Tool-call statistics |
+| `/usage cost` | Converted cost per model (official list price CNY, customizable) |
+| `/usage-today` | Today: request detail + converted amount + failures |
+| `/usage prices sync` | Sync latest official prices from models.dev |
+| `/usage quota` | Plan quota remaining (keyless client-log parsing; optional API key) |
+| `/usage doctor` | Environment checkup: database/tables/prices/quota source/dependencies ("stats disappeared?" run this first) |
+| `/usage export csv` | Export all records as CSV |
+| `/usage day 2026-10-14` | One day's request detail |
+| `/usage sessions 10` | Top 10 sessions by usage |
+| `/usage errors` | Recent failed/cancelled requests |
+| "which session burns the most tokens?" | Natural language works too — it routes to the right query |
 
-### 当前会话定位
+### Current-session detection
 
-ZCode 命令环境尚未提供可靠的当前会话 ID，因此默认使用本地数据库中**最近一次模型请求的 `session_id`**，一次执行中固定该 ID。多窗口并行请求时可能定位到另一会话，请核对输出中的会话标题、ID 和最近请求时间；有歧义时用 `--session ID` 指定，或用 `--directory "项目绝对路径"` 限制候选范围（两者互斥）。目录匹配为精确匹配，可使用报告中的项目目录。
+ZCode's command environment does not yet expose a reliable session ID, so the plugin uses the **`session_id` of the latest model request** in the local database, fixed for the duration of one run. Parallel windows may land on another session — verify the session title, ID and latest-request time in the output; when ambiguous pass `--session ID`, or narrow candidates with `--directory "absolute project path"` (mutually exclusive). Directory matching is exact; use a project directory from the report.
 
-只统计所选 `session_id` 的请求，不递归合并其他 ID 的子会话。文本版统计全部状态，生成 token = 输出 + 思考；失败和取消单独计数，进行中的请求归入其他状态。正在进行的请求可能尚未写入完整 token，重新运行可刷新。
+Only the selected `session_id` is counted; sub-sessions under other IDs are not merged. The text report counts all statuses; generation = output + thinking; failures and cancellations are counted separately and in-flight requests fall into "other". In-flight requests may not have full tokens yet — rerun to refresh.
 
-会话 UI 首屏展示标题、最近请求和四项用量；会话 ID、项目目录与创建时间可展开查看。模型分布和请求明细默认折叠，有失败/取消请求时可直接跳到对应筛选。会话排行、热力图与每日趋势仍在全量 `/usage-ui` 中查看。
+The session UI shows title, latest request and four usage stats on first paint; session ID, project directory and creation time expand on demand. Model mix and request detail start collapsed; failures/cancellations get a direct filter link. Session ranking, heatmap and daily trends live in the full `/usage-ui`.
 
-UI 在会话过滤后默认内嵌该会话全部请求，可用 `ZCODE_USAGE_LIMIT` 限制为 1-20000（-1 为全部）；超过时标注覆盖范围，卡片和明细均只统计已加载记录。结果是生成时的本地快照，不表示服务端套餐余量。
+The session-filtered UI embeds all of that session's requests by default; `ZCODE_USAGE_LIMIT` clamps to 1–20000 (-1 = all). Coverage is annotated when limited — cards and detail reflect loaded rows only. Results are a local snapshot at generation time and do not represent server-side plan quota.
 
-直接运行脚本：
+Run the scripts directly:
 
 ```bash
 bash usage-detail/scripts/usage.sh this
@@ -147,39 +140,38 @@ bash usage-detail/scripts/usage.sh this --session sess_xxx
 bash usage-detail/scripts/usage.sh dashboard-this /tmp/usage-this.html --directory "/path/to/project"
 ```
 
-### 会话侧栏面板怎么打开
+### Opening the session side panel
 
-1. 安装或更新插件后，**重启 ZCode**（宿主在启动时加载插件清单）
-2. 打开任意一个会话，在**右侧面板**区域点击 **「+」新增标签**
-3. 在列表里选择「**用量**」——面板即作为侧栏标签常驻，随会话自动刷新
-4. 面板顶部「**完整面板 ↗**」会自动拉起本地常驻服务并打开完整仪表盘（分页明细、热力图、5 小时窗口、会话钻取等全部能力都在那里）
+1. After installing or updating, **restart ZCode** (the host loads plugin manifests at launch)
+2. Open any task and click **"+"** in the right-hand panel area
+3. Choose **"Usage (用量)"** — the panel docks as a side tab and refreshes with the session
+4. **"Full panel ↗"** at its top starts the local resident service and opens the complete dashboard (paginated detail, heatmap, 5-hour windows, session drill-down — everything)
 
-若列表里没有「用量」：确认插件已启用、ZCode 为 3.15+ 且已重启；仍不出现请运行 `/usage doctor` 排查。
+If "Usage" is missing: make sure the plugin is enabled, ZCode is 3.15+ and has been restarted; otherwise run `/usage doctor`.
 
-### 每轮用量统计（侧栏实时卡 + 可选通知/统计行）
+### Per-turn usage stats (live card + optional notification/stats line)
 
-每轮回合结束，async Stop 钩子都会在本地（纯 node + SQLite，**零模型开销、不进上下文**）完成统计，并通过宿主 MCP 资源订阅（`resources/subscribe` → `notifications/resources/updated`）**实时推送到打开着的侧栏面板**——面板顶部「⏱ 本轮」横幅即时刷新速率/首字/缓存率/请求数/耗时，无需刷新、无需任何开关。这是统计「融入 ZCode」的正路：数字给人看，不经过模型。
+At each turn's end an async Stop hook computes the stats locally (pure node + SQLite, **zero model overhead, never enters context**) and pushes them to any open side panel via the host's MCP resource subscription (`resources/subscribe` → `notifications/resources/updated`) — the "⏱ This turn" banner refreshes speed/TTFT/cache/requests/duration live. Numbers for humans, never through the model.
 
-`usage.sh turnstats <模式>` 控制面板之外的附加出口：
+`usage.sh turnstats <mode>` controls the extra outlets beyond the panel:
 
-- **notify（推荐，零开销）**：面板没开着时也能看到——每轮回复结束弹一条系统通知显示本轮统计（macOS osascript / Windows WinRT toast / Linux notify-send，均本地计算，不可用时静默）。
-- **inject（对话内统计行）**：每条调用了工具的回复末尾附一行 `> 本轮用量：⚡ 82 tok/s · …`。统计脚本本身零模型推理，但**文本进入对话必须经由模型**（ZCode 的 hook 无法向回复追加文本，也没有提交前裁剪历史的通道；实测宿主 Stop 钩子注入上下文会强制"继续回合"，反而每轮多一次全量模型调用，更贵）。开销：注入指令约 0.15k token/轮（持续留在上下文）+ 一次工具调用约 0.1k + 统计行输出约 0.05k——相对百万级上下文 <0.1%，短会话约 1%。
-- **off（默认）**：仅保留侧栏面板实时卡与浏览器面板轮询（本地面板每 15s 拉一次 `/api/turn`），不通知、不进对话。
+- **notify (recommended, zero overhead)**: see it even with the panel closed — a system notification after each turn (macOS osascript / Windows WinRT toast / Linux notify-send; all local, silent when unavailable)
+- **inject (in-conversation line)**: appends `> 本轮用量：⚡ 82 tok/s · …` to each tool-using reply. The stats script does zero model inference, but **text entering the conversation must go through the model** (ZCode hooks cannot append to replies, and injecting context from the Stop hook forces an extra full model call — measurably more expensive). Cost: ~0.15k tokens/turn for the injected instruction (stays in context) + ~0.1k tool call + ~0.05k output — under 0.1% of a million-token context, ~1% on short sessions
+- **off (default)**: side-panel live card and browser-panel polling only (local panel pulls `/api/turn` every 15s)
 
-notify/inject 需重开会话生效（hook 配置按会话快照）；侧栏实时卡随面板打开即生效。
+notify/inject need a reopened session to take effect (hook config snapshots per session); the side-panel card works as soon as the panel opens.
 
+### Converted cost (official list price CNY, customizable)
 
-### 折算成本（官方牌价 CNY，可自定义）
+Price resolution order: `ZCODE_USAGE_PRICES` env → `~/.zcode/usage-prices.json` (your file) → built-in prices. GLM 5.3 models ship with z.ai's official list price (CNY per million tokens, matching the official pricing page); the rest bundle from models.dev converted at USD→CNY (7.2, `ZCODE_USAGE_USD_CNY` overridable). Works out of the box.
 
-价格表解析顺序：`ZCODE_USAGE_PRICES` 环境变量 → `~/.zcode/usage-prices.json`（你的文件）→ 插件内置价。GLM 5.3 系内置智谱官网权威牌价（元/百万 token，与官方定价页一致）；其余模型打包自 models.dev 并已按 USD→CNY 换算（汇率 7.2，`ZCODE_USAGE_USD_CNY` 可改）。开箱即用，无需配置。
-
-- **每日自动同步**：生成仪表盘/启动面板时若价格表超过 1 天未更新，自动从 models.dev 全量同步（`ZCODE_USAGE_NO_AUTOSYNC=1` 关闭）
-- `usage.sh prices show` 查看当前生效的价格表；`usage.sh prices sync` 手动全量同步所有供应商模型价（保留自定义条目；需要 node + curl）
-- 仪表盘顶部"同步价格"按钮：会话内点击会请求 Agent 执行同步并重渲染，本地面板点击直接同步后刷新
-- **"价格 / 预算"面板**（本地面板）：搜索并编辑任意模型的输入/输出/缓存读单价，保存后全历史立即重新折算；可新增/删除条目
-- **本地折算预算**：在价格面板里设日 / 月预算（元），总览洞察行显示「今日折算 / 日预算」进度条，超 100% 变红
-- **未定价提示**：折算成本后缀显示「未定价 N%」——缺价模型的 token 不计入合计，明确口径而非默默按 0
-- 自定义：编辑 `~/.zcode/usage-prices.json`，可加任意模型、改币种：
+- **Daily auto-sync**: when generating a dashboard or starting the panel, prices older than one day sync from models.dev automatically (`ZCODE_USAGE_NO_AUTOSYNC=1` to disable)
+- `usage.sh prices show` prints the effective table; `usage.sh prices sync` forces a full sync (keeps custom entries; needs node + curl)
+- The dashboard's "Sync Prices" button: in-session it asks the agent to sync and re-render; in the local panel it syncs and refreshes directly
+- **"Prices / Budget" panel** (local panel): search and edit any model's input/output/cache price — saving reconverts the full history immediately; add or remove entries
+- **Local converted budget**: set daily/monthly budgets in the price panel; the overview shows a "today / daily budget" progress bar that turns red past 100%
+- **Unpriced hint**: converted costs show "unpriced N%" — tokens of unpriced models are excluded from totals, stated explicitly instead of silently zeroed
+- Custom: edit `~/.zcode/usage-prices.json` to add models or change currency:
 
   ```json
   { "currency": "USD",
@@ -187,52 +179,52 @@ notify/inject 需重开会话生效（hook 配置按会话快照）；侧栏实�
                  "my-private-model": {"in": 1, "out": 3, "cache": 0.1} } }
   ```
 
-配置后 `/usage cost` 按模型拆分估算；仪表盘顶部出现"成本估算"开关，打开后会话排行与来源构成追加成本列。注意：订阅套餐（如 GLM Coding Plan）内的请求实际不按 token 计费，估算仅供 BYOK 按量计费或心理参考。
+With prices configured, `/usage cost` breaks cost down per model and the dashboard grows a "converted cost" toggle adding cost columns to session ranking and provider mix. Note: requests inside a subscription plan (e.g. GLM Coding Plan) are not actually billed per token — treat estimates as BYOK metering or a mental reference.
 
-### 实时燃烧率监控
+### Live burn-rate monitoring
 
-- 仪表盘"5 小时窗口"页：剩余百分比 + 重置时间点 + 燃烧率（token/小时）+ 与近 3 个完整窗口均值的对比和满窗预测 + **剩余请求估算**（按近 3 个完整窗口平均请求数，推算本窗口还可发起多少次）
-- **本地常驻面板**：`usage.sh serve`（默认端口 7741，`serve 8080` 可换），自动打开浏览器。页面数据一次加载，燃烧率/今日用量每 5 秒轻量轮询刷新（只查最近 5h 数据，走索引，开销极低）；也可让 ZCode 里的 Agent 后台启动后把 `http://127.0.0.1:7741` 发给你。仅监听 127.0.0.1、只读、不写任何文件
-- 终端监控（claude-monitor 风格）：`usage.sh live [秒]`，默认 3s 刷新、Ctrl-C 退出，适合挂在一个终端角落
+- Dashboard "5-hour window" tab: remaining % + reset time + burn rate (tokens/hour) + comparison against the last 3 complete windows + full-window projection + **remaining-requests estimate** (from the average of the last 3 complete windows)
+- **Local resident panel**: `usage.sh serve` (default port 7741; `serve 8080` to change), opens the browser automatically. Data loads once; burn rate and today's usage poll lightly every 5 seconds (queries only the last 5h, indexed, negligible overhead). Listens on 127.0.0.1 only, read-only, writes nothing
+- Terminal monitor (claude-monitor style): `usage.sh live [seconds]`, 3s refresh by default, Ctrl-C to exit
 
-### 仪表盘预览
+### Dashboard preview
 
-每日趋势按来源堆叠，图表下方附每日明细表（请求 / token / 缓存命中 / 生成速率），点击某天直接切换为该日的请求日志：
+Daily trends stack by provider, with a per-day table below — click a day to load that day's log:
 
-![每日趋势](screenshots/dashboard-trend-light.png)
+![Daily trend](screenshots/dashboard-trend-light.png)
 
-请求明细支持状态筛选与表头排序：
+Request detail supports status filtering and header sorting:
 
-![请求明细](screenshots/dashboard-detail-light.png)
+![Request detail](screenshots/dashboard-detail-light.png)
 
-## 数据说明与隐私
+## Data & privacy
 
-- 数据源是 ZCode 客户端自动写入的本地 SQLite（`~/.zcode/cli/db/db.sqlite` 的 `model_usage` 表），本插件只做**只读**查询
-- 不联网、不上传、不写库；仪表盘数据在生成时内嵌，仅存在于你自己机器上的一个 HTML 文件
-- 仪表盘默认内嵌最近 3000 条请求，`/usage-ui <条数>` 可调整（1–20000；超过约 8000 条可能超出会话内嵌渲染的体积限制，全量历史请用 `export json`）
-- token 口径：输入列含缓存命中（缓存读单独列出），生成 = 输出 + 思考；成本按「未命中输入 × 牌价 in + 缓存命中 × 牌价 cache + 生成 × 牌价 out」计价（命中段不重复计费，含分时费率模型按各请求发生时刻取档）
-- **套餐配额余量**（5 小时池 / 周额度）由服务端计量，不在本地库中：`/usage quota` 优先零密钥解析客户端日志里的额度观测；因账号/套餐类型而异，部分观测（如 5 小时池）可能为空，此时请以 ZCode 的 **Usage Stats → Coding Plan** 为准，或配置 API 凭据启用监控接口
-- **多厂商配额（全部可选，默认关闭）**：仅在插件设置里填写对应厂商 API Key 后，才会向该厂商**官方域名**发起只读查询——DeepSeek `api.deepseek.com`、Kimi `api.kimi.com`、OpenRouter `openrouter.ai`、MiniMax `api.minimaxi.com`；Key 保存在 `~/.zcode/usage-vendors.json`（权限 0600），不出现在日志与导出中；GLM 配额查询不发送任何凭据（解析本地客户端日志）。不填 Key 即零外联
+- The data source is the local SQLite written by the ZCode client (`model_usage` in `~/.zcode/cli/db/db.sqlite`); the plugin only ever queries it **read-only**
+- No network, no uploads, no database writes; dashboard data is embedded at generation time and exists only in an HTML file on your own machine
+- The dashboard embeds the latest 3000 requests by default; `/usage-ui <rows>` adjusts (1–20000; beyond ~8000 rows may exceed inline rendering limits — use `export json` for full history)
+- Token semantics: the input column includes cache hits (cache reads listed separately); generation = output + thinking; cost = uncached-input × in + cache-hit × cache + generation × out (cache never billed twice; time-of-use models price each request at its own moment)
+- **Plan quota remaining** (5-hour pool / weekly allowance) is metered server-side and not in the local database: `/usage quota` prefers keyless parsing of client-log observations; depending on account/plan some observations may be empty — defer to ZCode's **Usage Stats → Coding Plan**, or configure API credentials for the monitoring endpoint
+- **Multi-vendor quotas (all optional, off by default)**: only after you store a vendor's API key in plugin settings does the plugin query that vendor's **official domain** read-only — DeepSeek `api.deepseek.com`, Kimi `api.kimi.com`, OpenRouter `openrouter.ai`, MiniMax `api.minimaxi.com`; keys live in `~/.zcode/usage-vendors.json` (mode 0600) and never appear in logs or exports. GLM quota queries send no credentials at all (local client-log parsing). No keys, no outbound requests
 
-## 已知限制
+## Known limitations
 
-- 只统计**本机、本账号**在 ZCode 内的请求
-- 本地库结构可能随 ZCode 版本演进变化（当前在 0.16.x 验证通过）
-- 界面基于 ZCode Desktop 的 Gen UI 内嵌渲染，需在桌面端使用
-- 5 小时窗口与成本均为**本地近似口径**，服务端套餐配额以 ZCode 的 Usage Stats → Coding Plan 为准
+- Counts only **this machine, this account's** requests inside ZCode
+- The local schema may evolve with ZCode versions (verified through 0.16.x)
+- The UI renders via ZCode Desktop's Gen UI — desktop app required
+- 5-hour windows and costs are **local approximations**; server-side plan quota is authoritative at Usage Stats → Coding Plan
 
-## 开发验证
+## Development & testing
 
-运行会话过滤、聚合、空记录、参数转义及仪表盘回归测试（开发环境需要 Python 3；插件运行仍仅需 bash + sqlite3）：
+Run session-filter, aggregation, empty-data, parameter-escaping and dashboard regression tests (Python 3 for development only; the plugin itself still needs just bash + sqlite3):
 
 ```bash
 python3 -m unittest discover -s tests -v
 bash -n usage-detail/scripts/usage.sh
 ```
 
-## 致谢
+## Acknowledgments
 
-设计参考了这些优秀的同类项目：[ccusage](https://github.com/ccusage/ccusage)（5 小时窗口 / 成本报告）、[Claude-Code-Usage-Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor)（燃烧率与耗尽预测）以及 DeepSeek Harness 社区的用量插件家族（活跃热力图、缓存命中率、连续活跃、导出等思路）。
+Design draws on these excellent peers: [ccusage](https://github.com/ccusage/ccusage) (5-hour windows / cost reports), [Claude-Code-Usage-Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) (burn rate & depletion projection) and the DeepSeek Harness community usage-plugin family (activity heatmap, cache hit rate, streaks, exports).
 
 ## License
 
