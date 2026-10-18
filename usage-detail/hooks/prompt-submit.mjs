@@ -31,7 +31,7 @@ try {
 // 兼容旧 {"enabled":true}（无 mode 字段）= inject。
 function turnStatsMode() {
   try {
-    const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-turnstats.json'), 'utf8'));
+    const v = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-turnstats.json'), 'utf8')).replace(/^\uFEFF/, ''));
     if (!v || v.enabled !== true) return null;
     return v.mode === 'notify' ? 'notify' : 'inject';
   } catch (e) { return null; }

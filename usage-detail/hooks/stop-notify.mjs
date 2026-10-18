@@ -17,7 +17,7 @@ const DONE_FILE = path.join(os.homedir(), '.zcode', 'usage-detail-turn-done.json
 
 function readSwitch() {
   try {
-    const v = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-turnstats.json'), 'utf8'));
+    const v = JSON.parse(String(fs.readFileSync(path.join(os.homedir(), '.zcode', 'usage-turnstats.json'), 'utf8')).replace(/^\uFEFF/, ''));
     if (!v || v.enabled !== true) return null;
     return v.mode === 'notify' ? 'notify' : (v.mode === 'inject' ? 'inject' : 'inject'); // 兼容旧 {"enabled":true}（无 mode）= inject
   } catch (e) { return null; }

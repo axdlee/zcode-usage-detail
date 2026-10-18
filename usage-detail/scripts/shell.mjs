@@ -65,7 +65,15 @@ hr{border:none;border-top:1px solid var(--border);}
     --viz-series-1:#6c8cff; --viz-series-2:#e8a15c; --viz-series-3:#5cbf9a;
     --viz-series-4:#c586c0; --viz-series-5:#d16f6f; --viz-series-6:#7fb3e0;
   }
-:root[data-theme="light"]{color-scheme:light}
+:root[data-theme="light"]{
+    color-scheme: light;
+    --background:#ffffff; --foreground:#1a1a1a; --card:#ffffff;
+    --muted:#f2f2f3; --muted-foreground:#6b6b70; --border:#e4e4e7;
+    --primary:#18181b; --primary-foreground:#ffffff;
+    --blue:#2f6bff; --green:#15803d; --red:#dc2626; --yellow:#b45309;
+    --viz-series-1:#4066f0; --viz-series-2:#e8890c; --viz-series-3:#0f9d6a;
+    --viz-series-4:#ab47bc; --viz-series-5:#d15b5b; --viz-series-6:#2f80c8;
+  }
 `;
 export const TAB_JS = `
 document.querySelectorAll('.nav-pills [role=tab]').forEach(function (t) {
@@ -83,6 +91,7 @@ document.querySelectorAll('.nav-pills [role=tab]').forEach(function (t) {
 (function () {
   var h = (location.hash || '').replace('#', '');
   if (!h) return;
+  if (!/^[a-z-]{1,40}$/.test(h)) return; // 畸形 hash 防护：querySelector 非法选择器会抛错并跳过后续主题初始化
   var btn = document.querySelector('.nav-pills [role=tab][aria-controls="ud-' + h + '"]');
   if (btn) btn.click();
 })();

@@ -720,6 +720,8 @@ var I18N_EN = {
   "（仅显示前 60）": " (showing first 60)",
   "已选": "Selected",
   "跳转到页": "Go to page",
+  "点击只看该会话": "Click to show only this session",
+  "点击只看该模型": "Click to show only this model",
   '启动失败：请在终端运行 usage.sh serve': 'Failed to start: run "usage.sh serve" in a terminal'
 };
 var I18N_LANG = 'zh';
@@ -788,6 +790,7 @@ function __usageBoot(D) {
     var c = PRICE && PRICE.currency;
     return { USD: '$', CNY: '¥', EUR: '€', GBP: '£', JPY: '¥' }[c] || (c ? c + ' ' : '$');
   })();
+  try { document.documentElement.lang = I18N_LANG === 'en' ? 'en' : 'zh-CN'; } catch (e) {} // <html lang> 与界面语言同步（无障碍/拼写检查）
   var $ = function (id) { return document.getElementById(id); };
   var N = function (v) { var x = Number(v); return v == null || !Number.isFinite(x) ? 0 : x; }; // 真·转数字：弹窗输入框的字符串值也要安全进入算术
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
@@ -1876,8 +1879,6 @@ function __usageBoot(D) {
     var ts = rows.map(function (r) { return r[1]; }).sort(function (a, b) { return a - b; });
     if (ts.length < 2) { host.innerHTML = '<p class="text-muted">数据不足，无法切分窗口</p>'; return; }
     var wins = [], cur = { start: ts[0], end: ts[0], tok: 0, req: 0 };
-    var tokOf = {};
-    rows.forEach(function (r) { tokOf[r[1]] = N(r[4]) + N(r[5]); });
     var lastT = null;
     rows.slice().sort(function (a, b) { return a[1] - b[1]; }).forEach(function (r) {
       if (lastT != null && r[1] - lastT >= 5 * 3600e3) { wins.push(cur); cur = { start: r[1], end: r[1], tok: 0, req: 0 }; }
@@ -2033,8 +2034,8 @@ function __usageBoot(D) {
     } else {
       view.forEach(function (r, i) {
         body += '<tr class="ud-click" data-di="' + i + '"><td class="text-nowrap">' + fullTs(r[1]) + '</td>' +
-          '<td class="ud-flink" data-k="s" data-v="' + r[0] + '" title="点击只看该会话">' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
-          '<td class="ud-flink" data-k="m" data-v="' + r[2] + '" title="点击只看该模型">' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
+          '<td class="ud-flink" data-k="s" data-v="' + r[0] + '" title="' + tr('点击只看该会话') + '">' + (TL[r[0]] ? esc(TL[r[0]]) : '<span class="text-muted">（无标题）</span>') + '</td>' +
+          '<td class="ud-flink" data-k="m" data-v="' + r[2] + '" title="' + tr('点击只看该模型') + '">' + esc(MD[r[2]]) + '</td><td>' + pvLabel(r[3]) + '</td><td>' + QT[r[9]] + '</td>' +
           '<td class="text-end tabular-nums">' + tokCell(r[4]) + '</td>' +
           '<td class="text-end tabular-nums">' + tokCell(r[6]) + '</td>' +
           '<td class="text-end tabular-nums">' + tokCell(r[10]) + '</td>' +
@@ -2395,7 +2396,7 @@ function __usageBoot(D) {
       '<td class="ud-mgr-t"><input data-k="in" value="' + esc(e.in) + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="out" value="' + esc(e.out) + '" inputmode="decimal"></td>' +
       '<td class="ud-mgr-t"><input data-k="cache" value="' + esc(e.cache) + '" inputmode="decimal"></td>' +
-      '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + esc(e.ctxOverride || '') + '" placeholder="' + (e.ctx ? esc(String(e.ctx)) : tr('自动')) + '" title="' + '" title="' + tr('上下文窗口 token 数，留空按模型自动检测（水印曲线用）') + '" inputmode="numeric"></td>' +
+      '<td class="ud-mgr-t"><input data-k="ctxOverride" value="' + esc(e.ctxOverride || '') + '" placeholder="' + (e.ctx ? esc(String(e.ctx)) : tr('自动')) + '" title="' + tr('上下文窗口 token 数，留空按模型自动检测（水印曲线用）') + '" inputmode="numeric"></td>' +
       '<td class="text-nowrap"><button type="button" class="btn ud-mgr-act ud-mgr-save" style="margin:0">' + tr('保存') + '</button> <button type="button" class="btn ud-mgr-act ud-mgr-del" style="margin:0" title="' + tr('删除该模型价') + '">' + tr('删除') + '</button></td></tr>';
   }
   function swRow(id, name, desc, on) {
@@ -2419,7 +2420,7 @@ function __usageBoot(D) {
     body.innerHTML =
       '<div class="ud-mgr-h">' + tr('成本单价（元 / 每百万 token）') + '</div>' +
       '<div class="ud-mgr-sub">' + tr('GLM 5.3 系为智谱官网权威价；其余来自 models.dev（USD 按 7.2 换算）。默认列出当前用量相关模型，搜索可查全量；修改保存后按新价重算。') + '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="' + tr('搜索模型…') + '" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + tr(' 个模型') + (p.modelsSlim && p.modelsTotal != null ? tr('（全量 ') + p.modelsTotal + '）' : '') + (list.length >= 60 ? tr('（仅显示前 60）') : '') + '</span></div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="form-control form-control-sm" id="ud-mgr-q" placeholder="' + tr('搜索模型…') + '" value="' + esc(mgrState.q) + '" style="max-width:260px"><span class="text-small text-muted">' + list.length + ' / ' + models.length + tr(' 个模型') + (p.modelsSlim && p.modelsTotal != null ? tr('（全量 ') + p.modelsTotal + tr('）') : '') + (list.length >= 60 ? tr('（仅显示前 60）') : '') + '</span></div>' +
       '<div class="table-responsive" id="ud-mgr-wrap" style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:10px"><table class="table table-sm" style="margin:0"><thead><tr><th>' + tr('模型') + '</th><th>' + tr('输入') + '</th><th>' + tr('输出') + '</th><th>' + tr('缓存读') + '</th><th title="' + tr('上下文窗口 token 数，留空自动检测') + '">' + tr('窗口') + '</th><th></th></tr></thead><tbody id="ud-mgr-rows">' +
       list.map(function (m) { return mgrRow(m, p.models[m], !mgrState.q && used[m.toLowerCase()]); }).join('') +
       '</tbody></table></div>' +

@@ -8,7 +8,7 @@ cmd_summary() {
               sum(input_tokens) AS 输入token,
               sum(output_tokens+reasoning_tokens) AS 生成token,
               sum(cache_read_input_tokens) AS 缓存读token
-       FROM model_usage WHERE status='completed';"
+       FROM model_usage;"
     echo
     echo "—— 今日 ——"
     q "SELECT count(*) AS 请求数,
@@ -180,6 +180,12 @@ cmd_export() {
     case "$kind" in
       csv)
         out="${out:-zcode-usage-export.csv}"
+        # 全新环境表还不存在：导出表头空 CSV，而不是让 SQL 报 no such table（与 json 分支同守卫）
+        if [[ "$(qr "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('model_usage','session')")" != "2" ]]; then
+          printf 'time,session,project,model,provider,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,duration_ms,status\n' > "$out"
+          echo "已导出 CSV（空库）：$out"
+          return
+        fi
         # qc()：CLI 用 sqlite3 -csv，无 sqlite3 环境（Windows 常见）走 node 替身的 -csv 模式
         qc "
           SELECT datetime(m.started_at/1000,'unixepoch','localtime') AS time,

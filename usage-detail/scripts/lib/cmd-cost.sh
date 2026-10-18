@@ -57,6 +57,7 @@ cmd_prices() {
       sync)
         command -v node >/dev/null 2>&1 || { echo "prices sync 需要 node（同步仅是可选操作，内置价格表已可用）" >&2; exit 1; }
         tmp=$(mktemp)
+        trap 'rm -f "$tmp"' EXIT  # node 解析失败（set -e 中断）也不残留 TMPDIR 里的 MB 级下载物
         curl -fsSL --max-time 30 https://models.dev/api.json -o "$tmp" || { echo "下载 models.dev 失败" >&2; rm -f "$tmp"; exit 1; }
         node - "$tmp" "${ZCODE_USAGE_PRICES:-$HOME/.zcode/usage-prices.json}" "$SCRIPT_DIR/default-prices.json" <<'NODE'
 const fs = require('fs');

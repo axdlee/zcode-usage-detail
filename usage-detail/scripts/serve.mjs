@@ -324,7 +324,7 @@ function resolveBash() {
   return cmd;
 }
 
-function renderFragment(limit) {
+function renderFragment(limit, forServe) {
   // 唯一临时名：并发重建时两个 bash 写同一路径会互相读到半成品（panel-server 同类路径已加随机）
   const out = path.join(os.tmpdir(), 'zcode-usage-serve-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.html');
   const args = [USAGE_SH, 'dashboard', out];
@@ -337,9 +337,12 @@ function renderFragment(limit) {
   }
   let html = fs.readFileSync(out, 'utf8');
   try { fs.unlinkSync(out); } catch (e) {}
-  // 切换为服务模式：数据走 /api/data，由 boot 函数异步加载
-  html = html.replace(/^const DATA =\n.*$/m, "const DATA = null;\nwindow.__USAGE_DATA_URL__ = '/api/data';\nwindow.__USAGE_SERVE__ = true;");
-  if (html.indexOf('__USAGE_DATA_URL__') < 0) throw new Error('dashboard 生成结果异常');
+  // 服务模式：数据走 /api/data，由 boot 函数异步加载。
+  // 导出报告（forServe=false）必须保留内嵌 DATA——自包含快照脱离本机后无 API 可拉，
+  // 否则 boot 的 fetch 失败、整页只剩静态骨架（曾因无条件替换导致报告导出空数据）。
+  if (forServe !== false) {
+    html = html.replace(/^const DATA =\n.*$/m, "const DATA = null;\nwindow.__USAGE_DATA_URL__ = '/api/data';\nwindow.__USAGE_SERVE__ = true;");
+    if (html.indexOf('__USAGE_DATA_URL__') < 0) throw new Error('dashboard 生成结果异常');
   // 服务态附加：刷新按钮 + 自动刷新开关（挂机监控；页签 hash 在 reload 后保留）+ 实时燃烧率角标（5s 轻轮询）
   html += `<script>
 (function () {
@@ -384,6 +387,7 @@ function renderFragment(limit) {
   }, 200);
 })();
 </script>`;
+  }
   return html;
 }
 
@@ -578,7 +582,7 @@ const server = http.createServer(async function (req, res) {
       res.end(JSON.stringify(writeSwitches(b)));
     } else if (req.method === 'GET' && (u.pathname === '/report.html' || u.pathname === '/report')) {
       // 自包含报表：内嵌全部数据的一次性快照（供存档/分享/打印）
-      const html = renderFragment(-1).replace('window.__USAGE_SERVE__ = true;', 'window.__USAGE_SERVE__ = false;');
+      const html = renderFragment(-1, false); // 自包含快照：保留内嵌 DATA、不注入刷新与轮询
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': 'attachment; filename="zcode-usage-report.html"' });
       res.end(html);
     } else if (req.method === 'POST' && u.pathname === '/api/sync-prices') {
