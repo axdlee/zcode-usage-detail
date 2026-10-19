@@ -18,8 +18,14 @@ source "$SCRIPT_DIR/lib/cmd-this.sh"
 source "$SCRIPT_DIR/lib/dashboard.sh"
 
 if [[ ! -f "$DB" ]]; then
-  echo "未找到 ZCode 本地数据库：$DB" >&2
-  exit 1
+  # dashboard 冷启动（ZCode 从未运行过）：建 0 字节库走空数据页；其余子命令仍明确报错
+  if [[ "${1:-}" == dashboard || "${1:-}" == dashboard-this ]]; then
+    mkdir -p "$(dirname "$DB")"
+    touch "$DB"
+  else
+    echo "未找到 ZCode 本地数据库：$DB" >&2
+    exit 1
+  fi
 fi
 
 cmd="${1:-summary}"

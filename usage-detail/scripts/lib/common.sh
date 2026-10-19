@@ -13,8 +13,14 @@ price_file() {
 }
 
 if [[ ! -f "$DB" ]]; then
-  echo "未找到 ZCode 本地数据库：$DB" >&2
-  exit 1
+  # dashboard 冷启动（ZCode 从未运行过）：建 0 字节库走空数据页（入口已做同款豁免，此处兜底直接 source 场景）
+  if [[ "${1:-}" == dashboard || "${1:-}" == dashboard-this ]]; then
+    mkdir -p "$(dirname "$DB")"
+    touch "$DB"
+  else
+    echo "未找到 ZCode 本地数据库：$DB" >&2
+    exit 1
+  fi
 fi
 
 # 数据库访问：优先本机 sqlite3 CLI；没有时（Windows Git Bash 常见）回退 node:sqlite 替身。

@@ -366,7 +366,7 @@ function buildDetail(args) {
 }
 
 // ---------- 最小 MCP stdio 协议 ----------
-const SERVER_INFO = { name: 'usage-detail-panel', 'version': '0.30.1' };
+const SERVER_INFO = { name: 'usage-detail-panel', 'version': '0.30.3' };
 // 完整版仪表盘作为侧栏页面（与 /usage-ui、serve 本地面板同源同界面，单一维护点）：
 // 调 usage.sh dashboard 生成自包含片段（默认全量历史），包上独立壳（主题变量+页签行为）。
 import { execFile } from 'node:child_process';
@@ -524,7 +524,7 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data, time_created AS tc, length(data) AS
        ) WHERE rn <= 30 ORDER BY b DESC LIMIT 150) i) AS bitems`;
 function ctxTop(sid) {
   sid = String(sid || '').slice(0, 128);
-  if (!sid) return { tools: [], files: [] };
+  if (!sid) return { tools: [], files: [], fleet: [], bgroups: [], bitems: [] };
   try {
     const row = db.prepare(CTX_TOP_SQL).get(sid, sid);
     const j = (v) => { try { return JSON.parse(v) || []; } catch (e) { return []; } };

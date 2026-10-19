@@ -228,7 +228,7 @@ const CTX_TOP_SQL = `WITH P AS (SELECT data, time_created AS tc, length(data) AS
        ) WHERE rn <= 30 ORDER BY b DESC LIMIT 150) i) AS bitems`;
 function ctxTop(sid) {
   sid = String(sid || '').slice(0, 128);
-  if (!sid) return { tools: [], files: [] };
+  if (!sid) return { tools: [], files: [], fleet: [], bgroups: [], bitems: [] };
   try {
     const row = db.prepare(CTX_TOP_SQL).get(sid, sid);
     const j = (v) => { try { return JSON.parse(v) || []; } catch (e) { return []; } };
