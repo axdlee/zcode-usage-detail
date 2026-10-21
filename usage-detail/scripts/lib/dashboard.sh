@@ -2689,7 +2689,7 @@ function __usageBoot(D) {
       });
       days.forEach(function (k, di) {
         var o = perDay[k] || {}, req = 0, inn = 0, out2 = 0, ca = 0;
-        pvs.forEach(function (p) { var m = o[p] || {}; req += m.req || 0; inn += m.inn; out2 += m.out; ca += m.ca; });
+        pvs.forEach(function (p) { var m = o[p] || {}; req += m.req || 0; inn += N(m.inn); out2 += N(m.out); ca += N(m.ca); }); // 该天缺某来源时字段 undefined，NaN 会经 fmt 显示成 0 —— 与 req 同款保护
         var tip = k + '\n请求 ' + fmtI(req) + tr(' · 输入 ') + fmt(inn) + '\n生成 ' + fmt(out2) + tr(' · 缓存读 ') + fmt(ca);
         body += '<rect x="' + (P.l + di * slot) + '" y="' + P.t + '" width="' + slot + '" height="' + ih + '" fill="transparent"><title>' + esc(tip) + '</title></rect>';
       });
