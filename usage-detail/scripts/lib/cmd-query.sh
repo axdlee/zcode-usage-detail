@@ -188,10 +188,12 @@ cmd_export() {
         fi
         # qc()：CLI 用 sqlite3 -csv，无 sqlite3 环境（Windows 常见）走 node 替身的 -csv 模式
         qc "
+          -- 文本列防公式注入：Excel 会把 = + - @ 开头的单元格当公式执行，前缀单引号（真实数据可含用户输入标题）
           SELECT datetime(m.started_at/1000,'unixepoch','localtime') AS time,
-                 substr(coalesce(s.title,''),1,80) AS session,
-                 s.directory AS project,
-                 m.model_id AS model, m.provider_id AS provider,
+                 CASE WHEN substr(coalesce(s.title,''),1,1) IN ('=','+','-','@') THEN '''' || substr(coalesce(s.title,''),1,80) ELSE substr(coalesce(s.title,''),1,80) END AS session,
+                 CASE WHEN substr(coalesce(s.directory,''),1,1) IN ('=','+','-','@') THEN '''' || s.directory ELSE s.directory END AS project,
+                 CASE WHEN substr(coalesce(m.model_id,''),1,1) IN ('=','+','-','@') THEN '''' || m.model_id ELSE m.model_id END AS model,
+                 CASE WHEN substr(coalesce(m.provider_id,''),1,1) IN ('=','+','-','@') THEN '''' || m.provider_id ELSE m.provider_id END AS provider,
                  m.input_tokens AS input_tokens,
                  m.output_tokens+m.reasoning_tokens AS output_tokens,
                  m.cache_read_input_tokens AS cache_read_tokens,

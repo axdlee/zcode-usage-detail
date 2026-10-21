@@ -38,6 +38,11 @@ function q(sql) {
   if (!row) return '';
   return String(row[Object.keys(row)[0]]);
 }
+// 多列单行查询：按列序返回值数组（q() 只取首列，liveJSON 曾误用它拆分导致实时角标长期为 0）
+function qcols(sql) {
+  const row = db.prepare(sql).get();
+  return row ? Object.keys(row).map((k) => row[k]) : [];
+}
 // turn_id 是较新 ZCode 才有的列：老库直接 SELECT 会 prepare 失败，先探测再拼表达式
 const TURN_EXPR = q("SELECT count(*) FROM pragma_table_info('model_usage') WHERE name='turn_id'") === '1' ? 'R.turn_id' : 'NULL';
 // agent / context_exceeded 同为较新列：老库回退（agent 置空显示未知来源，ctx 置 NULL 无超限标注）
@@ -302,7 +307,7 @@ function dataJSON(limit) {
 }
 
 function liveJSON() {
-  const win = q(`WITH cur AS (SELECT count(*) AS req,
+  const win = qcols(`WITH cur AS (SELECT count(*) AS req,
                        COALESCE(sum(input_tokens),0) AS inn,
                        COALESCE(sum(output_tokens+reasoning_tokens),0) AS gen,
                        min(started_at) AS st
@@ -310,10 +315,10 @@ function liveJSON() {
          SELECT req, inn+gen AS tok,
                 CAST(round((inn+gen) / max(0.1,(unixepoch()*1000 - COALESCE(st, unixepoch()*1000))/3600000.0)) AS int),
                 COALESCE(st, 0)
-         FROM cur;`).trim().split('|').map(Number);
-  const today = q(`SELECT count(*), COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0),
+         FROM cur;`).map(Number);
+  const today = qcols(`SELECT count(*), COALESCE(sum(input_tokens+output_tokens+reasoning_tokens),0),
                           sum(CASE WHEN status<>'completed' THEN 1 ELSE 0 END)
-                   FROM model_usage WHERE date(started_at/1000,'unixepoch','localtime')=date('now','localtime');`).trim().split('|').map(Number);
+                   FROM model_usage WHERE date(started_at/1000,'unixepoch','localtime')=date('now','localtime');`).map(Number);
   return {
     window: { req: win[0] || 0, tok: win[1] || 0, rateH: win[2] || 0, start: win[3] || 0 },
     today: { req: today[0] || 0, tok: today[1] || 0, fail: today[2] || 0 },
@@ -413,35 +418,65 @@ function renderFragment(limit, forServe) {
     if (!c || !window.__usageBootDone) return;
     clearInterval(t);
     var b = document.createElement('button');
-    b.type = 'button'; b.className = 'btn'; b.style.margin = '0'; b.style.fontSize = '12px';
-    b.textContent = tr('刷新数据');
-    b.addEventListener('click', function () { b.disabled = true; b.textContent = tr('刷新中…'); location.reload(); });
+    b.type = 'button'; b.className = 'btn'; b.style.margin = '0'; b.style.fontSize = '12px'; b.style.padding = '2px 10px';
+    b.textContent = tr('同步数据');
+    // 手动同步：拉新快照交给页面闭包的 __udRefreshData 重绘——骨架、筛选、展开态与滚动全部保留；
+    // 老片段没有该入口时回退整页刷新。30s 超时兜底：服务挂起时 fetch 永不落定会让按钮无限「同步中」
+    function doRefresh() {
+      if (b.disabled) return;
+      b.disabled = true; b.textContent = tr('同步中…');
+      var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+      var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 30000) : null;
+      fetch('/api/data', ctl ? { signal: ctl.signal } : {}).then(function (r) { return r.json(); }).then(function (j) {
+        if (!(window.__udRefreshData && window.__udRefreshData(j))) location.reload();
+        else { b.textContent = tr('同步数据'); b.disabled = false; }
+      }).catch(function () {
+        b.textContent = tr('同步失败');
+        setTimeout(function () { b.textContent = tr('同步数据'); b.disabled = false; }, 2000);
+      }).then(function () { if (timer) clearTimeout(timer); });
+    }
+    b.addEventListener('click', function () { doRefresh(); });
     c.appendChild(b);
-    // 自动刷新：60s 整页刷新（保留页签 hash；开关状态记忆在 localStorage）
+    // 自动刷新：按钮上显示下次同步倒计时（Auto 47s），到点走同一局部刷新；开关记忆在 localStorage
     var auto = document.createElement('button');
     auto.type = 'button'; auto.className = 'ud-toggle'; auto.style.margin = '0'; auto.style.fontSize = '12px';
-    var on = false;
+    var on = false, left = 60;
     try { on = localStorage.getItem('ud-autorefresh') === '1'; } catch (e) {}
-    function paint() { auto.textContent = 'Auto ' + (on ? 'ON' : 'OFF'); auto.setAttribute('aria-pressed', String(on)); }
-    function applyAuto() {
+    // 「自动刷新」「关」是独立 i18n 键——「自动」已被压缩事件触发方式映射为小写 auto，同名会被覆盖
+    function paint() { auto.textContent = on ? tr('自动刷新') + ' ' + left + 's' : tr('自动刷新') + ' ' + tr('关'); auto.setAttribute('aria-pressed', String(on)); }
+    setInterval(function () {
+      if (!on) return;
+      left--;
+      if (left <= 0) {
+        // 手动同步进行中到点：顺延 5s 再试（整页重置会让该轮自动刷新被静默跳过）
+        if (b.disabled) { left = 5; return; }
+        left = 60; doRefresh();
+      }
       paint();
-      if (on) {
-        if (!window.__udAutoT) window.__udAutoT = setInterval(function () { location.reload(); }, 60000);
-      } else if (window.__udAutoT) { clearInterval(window.__udAutoT); window.__udAutoT = null; }
-    }
+    }, 1000);
     auto.addEventListener('click', function () {
-      on = !on;
+      on = !on; left = 60;
       try { localStorage.setItem('ud-autorefresh', on ? '1' : '0'); } catch (e) {}
-      applyAuto();
+      paint();
+      if (on) doRefresh();
     });
-    paint(); applyAuto();
+    paint();
     c.appendChild(auto);
     var badge = document.createElement('span');
     badge.id = 'ud-live-badge'; badge.className = 'text-small text-muted';
     c.appendChild(badge);
+    // 本段在页面全局作用域（fmt/fmtI 在 __usageBoot 内不可见），自带紧凑格式化
+    var EN = document.documentElement.lang === 'en';
+    function compact(n) {
+      n = Number(n) || 0;
+      if (EN) return n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n));
+      return n >= 1e8 ? (n / 1e8).toFixed(2) + '亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + '万' : String(Math.round(n));
+    }
     function tick() {
       fetch('/api/live').then(function (r) { return r.json(); }).then(function (j) {
-        badge.textContent = '● ' + tr('实时') + ' · ' + tr('燃烧率') + ' ' + Number(j.window.rateH || 0).toLocaleString('zh-CN') + ' token/h · ' + tr('近 5h') + ' ' + Number(j.window.tok || 0).toLocaleString('zh-CN') + ' tok · ' + tr('今日') + ' ' + Number(j.today.req || 0).toLocaleString('zh-CN') + ' ' + tr('次') + '';
+        // 紧凑单位（2187 万 token/h）：每小时原值可达八九位数
+        badge.textContent = '● ' + tr('实时') + ' · ' + tr('燃烧率') + ' ' + compact(j.window.rateH) + ' token/h · ' + tr('近 5h') + ' ' + compact(j.window.tok) + ' tok · ' + tr('今日') + ' ' + Number(j.today.req || 0).toLocaleString('zh-CN') + ' ' + tr('次') + '';
+        badge.title = Number(j.window.rateH || 0).toLocaleString('zh-CN') + ' token/h · ' + Number(j.window.tok || 0).toLocaleString('zh-CN') + ' tok';
       }).catch(function () {});
     }
     tick();

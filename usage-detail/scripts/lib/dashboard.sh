@@ -182,7 +182,30 @@ cmd_dashboard() {
 /* ===== 顶部筛选区：一行流式排布，弱化容器感 ===== */
 #usage-dashboard .viz-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:4px;}
 #usage-dashboard .viz-controls .form-label{margin:0;}
-#usage-dashboard .viz-controls .form-select{width:auto;max-width:200px;padding:3px 8px;font-size:12px;border-radius:7px;}
+/* ===== 表单控件：统一设计语言，覆盖宿主 Bootstrap 默认外观 ===== */
+#usage-dashboard .form-control,#usage-dashboard .form-select{
+  appearance:none;-webkit-appearance:none;
+  width:auto;border:1px solid var(--border);border-radius:8px;
+  padding:5px 10px;background:var(--card);color:var(--foreground);
+  font:inherit;font-size:13px;line-height:1.4;
+  transition:border-color .12s,box-shadow .12s,background-color .12s;
+}
+#usage-dashboard .form-control:hover,#usage-dashboard .form-select:hover{border-color:color-mix(in srgb,var(--muted-foreground) 55%,var(--border));}
+#usage-dashboard .form-control:focus,#usage-dashboard .form-select:focus{outline:none;border-color:var(--ud-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--ud-accent) 18%,transparent);}
+#usage-dashboard .form-control:disabled,#usage-dashboard .form-select:disabled{opacity:.5;cursor:default;}
+#usage-dashboard .form-control::placeholder{color:var(--muted-foreground);opacity:.7;}
+#usage-dashboard .form-control-sm,#usage-dashboard .form-select-sm{padding:3px 8px;font-size:12px;border-radius:7px;}
+#usage-dashboard .form-select{
+  padding-right:28px;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8a93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;
+}
+#usage-dashboard .form-select-sm{padding-right:24px;background-position:right 8px center;}
+#usage-dashboard input[type="search"]::-webkit-search-cancel-button{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--muted-foreground);opacity:.55;cursor:pointer;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 2l8 8M10 2l-8 8' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 2l8 8M10 2l-8 8' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;}
+#usage-dashboard input[type="search"]::-webkit-search-cancel-button:hover{opacity:.9;}
+#usage-dashboard .viz-controls .form-select{max-width:200px;}
 #usage-dashboard .ud-sortable{cursor:pointer;user-select:none;}
 #usage-dashboard .ud-sortable:hover{color:var(--foreground);}
 #usage-dashboard .ud-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle;}
@@ -337,8 +360,8 @@ cmd_dashboard() {
 #usage-dashboard .ud-mgr-close:hover{background:color-mix(in srgb,var(--foreground) 10%,transparent);color:var(--foreground);transform:scale(1.06);}
 #usage-dashboard .ud-mgr-body{padding:16px 20px 20px;}
 #usage-dashboard .ud-mgr-t input{width:86px;padding:4px 9px;font-size:12px;border-radius:8px;border-color:transparent;background:color-mix(in srgb,var(--muted) 55%,transparent);transition:border-color .12s,background .12s;}
-#usage-dashboard .ud-mgr-t input:hover,#usage-dashboard .ud-mgr-t input:focus{border-color:var(--ud-accent);background:var(--card);}
-#usage-dashboard .ud-mgr-t input:focus-visible{outline:2px solid color-mix(in srgb,var(--ud-accent) 45%,transparent);outline-offset:1px;}
+#usage-dashboard .ud-mgr-t input:hover{border-color:color-mix(in srgb,var(--muted-foreground) 55%,var(--border));}
+#usage-dashboard .ud-mgr-t input:focus{outline:none;border-color:var(--ud-accent);background:var(--card);box-shadow:0 0 0 3px color-mix(in srgb,var(--ud-accent) 18%,transparent);}
 #usage-dashboard #ud-mgr-rows tr{transition:background .1s;}
 #usage-dashboard #ud-mgr-rows tbody tr:hover{background:color-mix(in srgb,var(--muted) 38%,transparent);}
 #usage-dashboard #ud-mgr-wrap thead th{position:sticky;top:0;z-index:1;background:var(--card);box-shadow:0 1px 0 var(--border);}
@@ -436,7 +459,7 @@ UD_HEAD
       <span class="text-small text-muted" id="ud-hours-note"></span>
     </span>
   </div>
-  <div id="ud-hours"></div>
+  <div id="ud-hours" style="overflow-x:auto"></div>
   <div style="display:flex;justify-content:space-between;align-items:center">
     <h3 style="margin-bottom:0">活跃热力图</h3>
     <div class="viz-row" role="group" aria-label="热力图粒度" id="ud-heat-toggle">
@@ -707,7 +730,7 @@ var I18N_EN = {
   '项目用量': 'Projects', '请求明细': 'Requests', '失败请求': 'Failures',
   '来源': 'Provider', '模型': 'Model', '今天': 'Today', '昨天': 'Yesterday', '近 7 天': '7 Days', '近 30 天': '30 Days', '全部': 'All',
   '折算成本（API 牌价）': 'Converted Cost (API list)', '同步价格': 'Sync Prices', '设置': 'Settings',
-  '导出报表': 'Export Report', '刷新数据': 'Refresh', '刷新中…': 'Refreshing…', '自动': 'Auto',
+  '导出报表': 'Export Report', '刷新数据': 'Refresh', '刷新中…': 'Refreshing…', '同步数据': 'Sync Data', '同步中…': 'Syncing…', '同步失败': 'Sync failed', '自动刷新': 'Auto refresh', '关': 'Off', '关闭': 'Close', '近 1h 合计 ': 'last-1h total ',
   '请求次数': 'Requests', '输入 token': 'Input Tokens', '生成 token': 'Output Tokens', '活跃会话': 'Active Sessions',
   '缓存读': 'Cache Read', '缓存写': 'Cache Write', '日均': 'Daily Avg', '覆盖': 'Days', '输出 + 思考 token': 'Output + Reasoning Tokens', '合计': 'Total', '含子代理请求': 'incl. subagent requests',
   '用量洞察': 'Insights', '今日用量': 'Today', '昨日用量': 'Yesterday', '近 7 天用量': '7-Day', '近 30 天用量': '30-Day', '累计用量': 'All-Time',
@@ -727,6 +750,7 @@ var I18N_EN = {
   '日期': 'Date', '请求': 'Requests', '缓存命中': 'Cache Hit', '每月汇总': 'Monthly', '每日明细': 'Daily Detail', '月份': 'Month',
   '健康': 'Health', '压缩': 'Compact', '折算成本': 'Cost', '耗时': 'Duration',
   '当前筛选下暂无数据': 'No data for current filters', '暂无数据': 'No data',
+  '关闭设置': 'Close settings', '用量筛选': 'Usage filters', '文本筛选': 'Text filter', '时间范围': 'Time range', '甜甜圈图': 'Donut chart', '点击清除会话筛选': 'Click to clear the session filter', '热力图粒度': 'Heatmap granularity', '时段分布指标': 'Hourly metric', '价格与预算设置': 'Price & budget settings', '每日用量趋势（按来源堆叠）': 'Daily trend (stacked by provider)', '24 小时用量分布': '24-hour distribution', '近 7 天趋势': 'Last 7 days', '生成 token / 请求（单轮平均产出）': 'Generated tokens per request (single-turn avg output)',
   '点击表头排序，筛选条件在上方全局生效；点击行可展开会话详情。': 'Click headers to sort; filters above apply globally; click a row to expand session details.',
   '点击表头排序；点击任意请求行可展开该请求的完整信息。': 'Click headers to sort; click any request row to expand its full details.',
   '主会话': 'Main', '子代理': 'Subagent', '其他': 'Other',
@@ -879,8 +903,8 @@ function tr(s) { return I18N_LANG === 'en' && I18N_EN[s] ? I18N_EN[s] : s; }
     if (v && I18N_EN[v]) nodes.push([n, n.nodeValue.replace(v, I18N_EN[v])]);
   }
   nodes.forEach(function (x) { x[0].nodeValue = x[1]; });
-  Array.prototype.forEach.call(document.querySelectorAll('[placeholder],[title]'), function (el) {
-    ['placeholder', 'title'].forEach(function (a) {
+  Array.prototype.forEach.call(document.querySelectorAll('[placeholder],[title],[aria-label]'), function (el) {
+    ['placeholder', 'title', 'aria-label'].forEach(function (a) {
       var v = el.getAttribute(a);
       if (v && I18N_EN[v.trim()]) el.setAttribute(a, I18N_EN[v.trim()]);
     });
@@ -888,10 +912,11 @@ function tr(s) { return I18N_LANG === 'en' && I18N_EN[s] ? I18N_EN[s] : s; }
 })();
 
 function __usageBoot(D) {
-  // 模型名归一：同一模型可能以多种大小写形态入库（GLM-5.3-Flash / glm-5.3-flash），
-  // 不合并会把同模型拆成多行、模型筛选也分裂。建索引前就地合并：lower 相同的形态
-  // 并为一个模型索引，显示名取 token 量最大的原形态；价格匹配本身已有小写兜底不受影响。
-  (function () {
+  // 模型名归一（boot 与局部刷新共用）：同一模型可能以多种大小写形态入库
+  // （GLM-5.3-Flash / glm-5.3-flash），不合并会把同模型拆成多行、模型筛选也分裂。
+  // 建索引前就地合并：lower 相同的形态并为一个模型索引，显示名取 token 量最大的原形态；
+  // 价格匹配本身已有小写兜底不受影响。
+  function normalizeModels(D) {
     var MD0 = D.models || [];
     if (MD0.length < 2) return;
     var tokOf = {};
@@ -909,7 +934,8 @@ function __usageBoot(D) {
     }
     D.models = disp;
     (D.rows || []).forEach(function (r) { r[2] = remap[r[2]] != null ? remap[r[2]] : r[2]; });
-  })();
+  }
+  normalizeModels(D);
   var PV = D.providers || [], MD = D.models || [], TL = D.sessions || [], R = D.rows || [];
   var PVNAME = D.providerNames || {}; // BYOK 真名映射（id → 显示名），pvLabel 与文本筛选共用
   var PVNAME_PV = PV.map(function (id) { return PVNAME[id] || id; });
@@ -1342,7 +1368,7 @@ function __usageBoot(D) {
           '<div style="height:10px;border-radius:5px;background:var(--muted);overflow:hidden;margin:0 0 8px"><div style="width:' + Math.min(100, pct) + '%;height:100%;background:' + barColor + '"></div></div>' +
           '<div>' +
           (bm > 0 ? '<span class="ud-pill">' + tr('本月 ') + CURSYM + monthCost.toFixed(2) + ' / ' + CURSYM + bm.toFixed(0) + '</span>' : '') +
-          (r1h > 0 ? '<span class="ud-pill">' + tr('燃烧率 ') + fmtI(Math.round(r1h / 60)) + ' tok/min</span>' : '') +
+          (r1h > 0 ? '<span class="ud-pill" data-tip="' + fmtI(Math.round(r1h / 60)) + ' tok/min · ' + tr('近 1h 合计 ') + fmtI(r1h) + ' tok">' + tr('燃烧率 ') + fmt(Math.round(r1h / 60)) + ' tok/min</span>' : '') +
           '<span class="ud-pill">' + tr('达 80% / 100% 时系统提醒') + '</span>' +
           '</div>';
         heroEl.hidden = false;
@@ -1367,7 +1393,8 @@ function __usageBoot(D) {
             var ratio = avg7 > 0 ? (r1h * 24) / avg7 : 0;
             pace = ratio < 0.5 ? tr('节奏：放缓') : ratio <= 1.5 ? tr('节奏：平稳') : tr('节奏：加速');
           }
-          items.push(row(tr('近 1h 燃烧率'), fmtI(perMin) + ' tok/min', 'red', pace));
+          // 紧凑单位（36.5 万 tok/min）：原始六位数字不可读；悬停给精确值与近 1h 合计（含缓存读）
+          items.push(row(tr('近 1h 燃烧率'), '<span data-tip="' + fmtI(perMin) + ' tok/min · ' + tr('近 1h 合计 ') + fmtI(r1h) + ' tok">' + fmt(perMin) + ' tok/min</span>', 'red', pace));
         }
     })();
     // 分时计价当前档：按系统当前时间判定（有 tariff 配置的模型才显示，取筛选内用量最大的一个为代表）
@@ -1473,7 +1500,7 @@ function __usageBoot(D) {
     rows.forEach(function (r) { var o = per[r[3]]; o.req++; o.tok += N(r[4]) + N(r[5]); o.inn += N(r[4]); o.ca += N(r[6]); var c = rowCost(r); if (c != null) { o.cost += c; o.hasCost = true; } });
     var tot = per.reduce(function (a, x) { return a + x.tok; }, 0);
     var act = per.filter(function (x) { return x.req > 0; }).sort(function (a, b) { return b.tok - a.tok; });
-    if (!act.length) { $('ud-pv-stack').innerHTML = '<p class="text-muted">当前筛选下暂无数据</p>'; $('ud-pv-rows').innerHTML = ''; return; }
+    if (!act.length) { $('ud-pv-stack').innerHTML = '<p class="text-muted">' + tr('当前筛选下暂无数据') + '</p>'; $('ud-pv-rows').innerHTML = ''; return; }
     $('ud-pv-stack').innerHTML = donut(act.slice(0, 6).map(function (x) {
       return { name: pvLabel(x.i), value: x.tok, color: pvColor(x.i), tip: pvLabel(x.i) + ' · ' + fmtI(x.req) + tr(' 次请求 · ') + fmt(x.tok) + tr(' tok · 缓存 ') + (x.inn ? Math.round(x.ca / x.inn * 100) : 0) + '%' + (costOn && x.hasCost ? ' · ' + fmtCost(x.cost) : '') };
     }), 'token');
@@ -1498,7 +1525,7 @@ function __usageBoot(D) {
     }), 'token') + list.map(function (x) {
       var p = tot ? Math.round(x.tok / tot * 100) : 0;
       return '<div class="text-small" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>' + esc(MD[x.m]) + '</span><span class="tabular-nums text-muted">' + fmtI(x.req) + tr(' 次 · ') + fmt(x.tok) + ' token · ' + p + tr('% · 缓存 ') + x.hit + '%</span></div>';
-    }).join('') : '<p class="text-muted">当前筛选下暂无数据</p>';
+    }).join('') : '<p class="text-muted">' + tr('当前筛选下暂无数据') + '</p>';
   }
 
   function sessAgg(rows) {
@@ -1547,7 +1574,7 @@ function __usageBoot(D) {
     $('ud-top-sessions').innerHTML = list.length ? '<div class="table-responsive"><table class="table table-sm" style="min-width:520px;margin:0"><thead><tr><th>' + tr('会话') + '</th><th class="text-end">' + tr('请求数') + '</th><th class="text-end">' + tr('token 合计') + '</th><th>' + tr('近 7 天') + '</th><th class="text-end">' + tr('最后活动') + '</th></tr></thead><tbody>' +
       list.map(function (o) {
         return '<tr class="ud-click" data-sg="' + o.g + '" title="点击查看会话详情"><td>' + sessTitle(o) + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td>' + spark(o.g) + '</td><td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
-      }).join('') + '</tbody></table></div>' : '<p class="text-muted">当前筛选下暂无数据</p>';
+      }).join('') + '</tbody></table></div>' : '<p class="text-muted">' + tr('当前筛选下暂无数据') + '</p>';
     var donutEl = $('ud-tools-donut');
     if (donutEl) {
       donutEl.innerHTML = donut((D.tools || []).slice(0, 6).map(function (t) {
@@ -1620,7 +1647,7 @@ function __usageBoot(D) {
     var per = {};
     rows.forEach(function (r) { var k = dayKey(r[1]); var o = per[k] || (per[k] = { req: 0, tok: 0 }); o.req++; o.tok += N(r[4]) + N(r[5]); });
     var days = Object.keys(per).sort();
-    if (!days.length) { host.innerHTML = '<p class="text-muted">当前筛选下暂无数据</p>'; heatLastW = w; return; }
+    if (!days.length) { host.innerHTML = '<p class="text-muted">' + tr('当前筛选下暂无数据') + '</p>'; heatLastW = w; return; }
     var start = new Date(days[0] + 'T00:00:00'), end = new Date(days[days.length - 1] + 'T00:00:00');
     var cells = [];
     for (var d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -2077,12 +2104,12 @@ function __usageBoot(D) {
         '<td class="text-end">' + (o.tps == null ? '–' : tpsHtml(o.tps)) + '</td>' +
         '<td class="text-end tabular-nums">' + (o.avgTtft == null ? '–' : durCell(o.avgTtft)) + '</td>' +
         '<td class="text-end tabular-nums" style="color:' + (o.errRate >= 10 ? 'var(--red)' : o.errRate > 0 ? 'var(--yellow)' : 'inherit') + '">' + o.errRate + '%</td>' +
-        '<td class="text-end tabular-nums" title="生成 token / 请求（单轮平均产出）">' + (avgOut == null ? '–' : fmt(avgOut)) + '</td>' +
+        '<td class="text-end tabular-nums" title="' + tr('生成 token / 请求（单轮平均产出）') + '">' + (avgOut == null ? '–' : fmt(avgOut)) + '</td>' +
         '<td class="text-end tabular-nums">' + tokCell(o.inn) + '</td><td class="text-end tabular-nums">' + tokCell(o.out) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td>' +
         '<td class="text-end tabular-nums">' + o.rate + '%</td>' +
         (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td><td class="text-end tabular-nums">' + (o.per1k == null ? '–' : fmtCost(o.per1k)) + '</td>' : '') +
         '</tr>';
-    }).join('') : '<tr><td colspan="11" class="text-muted">当前筛选下暂无数据</td></tr>';
+    }).join('') : '<tr><td colspan="11" class="text-muted">' + tr('当前筛选下暂无数据') + '</td></tr>';
     if (!bodyEl.dataset.flinkBound) {
       bodyEl.dataset.flinkBound = '1';
       bodyEl.addEventListener('click', function (e) {
@@ -2147,7 +2174,7 @@ function __usageBoot(D) {
         (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') +
         '<td>' + spark(o.dir) + '</td>' +
         '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="text-muted">当前筛选下暂无数据</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="text-muted">' + tr('当前筛选下暂无数据') + '</td></tr>';
     Array.prototype.forEach.call(bodyEl.querySelectorAll('tr.ud-click'), function (tr) {
       tr.addEventListener('click', function () {
         var d = tr.getAttribute('data-proj');
@@ -2217,7 +2244,7 @@ function __usageBoot(D) {
       body += '<tr class="ud-click" data-sg="' + o.g + '"><td>' + sessTitle(o) + (o.sub ? '<span class="ud-tag">' + tr('子代理 ×') + fmtI(o.sub) + '</span>' : '') + '</td><td class="text-end tabular-nums">' + fmtI(o.req) + '</td><td class="text-end tabular-nums">' + tokCell(o.inn) + '</td><td class="text-end tabular-nums">' + tokCell(o.out) + '</td><td class="text-end tabular-nums">' + tokCell(o.tot) + '</td><td class="text-end tabular-nums">' + o.rate + '%</td><td class="text-end">' + healthBadge(o.health) + '</td>' + (hasCmp ? '<td class="text-end text-nowrap">' + (cmpMap[o.g] ? cmpMap[o.g].cnt + tr(' 次') : '–') + '</td>' : '') + (costOn ? '<td class="text-end tabular-nums">' + (o.hasCost ? fmtCost(o.cost) : '–') + '</td>' : '') + '<td class="text-end text-nowrap">' + fullTs(o.last) + '</td></tr>';
       if (o.g === sessExp) body += '<tr class="ud-exp"><td colspan="' + span + '">' + sessionDetailHTML(o) + '</td></tr>';
     });
-    $('ud-sessions-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
+    $('ud-sessions-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">' + tr('当前筛选下暂无数据') + '</td></tr>';
     Array.prototype.forEach.call($('ud-sessions-body').querySelectorAll('tr.ud-click'), function (tr) {
       tr.addEventListener('click', function () {
         var g = +tr.getAttribute('data-sg');
@@ -2537,7 +2564,7 @@ function __usageBoot(D) {
         if (detExp === i) body += '<tr class="ud-exp"><td colspan="' + span + '">' + requestDetailHTML(r) + '</td></tr>';
       });
     }
-    $('ud-detail-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">当前筛选下暂无数据</td></tr>';
+    $('ud-detail-body').innerHTML = body || '<tr><td colspan="' + span + '" class="text-muted">' + tr('当前筛选下暂无数据') + '</td></tr>';
     if (D.session) {
       var more = $('ud-more');
       if (more) {
@@ -2608,7 +2635,7 @@ function __usageBoot(D) {
     var w = host.clientWidth;
     if (!w) return;
     var rows = frows(false);
-    if (!rows.length) { host.innerHTML = '<p class="text-muted">当前筛选下暂无数据</p>'; return; }
+    if (!rows.length) { host.innerHTML = '<p class="text-muted">' + tr('当前筛选下暂无数据') + '</p>'; return; }
     var days = dayList(rows);
     var perDay = {};
     rows.forEach(function (r) {
@@ -3110,7 +3137,7 @@ function __usageBoot(D) {
       renderMgr();
     }
     function loadServe() {
-      body.innerHTML = '<p class="text-muted text-small">加载中…</p>';
+      body.innerHTML = '<p class="text-muted text-small">' + tr('加载中…') + '</p>';
       Promise.all([
         fetch('/api/prices').then(function (r) { return r.json(); }),
         fetch('/api/budget').then(function (r) { return r.json(); }),
@@ -3123,7 +3150,7 @@ function __usageBoot(D) {
     if (window.__USAGE_SERVE__) { loadServe(); return; }
     // 侧栏（MCP App）：callTool 直调设置工具，不经模型
     if (zc && typeof zc.callTool === 'function') {
-      body.innerHTML = '<p class="text-muted text-small">加载中…</p>';
+      body.innerHTML = '<p class="text-muted text-small">' + tr('加载中…') + '</p>';
       Promise.resolve(zc.callTool('usage_settings_get', {})).then(function (r) {
         renderFrom((r && r.structuredContent) || {});
       }).catch(function () { openPanelFallback(body, zc); });
@@ -3156,6 +3183,7 @@ function __usageBoot(D) {
     });
   }
   $('ud-mgr-close').addEventListener('click', function () { $('ud-mgr-mask').hidden = true; });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('ud-mgr-mask').hidden) $('ud-mgr-mask').hidden = true; });
   $('ud-mgr-mask').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
   $('ud-export-report').hidden = false;
   $('ud-export-report').addEventListener('click', function () {
@@ -3316,6 +3344,56 @@ function __usageBoot(D) {
     parts.push(fmtI(reqs) + ' ' + tr('次'));
     if (durMs > 0) parts.push(fmtDur(durMs));
     return parts.join(' · ') + ' (' + tr('截至') + ' ' + pad(new Date(lastTs).getHours()) + ':' + pad(new Date(lastTs).getMinutes()) + ')';
+  };
+  // 局部数据刷新（serve 手动同步/自动刷新）：只替换数据与派生引用，闭包状态、事件监听器、
+  // 筛选与展开态全部保留——骨架不重建、无白屏。供 serve 注入段调用；返回 false 则调用方回退整页刷新。
+  window.__udRefreshData = function (D2) {
+    if (!D2 || typeof D2 !== 'object') return false;
+    // 身份快照：索引型状态（来源/模型/会话筛选与展开）必须在新快照上按 id 找回——
+    // session id 是随机 UUID、providers/models 按 id 排序编号，新条目插队会让纯索引漂移到别的对象
+    var oldSID = (typeof D === 'object' && D && D.sessionIds) ? D.sessionIds : [];
+    var idP = PV[st.p], idM = MD[st.m], idS = oldSID[st.s], expSid = sessExp >= 0 ? oldSID[sessExp] : null;
+    normalizeModels(D2); // 与 boot 同款模型归一，防止大小写变体在刷新后重新分裂
+    D = D2; // 参数重赋值：闭包内所有 D.xxx 访问自动跟随新快照
+    PV = D.providers || []; MD = D.models || []; TL = D.sessions || []; R = D.rows || [];
+    PVNAME = D.providerNames || {};
+    PVNAME_PV = PV.map(function (id) { return PVNAME[id] || id; });
+    TOOLS = D.tools || []; SD = D.sessionDirs || [];
+    CTXMIX = D.ctxMix || []; SAGENTS = D.sessionAgents || [];
+    maxTs = 0; R.forEach(function (r) { if (r[1] > maxTs) maxTs = r[1]; }); // 近 7/30 天窗口下界跟随新数据
+    cmpMap = {}; toolsMap = {};
+    (D.compactions || []).forEach(function (c) { cmpMap[c[0]] = { cnt: c[1], pre: c[2], ts: c[3] || [], trg: c[4] || [] }; });
+    (D.sessionTools || []).forEach(function (t) { (toolsMap[t[0]] || (toolsMap[t[0]] = [])).push([t[1], t[2], t[3]]); });
+    var np = D.projectMap || {};
+    Object.keys(PMAP).forEach(function (k) { delete PMAP[k]; });
+    Object.keys(np).forEach(function (k) { PMAP[k] = np[k]; });
+    var p2 = (D.prices && typeof D.prices === 'object') ? D.prices : null;
+    if (p2 && Object.keys(p2).length) {
+      PRICE = p2;
+      PMODELS = PRICE.models && typeof PRICE.models === 'object' ? PRICE.models : PRICE;
+      var c2 = PRICE.currency;
+      CURSYM = { USD: '$', CNY: '¥', EUR: '€', GBP: '£', JPY: '¥' }[c2] || (c2 ? c2 + ' ' : '$');
+      if (Object.keys(PRICE).length) $('ud-cost-wrap').hidden = false;
+    }
+    if (!D.session) {
+      // 全量仪表盘：重填来源/模型选项（新快照可能新增），并按 id 找回原选择
+      fillSelect($('ud-f-pv'), tr('全部来源'), PV.map(function (x, i) { return { v: i, label: pvLabel(i) + ' (' + pvTag(i) + ')' }; }));
+      fillSelect($('ud-f-model'), tr('全部模型'), MD.map(function (m, i) { return { v: i, label: String(m) }; }));
+      st.p = idP != null ? PV.indexOf(idP) : -1;
+      st.m = idM != null ? MD.indexOf(idM) : -1;
+      $('ud-f-pv').value = String(st.p);
+      $('ud-f-model').value = String(st.m);
+    }
+    var nsid = D.sessionIds || [];
+    st.s = idS != null ? nsid.indexOf(idS) : -1;
+    sessExp = expSid != null ? nsid.indexOf(expSid) : -1;
+    detExp = -1; // 页行索引无稳定身份，刷新后诚实收起
+    // 来源配色按新 token 排序重算（pvColor 闭包引用 pvOrder）
+    var pvTot2 = PV.map(function (p, i) { var t = 0; R.forEach(function (r) { if (r[3] === i) t += N(r[4]) + N(r[5]); }); return { i: i, t: t }; })
+      .sort(function (a, b) { return b.t - a.t; });
+    pvOrder = pvTot2.map(function (x) { return x.i; });
+    apply();
+    return true;
   };
   window.__usageBootDone = true;
 }

@@ -18,7 +18,9 @@ const sql = argv[1];
 if (!dbPath || !sql) process.exit(1);
 
 const csvCell = (v) => {
-  const s = v == null ? '' : String(v);
+  let s = v == null ? '' : String(v);
+  // 公式注入防护：Excel/Numbers 把 = + - @ 开头的单元格当公式执行；前缀单引号（纯负数不处理）
+  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'" + s;
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 

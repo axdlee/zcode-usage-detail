@@ -46,7 +46,29 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--mu
 .text-muted{color:var(--muted-foreground)}.text-small{font-size:12px}
 .text-destructive{color:var(--red)}
 .tabular-nums{font-variant-numeric:tabular-nums}
-select.form-select,.form-select{border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:var(--background);color:var(--foreground);font:inherit;font-size:13px;}
+/* ===== 表单控件：统一设计语言的 input / select（替换浏览器默认外观） ===== */
+.form-control,.form-select{
+  appearance:none;-webkit-appearance:none;
+  width:auto;border:1px solid var(--border);border-radius:8px;
+  padding:5px 10px;background:var(--card);color:var(--foreground);
+  font:inherit;font-size:13px;line-height:1.4;
+  transition:border-color .12s,box-shadow .12s,background-color .12s;
+}
+.form-control:hover,.form-select:hover{border-color:color-mix(in srgb,var(--muted-foreground) 55%,var(--border));}
+.form-control:focus,.form-select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 18%,transparent);}
+.form-control:disabled,.form-select:disabled{opacity:.5;cursor:default;}
+.form-control::placeholder{color:var(--muted-foreground);opacity:.7;}
+.form-control-sm,.form-select-sm{padding:3px 8px;font-size:12px;border-radius:7px;}
+.form-select{
+  padding-right:28px;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8a93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;
+}
+.form-select-sm{padding-right:24px;background-position:right 8px center;}
+input[type="search"]::-webkit-search-cancel-button{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--muted-foreground);opacity:.55;cursor:pointer;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 2l8 8M10 2l-8 8' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 2l8 8M10 2l-8 8' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;}
+input[type="search"]::-webkit-search-cancel-button:hover{opacity:.9;}
 .form-label{margin:0;}
 .form-check{display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;}
 .form-check-input{width:14px;height:14px;accent-color:var(--blue);margin:0;}
